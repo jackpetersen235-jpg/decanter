@@ -35,14 +35,19 @@ Sources/Decanter/
   Support/   Shell (Process runner), Paths, SystemChecks, Panels
   Models/    Bottle, BottleSettings (WindowsVersion / SyncMode / GraphicsBackend)
   Wine/      WineInstallation (discovery), Wine (env + registry + tools)
-  Managers/  AppModel (all state + actions), Steam, TaskConsole
-  Views/     ContentView, SetupView, BottleDetailView, ConfigurationView, …
+  Managers/  AppModel (all state + actions), WineInstaller, Steam, TaskConsole
+  Views/     ContentView, SetupWizard, SetupView, BottleDetailView, ConfigurationView, …
 Scripts/
-  make_app.sh          bundles the binary into build/Decanter.app
-  sekiro/              rescued launch scripts for the real Sekiro setup
-Assets/                AppIcon.icns (wizard), wallpaper.png, wizard sources
-docs/                  GAMING-STACK.md, INVENTORY.md
+  make_app.sh            bundles the binary into build/Decanter.app
+  doctor.sh              health check — run FIRST when setting up / troubleshooting
+  package-for-friend.sh  builds the shareable zip (app + READ ME + doctor + helper note)
+  sekiro/                rescued launch scripts for the real Sekiro setup
+Assets/                  AppIcon.icns (wizard), wallpaper.png, wizard sources
+docs/                    SETUP-WITH-CLAUDE.md (helper runbook), GAMING-STACK.md, INVENTORY.md
 ```
+
+**Helping someone (or an agent) set this up?** Start at [`docs/SETUP-WITH-CLAUDE.md`](docs/SETUP-WITH-CLAUDE.md)
+and run `bash Scripts/doctor.sh`.
 
 Data at runtime: `~/Library/Application Support/Decanter/`
 (`bottles.json`, `Bottles/`, `ShaderCache/`, `Backups/`)

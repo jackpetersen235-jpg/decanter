@@ -19,6 +19,54 @@ xattr -cr "$STAGE/Decanter.app" 2>/dev/null || true
 # Re-apply the ad-hoc signature after stripping xattrs.
 codesign --force --sign - "$STAGE/Decanter.app" >/dev/null 2>&1 || true
 
+# Self-contained diagnostic (works with no repo) + a note for a helper / Claude Code.
+cp "$ROOT/Scripts/doctor.sh" "$STAGE/doctor.command"     # .command so it's double-clickable too
+chmod +x "$STAGE/doctor.command"
+
+cat > "$STAGE/FOR-CLAUDE-CODE.md" <<'MD'
+# Helping set up Decanter (read this first if you're Claude Code or a technical helper)
+
+Decanter runs Windows Steam games on Apple silicon Macs via Wine. The person you're helping just
+has the app — no repo. Getting them going is short:
+
+## Do this
+1. **Run the diagnostic** — it prints exactly what's present/missing and the next step:
+   ```bash
+   bash "$(dirname "$0")/doctor.command"      # or just: bash doctor.command  (in this folder)
+   ```
+2. **Install the app**: drag `Decanter.app` to `/Applications`. If double-clicking gives
+   *"Decanter is damaged"*, it's just the unsigned-app gate — clear it:
+   ```bash
+   xattr -cr /Applications/Decanter.app
+   ```
+   then right-click ▸ Open.
+3. **Press "Set everything up for me"** in the app. It installs, in order and on its own:
+   Rosetta 2 → the Windows engine (WhiskyWine 11, ~317 MB) → a game bottle → Steam.
+   Progress shows inline. It self-skips anything already done, so it's safe to re-press.
+4. Sign into Steam, install games, play.
+
+## Verify (the 4 things a working setup needs)
+```bash
+ls /Library/Apple/usr/libexec/oah/libRosettaRuntime                                   # 1. Rosetta
+"$HOME/Library/Application Support/Decanter/Wine/Libraries/Wine/bin/wine" --version    # 2. engine -> wine-11.0
+cat "$HOME/Library/Application Support/Decanter/bottles.json"                          # 3. a bottle, isInitialized:true
+# 4. Steam = steam.exe inside that bottle's drive_c/Program Files (x86)/Steam/
+```
+
+## Honest expectations (tell them up front)
+- Single-player games generally work. **Kernel anti-cheat games (Valorant, most competitive
+  shooters) do NOT** — no Mac tool can run them.
+- Keep the Mac **plugged in** while gaming; on battery macOS throttles hard.
+- Some demanding 3D games need per-game graphics setup to run their best; a fresh bottle is
+  Steam-ready but games default to a slower renderer until tuned.
+
+## Don't
+- Don't delete a bottle or a save file to "clean up" — back up first (`cp -Rc` is instant).
+- Don't swap the Wine engine or add a global d3d DLL override (it black-screens Steam).
+MD
+
+# Keep the diagnostic runnable when double-clicked from Finder as well as `bash doctor.command`.
+
 cat > "$STAGE/READ ME FIRST.txt" <<'TXT'
 DECANTER — play Windows games on your Mac
 ==========================================
