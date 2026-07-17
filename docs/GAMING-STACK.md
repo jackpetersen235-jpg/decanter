@@ -192,3 +192,18 @@ user's very first experience look like a hang.
 - Terminal has **Screen Recording** (screenshots work) and now **Accessibility** (System Events
   can click menu items — that's how the wizard was verified). Neither is guaranteed on another
   machine.
+
+
+## 10. Removing Steam's menu-bar (systray) icon
+
+Wine's `explorer.exe` bridges a Windows systray icon to a macOS `NSStatusItem` (top-right menu
+bar). Steam always adds one. To suppress it:
+
+```bash
+pkill -f explorer.exe     # after Steam is up
+```
+
+Measured facts: explorer does **not** respawn once killed; Steam keeps running fine without it
+(its windows are managed by `winemac.drv`, not explorer). The tray icon is only created after
+Steam's UI loads, so Decanter sweeps `pkill` for ~60s post-launch (`suppressWineSystray`). No
+Wine registry toggle exists (checked `NoTrayItemsDisplay` / policies — not honoured).

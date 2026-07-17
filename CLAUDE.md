@@ -81,6 +81,18 @@ Data at runtime: `~/Library/Application Support/Decanter/`
 - **`grep -rl` silently fails on these Mach-O trees.** Use `strings <file> | grep`. A tree-wide
   grep returned 0 hits for a term that `strings` found 27 times — nearly caused a wrong conclusion.
 - Backups/snapshots: use **`cp -Rc`** (APFS clone). 16 GB cloned in 1.4 s with ~0 disk used.
+- **Steam adds a macOS menu-bar (top-right) icon** via Wine's `explorer.exe`, which bridges the
+  Windows systray to an `NSStatusItem`. To remove it: `pkill -f explorer.exe` after launch.
+  Verified: explorer does NOT respawn, and Steam keeps working without it (windows are managed by
+  `winemac.drv`, not explorer). `AppModel.suppressWineSystray()` sweeps for 60s after every launch.
+- **`launchSteam` must be idempotent.** Spawning `wine steam.exe` on every click made Steam
+  "reopen" each time. Now: a plain Steam bottle short-circuits to activate-existing if Steam is
+  already up; a bottle with `-applaunch` (a game) always runs, because the running Steam forwards
+  the applaunch to launch the game. See the `isGameLauncher` split.
+- **Game/Steam launches run QUIET** (no console sheet). The console popping over Decanter made the
+  first click look like a no-op ("had to click twice"). Setup ops (create/install/apply) still show it.
+- `pgrep -f 'steam\.exe'` from a shell can self-match (the pattern is in the shell's own argv);
+  from the app via Process it's correct (Decanter's argv has no "steam.exe").
 - **Never `for try await byte in URLSession.bytes(...)`.** Iterating an async sequence one byte at
   a time cost **25x throughput** here (0.12 MB/s vs 3 MB/s) — a 317 MB download went from ~45 min
   to **57 s** once switched to `URLSession.download(from:delegate:)`. Both WineInstaller and

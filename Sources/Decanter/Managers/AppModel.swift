@@ -13,6 +13,10 @@ final class AppModel: ObservableObject {
     @Published var activeConsole: TaskConsole?
     @Published var isRosettaInstalled: Bool = SystemChecks.isRosettaInstalled
 
+    /// Bottles whose game/Steam is starting up. Drives the button state and prevents a second
+    /// click from spawning a duplicate before the first launch has fully come up.
+    @Published private(set) var launchingBottleIDs: Set<Bottle.ID> = []
+
     /// User-added Wine `bin` directories, persisted across launches.
     @Published var extraWineDirectories: [URL] = [] {
         didSet { persistExtraDirectories() }
@@ -375,8 +379,74 @@ final class AppModel: ObservableObject {
 
     /// Launch the Steam client already installed in the bottle.
     func launchSteam(in bottle: Bottle) {
-        let args = [bottle.steamExecutable.path] + Steam.launchArguments(from: bottle.settings.steamArguments)
-        launch(title: "Steam — \(bottle.name)", bottle: bottle, arguments: args)
+        // A bottle with `-applaunch` launches a *game*: if Steam is already up, running
+        // `steam.exe -applaunch <id>` just tells the running client to start the game, which is
+        // exactly right — so we must NOT skip it. Only a plain Steam launcher should short-circuit.
+        let isGameLauncher = bottle.settings.steamArguments.contains("-applaunch")
+        Task {
+            // Guard against a rapid double-click on the same bottle regardless of kind.
+            if launchingBottleIDs.contains(bottle.id) {
+                activateRunningGame()
+                return
+            }
+            // For a plain Steam launcher, a second click while Steam runs should just focus it —
+            // this is what fixes "every click reopens Steam".
+            if !isGameLauncher, await isSteamRunning() {
+                activateRunningGame()
+                return
+            }
+            launchingBottleIDs.insert(bottle.id)
+            let args = [bottle.steamExecutable.path] + Steam.launchArguments(from: bottle.settings.steamArguments)
+            // Quiet: no console sheet pops over Decanter (which made the first click look like a
+            // no-op). Steam just opens on its own.
+            launchQuietly(bottle: bottle, arguments: args)
+            suppressWineSystray()
+            Task {
+                // Hold the guard while Steam comes up, then let isSteamRunning take over.
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                launchingBottleIDs.remove(bottle.id)
+            }
+        }
+    }
+
+    /// True if a Steam client process is running in any bottle.
+    private func isSteamRunning() async -> Bool {
+        guard let result = try? await Shell.run(
+            URL(fileURLWithPath: "/usr/bin/pgrep"),
+            arguments: ["-f", #"steam\.exe"#]) else { return false }
+        return !result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Bring the already-running game/Steam window to the front (best effort).
+    private func activateRunningGame() {
+        for app in NSWorkspace.shared.runningApplications
+        where app.localizedName == "wine" || app.localizedName == "Steam" {
+            app.activate()
+        }
+    }
+
+    /// Launch a long-lived program without popping a console sheet. Used for games/Steam, where
+    /// the user just wants the app to open — not a log window.
+    private func launchQuietly(bottle: Bottle, arguments: [String]) {
+        guard let installation = installation(for: bottle) else { return }
+        let env = Wine.environment(for: bottle, using: installation)
+        _ = try? Shell.stream(installation.loader, arguments: arguments, environment: env,
+                              onOutput: { _ in }, onExit: { _ in })
+    }
+
+    /// Remove the macOS menu-bar tray icon Wine creates for Steam.
+    ///
+    /// Wine's `explorer.exe` bridges a Windows systray icon to an `NSStatusItem` in the menu bar.
+    /// Steam doesn't need explorer, and (verified) it does NOT respawn once killed and Steam keeps
+    /// running fine. The tray icon is only added after Steam's UI loads, so we sweep for a while.
+    private func suppressWineSystray() {
+        Task {
+            for _ in 0..<20 {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)   // 20 × 3s = 60s of coverage
+                _ = try? await Shell.run(URL(fileURLWithPath: "/usr/bin/pkill"),
+                                         arguments: ["-f", "explorer.exe"])
+            }
+        }
     }
 
     // MARK: Console plumbing

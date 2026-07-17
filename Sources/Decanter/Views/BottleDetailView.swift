@@ -63,16 +63,26 @@ struct BottleDetailView: View {
             GroupBox("Steam") {
                 VStack(alignment: .leading, spacing: 12) {
                     if bottle.isSteamInstalled {
+                        let launching = model.launchingBottleIDs.contains(bottle.id)
                         Text("Steam is installed in this bottle.").foregroundStyle(.secondary)
                         HStack {
                             Button {
                                 model.launchSteam(in: bottle)
                             } label: {
-                                Label("Launch Steam", systemImage: "play.fill")
+                                if launching {
+                                    Label("Opening…", systemImage: "hourglass")
+                                } else {
+                                    Label("Launch Steam", systemImage: "play.fill")
+                                }
                             }
                             .buttonStyle(.borderedProminent)
+                            .disabled(launching)
 
                             Button("Reinstall") { model.installSteam(in: bottle) }
+                        }
+                        if launching {
+                            Text("Steam is opening — this can take a few seconds the first time.")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     } else {
                         Text("Install the Steam client to start downloading and playing games.")
