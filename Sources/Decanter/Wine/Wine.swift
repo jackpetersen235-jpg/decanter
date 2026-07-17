@@ -9,13 +9,17 @@ enum Wine {
     /// Common locations for gaming-oriented Wine builds on Apple Silicon.
     private static var candidateBinDirectories: [(name: String, path: String)] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
+        // ORDER MATTERS: the first hit becomes the default for new bottles.
+        // WhiskyWine (wine 11) is first because it is the only free build that can complete a
+        // modern Steam login. The wine-7.7 builds below have msync but Steam's TLS has outgrown
+        // them, so they cannot launch Steam-DRM games. See docs/GAMING-STACK.md §2.
         return [
-            // Mythic ships a GPTk-based Wine (D3DMetal) — great for gaming, no extra download.
-            ("Mythic (GPTk / D3DMetal)", "\(home)/Library/Application Support/Mythic/Engine/wine/bin"),
-            // Whisky is sandboxed: its Wine lives inside the app container.
-            ("Whisky", "\(home)/Library/Containers/com.isaacmarovitz.Whisky/Data/Library/Application Support/com.isaacmarovitz.Whisky/Libraries/Wine/bin"),
-            // Older (non-sandboxed) Whisky layout.
+            // Non-sandboxed WhiskyWine (manual install of Libraries.tar.gz) — the working build.
             ("Whisky", "\(home)/Library/Application Support/com.isaacmarovitz.Whisky/Libraries/Wine/bin"),
+            // Whisky.app is sandboxed: its Wine lives inside the app container.
+            ("Whisky", "\(home)/Library/Containers/com.isaacmarovitz.Whisky/Data/Library/Application Support/com.isaacmarovitz.Whisky/Libraries/Wine/bin"),
+            // Mythic ships a GPTk wine-7.7 (D3DMetal + msync) — good sync, but no modern Steam login.
+            ("Mythic (GPTk / D3DMetal)", "\(home)/Library/Application Support/Mythic/Engine/wine/bin"),
             ("Game Porting Toolkit", "/usr/local/opt/game-porting-toolkit/bin"),
             ("Game Porting Toolkit", "/opt/homebrew/opt/game-porting-toolkit/bin"),
             ("CrossOver", "/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin"),
@@ -34,8 +38,11 @@ enum Wine {
         var seen = Set<String>()
 
         func consider(name: String, dir: URL) {
-            let candidate = WineInstallation(binDirectory: dir, name: name)
+            var candidate = WineInstallation(binDirectory: dir, name: name)
             guard candidate.isValid, !seen.contains(candidate.id) else { return }
+            // Probe once at discovery — msync/esync support decides whether this build will
+            // spike in thread-heavy games. See WineInstallation.supportsFastSync.
+            candidate.supportsFastSync = WineInstallation.probeFastSync(binDirectory: dir)
             seen.insert(candidate.id)
             results.append(candidate)
         }
@@ -86,8 +93,21 @@ enum Wine {
             env["DYLD_FALLBACK_LIBRARY_PATH"] = "\(installation.libDirectory.path):\(existing)"
         }
 
+        // Persistent DXMT shader cache, per bottle — reduces repeat stutter across launches.
+        let cache = Paths.shaderCache(for: bottle)
+        try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        env["DXMT_SHADER_CACHE_PATH"] = cache.path
+
         // Layer on the settings-derived flags (sync mode, graphics backend, HUDs, …).
         for (key, value) in bottle.settings.derivedEnvironment { env[key] = value }
+
+        // …then strip fast-sync vars if this build can't honour them. Must come AFTER the
+        // settings merge above, which is what sets them. On wine 11 these are a silent no-op
+        // and only serve to mislead (see WineInstallation.supportsFastSync).
+        if !installation.supportsFastSync {
+            env.removeValue(forKey: "WINEMSYNC")
+            env.removeValue(forKey: "WINEESYNC")
+        }
         return env
     }
 

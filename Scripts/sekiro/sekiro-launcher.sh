@@ -12,8 +12,7 @@ export WINEPREFIX="$PREFIX" WINEDEBUG=-all WINEMSYNC=1 WINEESYNC=1 ROSETTA_ADVER
 export DXMT_METALFX_SPATIAL_SWAPCHAIN=1
 export DXMT_CONFIG="d3d11.metalSpatialUpscaleFactor=2.0;d3d11.preferredMaxFrameRate=60;d3d11.ignoreMapFlagNoWait=True"
 export DXMT_SHADER_CACHE=1 DXMT_SHADER_CACHE_PATH="$CACHE"
-export DXMT_LOG_LEVEL=info DXMT_LOG_PATH="/private/tmp/claude-501/-Users-me-coding/7ca41e9c-8f88-4cdc-9bc5-e9e54fb1c4d4/scratchpad/dxmt-live"
-export MTL_HUD_ENABLED=1   # on while we verify Game Mode; will default off after
+export MTL_HUD_ENABLED="${SEKIRO_HUD:-0}"   # set SEKIRO_HUD=1 to show fps
 export WINELOADER="$WB/wine" WINESERVER="$WB/wineserver" PATH="$WB:$PATH"
 export DYLD_FALLBACK_LIBRARY_PATH="$WINEROOT/lib:/usr/local/lib:/usr/lib"
 

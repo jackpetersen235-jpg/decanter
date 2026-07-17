@@ -44,9 +44,12 @@ enum SyncMode: String, Codable, CaseIterable, Identifiable {
 
 /// How DirectX calls get translated to the Mac's Metal API.
 enum GraphicsBackend: String, Codable, CaseIterable, Identifiable {
+    /// DXMT: DirectX 11 → Metal, directly (1 hop). Best on Apple Silicon.
+    /// Ships with WhiskyWine (Libraries/DXMT) and needs wine's `winemetal` driver.
+    case dxmt
     /// Apple's Game Porting Toolkit path: DirectX 11/12 → Metal directly.
     case d3dmetal
-    /// DXVK: DirectX 9/10/11 → Vulkan → MoltenVK → Metal.
+    /// DXVK: DirectX 9/10/11 → Vulkan → MoltenVK → Metal (3 hops — slow here).
     case dxvk
     /// Wine's built-in OpenGL-based renderer. Most compatible, slowest.
     case wined3d
@@ -55,6 +58,7 @@ enum GraphicsBackend: String, Codable, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .dxmt:     return "DXMT (DirectX → Metal)"
         case .d3dmetal: return "D3DMetal (Game Porting Toolkit)"
         case .dxvk:     return "DXVK (Vulkan)"
         case .wined3d:  return "WineD3D (built-in)"
@@ -63,8 +67,9 @@ enum GraphicsBackend: String, Codable, CaseIterable, Identifiable {
 
     var detail: String {
         switch self {
+        case .dxmt:     return "DirectX 11 → Metal in one hop. Fastest option on Apple Silicon. Applied per-game: DXMT's DLLs sit beside the game .exe and are enabled via AppDefaults, so the launcher UI is untouched."
         case .d3dmetal: return "DirectX 11/12 → Metal. Best performance for modern titles; needs a GPTk-based Wine build."
-        case .dxvk:     return "DirectX 9–11 → Vulkan → Metal. Applied per-game (not to the launcher UI, which must stay on the built-in renderer)."
+        case .dxvk:     return "DirectX 9–11 → Vulkan → MoltenVK → Metal (3 hops). Much slower than DXMT here; prefer DXMT unless a game misbehaves."
         case .wined3d:  return "DirectX → OpenGL. Most compatible fallback, lowest performance."
         }
     }
@@ -76,8 +81,14 @@ struct BottleSettings: Codable, Equatable {
     var syncMode: SyncMode = .msync
     var graphics: GraphicsBackend = .d3dmetal
 
-    var metalHUD: Bool = false        // MTL_HUD_ENABLED — Metal performance overlay
-    var metalFX: Bool = false         // D3DM_ENABLE_METALFX — MetalFX upscaling
+    var metalHUD: Bool = false        // MTL_HUD_ENABLED — Metal performance overlay (small cost)
+    var metalFX: Bool = false         // MetalFX upscaling
+
+    /// MetalFX upscale factor. NOTE: MetalFX upscales *from the game's own render resolution*
+    /// (input × factor = output). It does NOT reduce what the game renders — on its own it is a
+    /// quality feature that costs an extra pass and buys zero frames. To gain performance you must
+    /// ALSO lower the game's internal resolution and let MetalFX rebuild it to the display size.
+    var metalFXFactor: Double = 2.0
     var dxvkHUD: Bool = false         // DXVK_HUD — DXVK's own overlay
     var advertiseAVX: Bool = true     // ROSETTA_ADVERTISE_AVX — several GPTk games require AVX
     var retinaMode: Bool = false      // HiDPI rendering inside the prefix
@@ -109,6 +120,20 @@ struct BottleSettings: Codable, Equatable {
         }
 
         switch graphics {
+        case .dxmt:
+            // No prefix-wide WINEDLLOVERRIDES: DXMT is scoped per-executable (AppDefaults +
+            // DLLs beside the game .exe). A global override drags Steam's CEF UI through it,
+            // which fails to make a GL context and renders the client as a black window.
+            env["DXMT_SHADER_CACHE"] = "1"          // persistent; kills repeat shader stutter
+            if metalFX {
+                env["DXMT_METALFX_SPATIAL_SWAPCHAIN"] = "1"
+            }
+            var cfg = ["d3d11.preferredMaxFrameRate=60"]
+            if metalFX {
+                cfg.append("d3d11.metalSpatialUpscaleFactor=\(String(format: "%.1f", metalFXFactor))")
+            }
+            env["DXMT_CONFIG"] = cfg.joined(separator: ";")
+
         case .dxvk:
             // NOTE: deliberately no prefix-wide WINEDLLOVERRIDES here. A global override
             // also routes the Steam client's CEF/ANGLE UI through DXVK, which fails to

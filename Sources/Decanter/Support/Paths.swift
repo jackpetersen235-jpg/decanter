@@ -19,6 +19,14 @@ enum Paths {
     /// Scratch space for installer downloads (SteamSetup.exe, etc.).
     static var downloads: URL { appSupport.appendingPathComponent("Downloads", isDirectory: true) }
 
+    /// Persistent shader caches (DXMT), one per bottle. Survives launches so repeat
+    /// shader-compilation stutter fades the more a game is played.
+    static var shaderCacheRoot: URL { appSupport.appendingPathComponent("ShaderCache", isDirectory: true) }
+
+    static func shaderCache(for bottle: Bottle) -> URL {
+        shaderCacheRoot.appendingPathComponent(bottle.url.lastPathComponent, isDirectory: true)
+    }
+
     /// Create the directory skeleton if it does not yet exist.
     static func ensureDirectories() {
         for dir in [appSupport, bottlesRoot, downloads] {

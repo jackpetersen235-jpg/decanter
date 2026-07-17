@@ -51,14 +51,16 @@ Data at runtime: `~/Library/Application Support/Decanter/`
 
 ## ⚠️ Known-stale / TODO
 
-- **Decanter's bottles point at the wrong engine.** `bottles.json` says the Steam + Sekiro
-  bottles use **Mythic (GPTk / D3DMetal) wine-7.7**, graphics **DXVK**, sync **ESync**.
-  Reality: the working setup uses **WhiskyWine 11.0 + DXMT**, prefix `Steam-Wine11`.
-  ⇒ Decanter's **Launch Steam** button does NOT reproduce what `Sekiro.app` does.
-  Fix = repoint both bottles to `~/Library/Application Support/com.isaacmarovitz.Whisky/Libraries/Wine/bin`
-  and set `graphics = .dxmt`-equivalent. **`GraphicsBackend` has no `.dxmt` case yet — it needs one.**
-- `BottleSettings.syncMode` (msync/esync) is **meaningless on wine 11** — it has neither.
-  See GAMING-STACK.md; consider showing sync support per-build instead of a free-choice picker.
+- ~~Decanter's bottles point at the wrong engine.~~ **FIXED (2026-07-16).** Both bottles now use
+  **WhiskyWine 11.0 + DXMT + MetalFX 2x**, prefix `Steam-Wine11`, matching `Sekiro.app`.
+  (For the record: the stale build was **Gcenx Wine Staging 11.10**, not Mythic — an earlier note
+  here was wrong. The prefix was always correct.)
+- ~~`GraphicsBackend` has no `.dxmt` case~~ — **added**, and it is now the recommended backend.
+- Discovery order in `Wine.swift` decides the default for new bottles: **WhiskyWine is first on
+  purpose** (only free build that can complete a modern Steam login). Don't reorder casually.
+- `BottleSettings.syncMode` is **meaningless on builds without msync/esync**. Now handled:
+  `WineInstallation.supportsFastSync` probes ntdll at discovery, `Wine.environment` strips the
+  vars when unsupported, and ConfigurationView shows/disables it. Don't re-add blind `WINEMSYNC=1`.
 - `Steam-Mythic` prefix (~435 MB) is a leftover experiment — safe to delete.
 - CrossOver bottle `~/Library/Application Support/CrossOver/Bottles/Steam` (~2.8 GB) is a
   leftover client install; Sekiro was **moved out** of it. Safe to delete if CrossOver is gone.

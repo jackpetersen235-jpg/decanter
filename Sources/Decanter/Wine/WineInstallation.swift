@@ -34,4 +34,30 @@ struct WineInstallation: Codable, Equatable, Identifiable, Hashable {
     var isCrossOver: Bool {
         binDirectory.path.contains("CrossOver.app")
     }
+
+    /// Whether this build implements msync/esync (fast synchronization).
+    ///
+    /// This matters more than it looks. Without it, every Windows mutex/event round-trips
+    /// through `wineserver` over IPC — measured on this machine at **39.9% wineserver CPU vs
+    /// 0.1% with msync** — which surfaces as frame spikes in thread-heavy games (Sekiro runs
+    /// ~103 threads). `WINEMSYNC=1` is silently ignored by builds that lack it.
+    ///
+    /// msync is a CodeWeavers patch, so it exists only in wine-7.7-era CrossOver forks.
+    /// Upstream wine 11 replaced it with `ntsync`, which needs a **Linux kernel driver** —
+    /// so wine 11 on macOS has no fast sync at all. See docs/GAMING-STACK.md §2.
+    var supportsFastSync: Bool = false
+
+    /// Cheap probe: look for the msync/esync symbols in the build's unix-side ntdll.
+    static func probeFastSync(binDirectory: URL) -> Bool {
+        let ntdll = binDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("lib/wine/x86_64-unix/ntdll.so")
+        guard let data = try? Data(contentsOf: ntdll, options: .mappedIfSafe) else { return false }
+        return data.range(of: Data("msync".utf8)) != nil
+            || data.range(of: Data("esync".utf8)) != nil
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case binDirectory, name, version   // supportsFastSync is probed, never persisted
+    }
 }
