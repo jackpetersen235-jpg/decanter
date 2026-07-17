@@ -19,30 +19,22 @@ enum Steam {
         }
     }
 
-    /// Fetch SteamSetup.exe if it isn't already cached. Reports 0...1 progress.
+    /// Fetch SteamSetup.exe if it isn't already cached.
+    ///
+    /// Uses a download task, not `URLSession.bytes`. Iterating an async byte sequence costs
+    /// roughly 25x throughput (measured on a large file: 0.12 MB/s vs 3 MB/s) — see the note in
+    /// WineInstaller.download.
     static func downloadInstaller(progress: @escaping (Double) -> Void) async throws -> URL {
         let destination = installerDestination
         if FileManager.default.fileExists(atPath: destination.path) { return destination }
 
         Paths.ensureDirectories()
-        let (bytes, response) = try await URLSession.shared.bytes(from: installerURL)
+        let (tempURL, response) = try await URLSession.shared.download(from: installerURL)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             throw SteamError.badResponse(http.statusCode)
         }
-
-        let total = response.expectedContentLength
-        var data = Data()
-        if total > 0 { data.reserveCapacity(Int(total)) }
-        var received: Int64 = 0
-        for try await byte in bytes {
-            data.append(byte)
-            received += 1
-            if total > 0, received % 65_536 == 0 {
-                let fraction = Double(received) / Double(total)
-                await MainActor.run { progress(fraction) }
-            }
-        }
-        try data.write(to: destination)
+        try? FileManager.default.removeItem(at: destination)
+        try FileManager.default.moveItem(at: tempURL, to: destination)
         await MainActor.run { progress(1.0) }
         return destination
     }

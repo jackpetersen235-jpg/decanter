@@ -19,6 +19,12 @@ enum Paths {
     /// Scratch space for installer downloads (SteamSetup.exe, etc.).
     static var downloads: URL { appSupport.appendingPathComponent("Downloads", isDirectory: true) }
 
+    /// Decanter's own Wine engine, installed by the setup wizard. Owning this ourselves means
+    /// the app never depends on Whisky/Mythic/CrossOver being present.
+    static var wineEngineRoot: URL { appSupport.appendingPathComponent("Wine", isDirectory: true) }
+    static var wineEngineLibraries: URL { wineEngineRoot.appendingPathComponent("Libraries", isDirectory: true) }
+    static var wineEngineBin: URL { wineEngineLibraries.appendingPathComponent("Wine/bin", isDirectory: true) }
+
     /// Persistent shader caches (DXMT), one per bottle. Survives launches so repeat
     /// shader-compilation stutter fades the more a game is played.
     static var shaderCacheRoot: URL { appSupport.appendingPathComponent("ShaderCache", isDirectory: true) }

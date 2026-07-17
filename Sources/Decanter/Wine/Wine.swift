@@ -14,6 +14,8 @@ enum Wine {
         // modern Steam login. The wine-7.7 builds below have msync but Steam's TLS has outgrown
         // them, so they cannot launch Steam-DRM games. See docs/GAMING-STACK.md §2.
         return [
+            // Decanter's own engine (installed by the setup wizard) — always preferred.
+            ("Decanter Engine", Paths.wineEngineBin.path),
             // Non-sandboxed WhiskyWine (manual install of Libraries.tar.gz) — the working build.
             ("Whisky", "\(home)/Library/Application Support/com.isaacmarovitz.Whisky/Libraries/Wine/bin"),
             // Whisky.app is sandboxed: its Wine lives inside the app container.

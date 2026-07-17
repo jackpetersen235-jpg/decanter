@@ -28,7 +28,8 @@ State as of **2026-07-16**. Machine: M5 MacBook Air, macOS Tahoe 26.5.2, 10 GPU 
 
 | What | Version | Source | Landed at |
 |---|---|---|---|
-| **WhiskyWine** ← *in use* | wine **11.0** + DXVK + DXMT | `github.com/frankea/Whisky` release **v3.1.1** → `Libraries.tar.gz` (317 MB) | `~/Library/Application Support/com.isaacmarovitz.Whisky/Libraries/` |
+| **Decanter Engine** ← *in use* | wine **11.0** + DXVK + DXMT | Downloaded **automatically by the app** (`WineInstaller`) from `frankea/Whisky` v3.1.1 | `~/Library/Application Support/Decanter/Wine/` (836 MB unpacked) |
+| WhiskyWine (manual, earlier) | wine **11.0** | same tarball, installed by hand | `~/Library/Application Support/com.isaacmarovitz.Whisky/Libraries/` — now redundant |
 | Whisky app | 2.3.5 | `github.com/Whisky-App/Whisky` (archived) | `/Applications/Whisky.app` — **redundant, never used** |
 | Whisky 2.5 libs | wine **7.7** (CrossOver 22, has msync) | `frankea/Whisky` release **v2.5.0** → `Libraries.tar.gz` (270 MB) | `~/Library/Application Support/WhiskyWine25/` — experiment only |
 | Gcenx Wine Staging | wine **11.10** | `github.com/Gcenx/macOS_Wine_builds` **11.10** (181 MB) | `~/Applications/Wine Staging.app` — Steam UI went black; superseded |
@@ -77,6 +78,16 @@ Snapshots use `cp -Rc` (APFS clone): 16 GB in **1.4 s**, ~0 extra disk.
 - **Steam config** — `loginusers.vdf`/`config.vdf` originally copied from the CrossOver bottle
   (account name only); `WantsOfflineMode`/`SkipOfflineModeWarning` set to 1 in the **deleted**
   test prefix only.
+
+## 5b. Sharing Decanter with someone else
+
+`~/Desktop/Decanter-for-friend.zip` (2.1 MB) + `Decanter-for-friend/READ ME FIRST.txt`.
+Tiny because the 317 MB engine self-downloads on first run.
+
+Requirements for them: Apple silicon Mac, macOS 14+, internet. **Nothing else** — no Homebrew,
+no Terminal, no purchases. First run shows `SetupWizard`, which installs Rosetta → engine →
+bottle → Steam from one button. They must **right-click → Open** the first time (ad-hoc signed,
+not notarised); the READ ME explains this in plain language.
 
 ## 6. How to launch (current, working)
 

@@ -21,6 +21,9 @@ struct DecanterApp: App {
                 Button("Rescan Wine Installations") { model.rescanInstallations() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                 Button("Import CrossOver Bottles") { model.importCrossOverBottles() }
+                Button("Setup Assistant…") {
+                    NotificationCenter.default.post(name: .setupAssistantRequested, object: nil)
+                }
             }
         }
 
@@ -34,4 +37,5 @@ struct DecanterApp: App {
 
 extension Notification.Name {
     static let newBottleRequested = Notification.Name("DecanterNewBottleRequested")
+    static let setupAssistantRequested = Notification.Name("DecanterSetupAssistantRequested")
 }

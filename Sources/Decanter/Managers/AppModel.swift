@@ -41,6 +41,11 @@ final class AppModel: ObservableObject {
         if CommandLine.arguments.contains("--import-crossover") {
             importCrossOverBottles()
         }
+        // Headless engine install (used for testing the first-run path, and handy for support):
+        //   Decanter.app/Contents/MacOS/Decanter --install-engine
+        if CommandLine.arguments.contains("--install-engine") {
+            Task { await installEngine() }
+        }
     }
 
     // MARK: Derived
@@ -289,6 +294,38 @@ final class AppModel: ObservableObject {
     /// Reveal the bottle's C: drive in Finder.
     func openCDrive(_ bottle: Bottle) {
         NSWorkspace.shared.open(bottle.driveC)
+    }
+
+    /// Download + install Decanter's own Wine engine, streaming progress into a console.
+    /// Used by the setup wizard and by `--install-engine`.
+    func installEngine() async {
+        let console = openConsole(title: "Installing the Windows engine")
+        console.append("Downloading WhiskyWine 11.0 (~317 MB)…")
+        let installer = WineInstaller()
+        var lastReported = -1
+        let ticker = Task { @MainActor in
+            while !Task.isCancelled {
+                if case .downloading(let p) = installer.phase {
+                    let pct = Int(p * 100)
+                    if pct >= lastReported + 10 { lastReported = pct; console.append("… \(pct)%") }
+                }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+        await installer.install()
+        ticker.cancel()
+        switch installer.phase {
+        case .done(let version):
+            console.append("Installed: \(version)")
+            console.append("Location: \(Paths.wineEngineBin.path)")
+            rescanInstallations()
+            console.finish(0)
+        case .failed(let message):
+            console.append("Failed: \(message)")
+            console.finish(1)
+        default:
+            console.finish()
+        }
     }
 
     /// Kick off the Rosetta 2 installer (prompts for admin rights on its own).

@@ -4,12 +4,16 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showingCreate = false
     @State private var showingSetup = false
+    @State private var showingWizard = false
 
     var body: some View {
         Group {
-            if model.installations.isEmpty && model.bottles.isEmpty {
-                // Nothing to work with yet — walk the user through Wine setup first.
-                SetupView()
+            if model.bottles.isEmpty || showingWizard {
+                // First run: fully automated setup. No Wine knowledge required.
+                // Keyed on *bottles*, not on engines: a newcomer who happens to have some other
+                // Wine installed (Mythic, Whisky…) must still get the guided path, or they land
+                // in a UI they have no way to understand. The wizard skips finished steps anyway.
+                SetupWizard(dismiss: showingWizard ? { showingWizard = false } : nil)
             } else {
                 splitView
             }
@@ -21,6 +25,9 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .newBottleRequested)) { _ in
             showingCreate = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .setupAssistantRequested)) { _ in
+            showingWizard = true
         }
     }
 

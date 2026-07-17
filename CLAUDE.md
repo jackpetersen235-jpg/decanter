@@ -49,21 +49,21 @@ Data at runtime: `~/Library/Application Support/Decanter/`
 
 ---
 
-## ⚠️ Known-stale / TODO
+## Current state (2026-07-17)
 
-- ~~Decanter's bottles point at the wrong engine.~~ **FIXED (2026-07-16).** Both bottles now use
-  **WhiskyWine 11.0 + DXMT + MetalFX 2x**, prefix `Steam-Wine11`, matching `Sekiro.app`.
-  (For the record: the stale build was **Gcenx Wine Staging 11.10**, not Mythic — an earlier note
-  here was wrong. The prefix was always correct.)
-- ~~`GraphicsBackend` has no `.dxmt` case~~ — **added**, and it is now the recommended backend.
-- Discovery order in `Wine.swift` decides the default for new bottles: **WhiskyWine is first on
-  purpose** (only free build that can complete a modern Steam login). Don't reorder casually.
-- `BottleSettings.syncMode` is **meaningless on builds without msync/esync**. Now handled:
-  `WineInstallation.supportsFastSync` probes ntdll at discovery, `Wine.environment` strips the
-  vars when unsupported, and ConfigurationView shows/disables it. Don't re-add blind `WINEMSYNC=1`.
-- `Steam-Mythic` prefix (~435 MB) is a leftover experiment — safe to delete.
-- CrossOver bottle `~/Library/Application Support/CrossOver/Bottles/Steam` (~2.8 GB) is a
-  leftover client install; Sekiro was **moved out** of it. Safe to delete if CrossOver is gone.
+- **First run is fully automated.** `SetupWizard` + `WineInstaller` download and configure
+  everything (Rosetta → engine → bottle → Steam) with one button. No terminal, no Wine knowledge.
+  Re-openable any time via **View → Setup Assistant…**.
+- **Decanter owns its engine**: `~/Library/Application Support/Decanter/Wine/` (WhiskyWine 11.0,
+  installed by the wizard). No dependency on Whisky/Mythic/CrossOver being present.
+  `Paths.wineEngine*` — first in discovery order, so it's the default.
+- Bottles are synced to reality: **WhiskyWine 11 + DXMT + MetalFX 2x**, prefix `Steam-Wine11`.
+- Shareable build: `~/Desktop/Decanter-for-friend.zip` (2.1 MB — the engine self-downloads).
+
+### Still open
+- Frame spikes in thread-heavy games are **unfixed and unfixable for free** — wine 11 has no
+  msync. See GAMING-STACK.md §2/§3. Only CrossOver has both msync and modern Steam TLS.
+- `Steam-Mythic` prefix + the CrossOver bottle (~3.2 GB total) are leftovers, safe to delete.
 
 ## Gotchas that already bit us (don't rediscover these)
 
@@ -81,6 +81,20 @@ Data at runtime: `~/Library/Application Support/Decanter/`
 - **`grep -rl` silently fails on these Mach-O trees.** Use `strings <file> | grep`. A tree-wide
   grep returned 0 hits for a term that `strings` found 27 times — nearly caused a wrong conclusion.
 - Backups/snapshots: use **`cp -Rc`** (APFS clone). 16 GB cloned in 1.4 s with ~0 disk used.
+- **Never `for try await byte in URLSession.bytes(...)`.** Iterating an async sequence one byte at
+  a time cost **25x throughput** here (0.12 MB/s vs 3 MB/s) — a 317 MB download went from ~45 min
+  to **57 s** once switched to `URLSession.download(from:delegate:)`. Both WineInstaller and
+  Steam.downloadInstaller hit this; comments there record it.
+- **Steam `-silent` hides the window.** On a launcher bottle it makes "Launch Steam" look broken
+  (user must click twice). Only use it on a per-game bottle that also passes `-applaunch`.
+- **Steam re-execs itself** for a startup update check and both processes stay resident → **two
+  Dock tiles for one Steam**. `-skipinitialbootstrap` avoids it (verified: still logs in, still
+  self-updates). Don't also add `-nobootstrapperupdate` — that blocks bootstrapper updates.
+- **`pkill -f 'steam.exe'` does not kill a Wine prefix.** `explorer.exe`, `services.exe`,
+  `winedevice.exe` etc. survive for hours and leave stale Dock registrations. Use
+  `wineserver -k` **per prefix**, then pkill the stragglers.
+- **`homeDirectoryForCurrentUser` ignores `$HOME`** (reads the passwd entry), so you cannot fake a
+  fresh-Mac test by overriding HOME. Use `--install-engine` / Setup Assistant instead.
 
 ## Verification habits that mattered
 

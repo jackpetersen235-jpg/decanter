@@ -74,10 +74,12 @@ CPU-side (Rosetta translation + wineserver sync).
 - **Offline Mode won't engage while online.** Setting `WantsOfflineMode 1` in `loginusers.vdf`
   is ignored if Steam's connectivity test (plain HTTP:80) passes — even when the TLS login on
   :443 fails. Steam sits at `[Logged Off]` forever and never offers offline.
-- Steam re-execs itself: the bootstrapper exits (that's normal) and the real client runs as
-  `C:\Program Files (x86)\Steam\steam.exe`. **`pgrep -f <unix path>` misses it.** Two Dock tiles
-  = one Steam.
-- `-silent` hides the window but **still spawns ~6 steamwebhelper processes**. Minor win only.
+- Steam re-execs itself and the real client runs as `C:\Program Files (x86)\Steam\steam.exe`.
+  **`pgrep -f <unix path>` misses it.** Two Dock tiles = one Steam — **but see §10, this is
+  avoidable with `-skipinitialbootstrap`** (an earlier version of this doc wrongly called it
+  inherent).
+- `-silent` hides the window but **still spawns ~6 steamwebhelper processes** — a negligible win,
+  and actively wrong on a launcher bottle (§10).
 - `-applaunch <id>` on a **cold** Steam gets consumed before login completes. Launch Steam first,
   then send applaunch — or accept a slow first attempt.
 
@@ -148,3 +150,45 @@ trial ran Sekiro smoothly and nothing free since has.
 
 If the Whisky fork ever ports msync/ntsync to its wine 11 build, this resolves itself — re-check
 with the `strings ... | grep -ic msync` test above.
+
+---
+
+## 10. Steam process/window behaviour (learned the hard way)
+
+- **`-silent` = no window.** On a launcher bottle this makes "Launch Steam" look like it did
+  nothing; the user clicks again and the *second* click surfaces the already-running instance.
+  Only correct on a per-game bottle that also passes `-applaunch` (Steam is a DRM host there).
+- **Two Dock tiles for one Steam** is avoidable, despite appearances. Steam re-execs itself for a
+  startup update check and *both* processes stay resident; Wine gives each a tile.
+  **`-skipinitialbootstrap`** → 2 processes become 1. Verified: still logs in, UI renders, and
+  Steam still resolves its `client-update` hosts, so self-updating is intact.
+  Do **not** add `-nobootstrapperupdate` as well — it blocks bootstrapper updates and risks
+  breaking Steam months later for a cosmetic gain.
+- **Killing Steam does not kill the prefix.** `explorer.exe /desktop`, `services.exe`,
+  `winedevice.exe`, `rpcss.exe` survive `pkill -f steam.exe` — we found them still running hours
+  later, holding stale Dock registrations that pointed at Wine builds already deleted. Correct
+  teardown: `wineserver -k` for **each prefix**, then pkill stragglers.
+- Steam's log line `Background command completed exit 0` for the launcher is **normal** — the
+  bootstrapper hands off and exits; the client keeps running.
+
+## 11. Networking in Swift — a 25x mistake worth not repeating
+
+`for try await byte in URLSession.shared.bytes(from:)` iterates **one byte per await**. Measured
+on the 317 MB engine download:
+
+| approach | throughput | 317 MB takes |
+|---|---|---|
+| `URLSession.bytes` byte loop | **0.12 MB/s** | ~45 minutes |
+| `URLSession.download(from:delegate:)` | **~3 MB/s** | **57 s** (incl. unpack + verify) |
+
+Use a download task and report progress from `didWriteData`. This bug would have made a new
+user's very first experience look like a hang.
+
+## 12. Testing notes
+
+- **`homeDirectoryForCurrentUser` ignores `$HOME`** — it reads the passwd entry. You cannot
+  simulate a fresh Mac by overriding HOME; the app will happily read the real home. Use the
+  `--install-engine` flag or **View → Setup Assistant…** to exercise first-run paths instead.
+- Terminal has **Screen Recording** (screenshots work) and now **Accessibility** (System Events
+  can click menu items — that's how the wizard was verified). Neither is guaranteed on another
+  machine.
