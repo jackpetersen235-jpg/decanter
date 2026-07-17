@@ -8,12 +8,14 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if model.bottles.isEmpty || showingWizard {
+            if model.bottles.isEmpty || showingWizard || model.isSettingUp {
                 // First run: fully automated setup. No Wine knowledge required.
                 // Keyed on *bottles*, not on engines: a newcomer who happens to have some other
                 // Wine installed (Mythic, Whisky…) must still get the guided path, or they land
-                // in a UI they have no way to understand. The wizard skips finished steps anyway.
-                SetupWizard(dismiss: showingWizard ? { showingWizard = false } : nil)
+                // in a UI they have no way to understand. `isSettingUp` keeps the wizard on screen
+                // through the whole run — creating the first bottle makes `bottles` non-empty, and
+                // without this the wizard would vanish mid-automation. The wizard skips finished steps.
+                SetupWizard(dismiss: (showingWizard && !model.isSettingUp) ? { showingWizard = false } : nil)
             } else {
                 splitView
             }

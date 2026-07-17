@@ -55,6 +55,11 @@ enum Shell {
             process.terminationHandler = { proc in
                 outPipe.fileHandleForReading.readabilityHandler = nil
                 errPipe.fileHandleForReading.readabilityHandler = nil
+                // The termination handler can fire before the readability handlers have drained
+                // everything, which truncates output. The write ends are closed now (process
+                // exited), so read whatever remains — this can't block.
+                if let rest = try? outPipe.fileHandleForReading.readToEnd() { out.append(rest) }
+                if let rest = try? errPipe.fileHandleForReading.readToEnd() { err.append(rest) }
                 continuation.resume(returning: CommandResult(
                     exitCode: proc.terminationStatus,
                     stdout: out.string,

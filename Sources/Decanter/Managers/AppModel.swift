@@ -17,6 +17,11 @@ final class AppModel: ObservableObject {
     /// click from spawning a duplicate before the first launch has fully come up.
     @Published private(set) var launchingBottleIDs: Set<Bottle.ID> = []
 
+    /// True while the first-run setup wizard is actively running its steps. Keeps the wizard
+    /// mounted (see ContentView) so creating the first bottle — which makes `bottles` non-empty —
+    /// doesn't yank the wizard out from under the automation mid-way.
+    @Published var isSettingUp = false
+
     /// User-added Wine `bin` directories, persisted across launches.
     @Published var extraWineDirectories: [URL] = [] {
         didSet { persistExtraDirectories() }
@@ -49,6 +54,34 @@ final class AppModel: ObservableObject {
         //   Decanter.app/Contents/MacOS/Decanter --install-engine
         if CommandLine.arguments.contains("--install-engine") {
             Task { await installEngine() }
+        }
+        // Headless full guided setup — the same steps the wizard runs, for end-to-end testing:
+        //   Decanter.app/Contents/MacOS/Decanter --run-setup
+        if CommandLine.arguments.contains("--run-setup") {
+            Task { await runGuidedSetup() }
+        }
+    }
+
+    /// The complete first-run automation, factored out of the wizard view so it (a) survives any
+    /// view lifecycle and (b) is testable headlessly via `--run-setup`. Steps self-skip if done.
+    func runGuidedSetup() async {
+        isSettingUp = true
+        defer { isSettingUp = false }
+
+        guard await ensureRosetta() else { return }              // 1. Rosetta
+
+        if defaultInstallation == nil {                          // 2. Engine
+            await installEngine()
+            rescanInstallations()
+        }
+        guard defaultInstallation != nil else { return }
+
+        if bottles.isEmpty {                                     // 3. Bottle
+            _ = await createBottleForSetup(name: "Games")
+        }
+
+        if let bottle = bottles.first, !bottle.isSteamInstalled { // 4. Steam
+            _ = await performSteamInstall(in: bottle, console: nil)
         }
     }
 
@@ -109,12 +142,7 @@ final class AppModel: ObservableObject {
 
     func createBottle(name: String) {
         guard let installation = defaultInstallation else { return }
-        let safeName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let folderName = safeName.isEmpty ? "Bottle-\(UUID().uuidString.prefix(6))" : diskSafe(safeName)
-        let prefixURL = Paths.bottlesRoot.appendingPathComponent(folderName, isDirectory: true)
-
-        var bottle = Bottle(name: safeName.isEmpty ? folderName : safeName, url: prefixURL)
-        bottle.wineBinDirectory = installation.binDirectory
+        let (bottle, _) = makeBottle(name: name, installation: installation)
         bottles.append(bottle)
         selectedBottleID = bottle.id
         saveBottles()
@@ -129,6 +157,58 @@ final class AppModel: ObservableObject {
                 console.finish(code)
             }
         }
+    }
+
+    /// Build a bottle value with a collision-free prefix folder. Does not persist.
+    private func makeBottle(name: String, installation: WineInstallation) -> (Bottle, URL) {
+        let safeName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = safeName.isEmpty ? "Bottle-\(UUID().uuidString.prefix(6))" : diskSafe(safeName)
+        let folderName = uniqueBottleFolder(from: base)
+        let prefixURL = Paths.bottlesRoot.appendingPathComponent(folderName, isDirectory: true)
+        var bottle = Bottle(name: safeName.isEmpty ? folderName : safeName, url: prefixURL)
+        bottle.wineBinDirectory = installation.binDirectory
+        // Store a sync mode the engine can actually honour, so the config UI isn't misleading.
+        // (Wine.environment also strips these vars for builds without fast sync, so it's belt-and-braces.)
+        bottle.settings.syncMode = installation.supportsFastSync ? .msync : .none
+        return (bottle, prefixURL)
+    }
+
+    /// A prefix folder name not already taken on disk or by another bottle — so two bottles named
+    /// the same never share a WINEPREFIX (which would corrupt both).
+    private func uniqueBottleFolder(from base: String) -> String {
+        let fm = FileManager.default
+        var candidate = base
+        var n = 2
+        while fm.fileExists(atPath: Paths.bottlesRoot.appendingPathComponent(candidate).path)
+                || bottles.contains(where: { $0.url.lastPathComponent == candidate }) {
+            candidate = "\(base) \(n)"
+            n += 1
+        }
+        return candidate
+    }
+
+    /// Create a bottle and wait for it to finish initializing, WITHOUT popping a console sheet.
+    /// Used by the setup wizard so a first-timer never sees raw wineboot logs. Returns the id
+    /// once the prefix is ready, or nil on failure.
+    @discardableResult
+    func createBottleForSetup(name: String) async -> Bottle.ID? {
+        guard let installation = defaultInstallation else { return nil }
+        let (bottle, _) = makeBottle(name: name, installation: installation)
+        bottles.append(bottle)
+        selectedBottleID = bottle.id
+        saveBottles()
+
+        let hidden = TaskConsole(title: "setup")   // deliberately not shown as activeConsole
+        let code: Int32 = await withCheckedContinuation { continuation in
+            let handle = Wine.bootPrefix(bottle, using: installation, console: hidden) { code in
+                continuation.resume(returning: code)
+            }
+            if handle == nil { continuation.resume(returning: -1) }   // never started
+        }
+        guard code == 0 else { return nil }
+        markInitialized(bottle.id)
+        await applyRegistry(bottleID: bottle.id, console: hidden, finish: false)
+        return bottle.id
     }
 
     func deleteBottle(_ bottle: Bottle, removeFiles: Bool) {
@@ -348,33 +428,48 @@ final class AppModel: ObservableObject {
         )
     }
 
-    /// Download (if needed) and silently install Steam into the bottle.
+    /// Download (if needed) and silently install Steam into the bottle, showing a console.
     func installSteam(in bottle: Bottle) {
-        guard let installation = installation(for: bottle) else { return }
         let console = openConsole(title: "Installing Steam — \(bottle.name)")
-        Task {
-            do {
-                console.append("Downloading SteamSetup.exe…")
-                let installer = try await Steam.downloadInstaller { fraction in
-                    // Coarse progress ticks keep the log readable.
-                    if Int(fraction * 100) % 20 == 0 {
-                        console.append("… \(Int(fraction * 100))%")
-                    }
-                }
-                console.append("Running installer inside the bottle…")
-                let env = Wine.environment(for: bottle, using: installation)
-                let result = try await Shell.run(installation.loader,
-                                                 arguments: Steam.installArguments(installerPath: installer),
-                                                 environment: env)
-                if !result.stdout.isEmpty { console.append(result.stdout) }
-                if !result.stderr.isEmpty { console.append(result.stderr) }
-                console.append(bottle.isSteamInstalled ? "Steam installed." : "Installer finished.")
-                console.finish(result.exitCode)
-            } catch {
-                console.append("error: \(error.localizedDescription)")
-                console.finish()
-            }
+        Task { await performSteamInstall(in: bottle, console: console) }
+    }
+
+    /// Core Steam install. Pass a console to show a log (manual "Install Steam"), or nil to run
+    /// quietly (setup wizard). Returns whether Steam ended up installed.
+    @discardableResult
+    func performSteamInstall(in bottle: Bottle, console: TaskConsole?) async -> Bool {
+        guard let installation = installation(for: bottle) else {
+            console?.append("No Wine build available."); console?.finish(); return false
         }
+        do {
+            console?.append("Downloading Steam…")
+            let installer = try await Steam.downloadInstaller { _ in }
+            console?.append("Installing Steam into the bottle…")
+            let env = Wine.environment(for: bottle, using: installation)
+            let result = try await Shell.run(installation.loader,
+                                             arguments: Steam.installArguments(installerPath: installer),
+                                             environment: env)
+            if let console, !result.stderr.isEmpty { console.append(result.stderr) }
+            let installed = bottle.isSteamInstalled
+            console?.append(installed ? "Steam installed." : "Installer finished.")
+            console?.finish(result.exitCode)
+            objectWillChange.send()   // isSteamInstalled is filesystem-derived; refresh the UI
+            return installed
+        } catch {
+            console?.append("error: \(error.localizedDescription)"); console?.finish(); return false
+        }
+    }
+
+    /// Install Rosetta 2 and wait for it to actually finish. Returns whether it's present after.
+    /// On macOS 26 `softwareupdate --install-rosetta --agree-to-license` runs without admin
+    /// (verified); a future OS that needs elevation will simply return false and the wizard shows
+    /// clear guidance rather than silently continuing into a broken state.
+    func ensureRosetta() async -> Bool {
+        if SystemChecks.isRosettaInstalled { isRosettaInstalled = true; return true }
+        _ = try? await Shell.run(URL(fileURLWithPath: "/usr/sbin/softwareupdate"),
+                                 arguments: ["--install-rosetta", "--agree-to-license"])
+        isRosettaInstalled = SystemChecks.isRosettaInstalled
+        return isRosettaInstalled
     }
 
     /// Launch the Steam client already installed in the bottle.

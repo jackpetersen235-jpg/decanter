@@ -69,9 +69,10 @@ GOOD TO KNOW
   • KEEP YOUR MAC PLUGGED IN while gaming. On battery, macOS deliberately
     throttles performance — this makes a bigger difference than any setting.
 
-  • If a game is slow, in Decanter open the bottle, go to Configuration, and
-    make sure Graphics is set to "DXMT (DirectX -> Metal)". It's the fastest
-    option and the default. Turn on MetalFX upscaling for extra frames.
+  • Performance varies a lot by game. "DXMT (DirectX -> Metal)" is the default
+    and fastest graphics mode, and MetalFX upscaling (in Configuration) can add
+    frames. Some demanding 3D games need extra per-game setup to run their best
+    — ask whoever sent you this if a specific game feels slow.
 
 
 IF SOMETHING GOES WRONG

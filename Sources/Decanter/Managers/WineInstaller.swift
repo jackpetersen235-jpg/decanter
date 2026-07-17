@@ -55,6 +55,9 @@ final class WineInstaller: ObservableObject {
             try? FileManager.default.removeItem(at: tarball)   // reclaim ~317 MB
             phase = .done(version: version)
         } catch {
+            // Remove a half-extracted engine so a retry re-downloads cleanly instead of finding a
+            // present-but-broken build (which discovery would treat as valid and never retry).
+            try? FileManager.default.removeItem(at: Self.librariesRoot)
             phase = .failed(error.localizedDescription)
         }
     }
@@ -108,7 +111,9 @@ final class WineInstaller: ObservableObject {
             throw InstallError.step("The engine unpacked but no runnable `wine` was found.")
         }
         guard let result = try? await Shell.run(wine, arguments: ["--version"]), result.succeeded else {
-            throw InstallError.step("The engine unpacked but wouldn't run.")
+            let hint = SystemChecks.isRosettaInstalled
+                ? "" : " Rosetta 2 doesn't appear to be installed yet — it's needed to run the engine."
+            throw InstallError.step("The engine unpacked but wouldn't run.\(hint)")
         }
         return result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }

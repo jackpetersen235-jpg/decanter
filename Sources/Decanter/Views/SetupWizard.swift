@@ -10,6 +10,8 @@ struct SetupWizard: View {
     @StateObject private var installer = WineInstaller()
     @State private var running = false
     @State private var bottleName = "Games"
+    @State private var failureMessage: String? = nil
+    @State private var steamInstalling = false
 
     private enum Step: Int, CaseIterable {
         case rosetta, engine, bottle, steam
@@ -113,8 +115,8 @@ struct SetupWizard: View {
                 if step == .engine, active, installer.phase == .extracting {
                     Text("Unpacking…").font(.caption2).foregroundStyle(.secondary)
                 }
-                if case .failed(let message) = installer.phase, step == .engine {
-                    Text(message).font(.caption2).foregroundStyle(.red)
+                if step == .steam, active, steamInstalling {
+                    Text("Downloading and installing Steam…").font(.caption2).foregroundStyle(.secondary)
                 }
             }
             Spacer()
@@ -157,9 +159,10 @@ struct SetupWizard: View {
                      : "Downloads about 317 MB. Nothing else on your Mac is touched.")
                     .font(.caption).foregroundStyle(.secondary)
 
-                if !model.isRosettaInstalled {
-                    Text("macOS may ask for your password to install Apple's translation layer.")
-                        .font(.caption2).foregroundStyle(.orange)
+                if let failureMessage {
+                    Label(failureMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                        .padding(.top, 2)
                 }
             }
         }
@@ -169,42 +172,48 @@ struct SetupWizard: View {
 
     private func runAll() async {
         running = true
-        defer { running = false }
+        model.isSettingUp = true            // keep the wizard mounted through every step
+        failureMessage = nil
+        defer { running = false; model.isSettingUp = false }
 
-        // 1. Rosetta — Apple's installer prompts for admin itself.
+        // 1. Rosetta — awaited to completion (no fixed-time guess). Stop clearly if it fails.
         if !model.isRosettaInstalled {
-            model.installRosetta()
-            // Give the installer a chance; it's user-driven so we don't block forever.
-            for _ in 0..<60 {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                model.isRosettaInstalled = SystemChecks.isRosettaInstalled
-                if model.isRosettaInstalled { break }
+            let ok = await model.ensureRosetta()
+            if !ok {
+                failureMessage = "Couldn't install Apple's Rosetta translation layer. "
+                    + "Open Terminal and run:  softwareupdate --install-rosetta --agree-to-license  "
+                    + "then press the button again."
+                return
             }
         }
 
-        // 2. Engine — download + unpack + verify.
+        // 2. Engine — download + unpack + verify (progress shown in the row).
         if model.defaultInstallation == nil {
             await installer.install()
             model.rescanInstallations()
-            if case .failed = installer.phase { return }
+            if case .failed(let message) = installer.phase {
+                failureMessage = "Couldn't set up the Windows engine: \(message)"
+                return
+            }
+        }
+        guard model.defaultInstallation != nil else {
+            failureMessage = "No Windows engine is available. Please check your internet connection and try again."
+            return
         }
 
-        // 3. Bottle.
-        if model.bottles.isEmpty, model.defaultInstallation != nil {
-            model.createBottle(name: bottleName)
-            for _ in 0..<120 {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                if model.bottles.first?.isInitialized == true { break }
+        // 3. Bottle — created quietly (no scary wineboot log for a first-timer).
+        if model.bottles.isEmpty {
+            if await model.createBottleForSetup(name: bottleName) == nil {
+                failureMessage = "Couldn't create the game environment. Please try again."
+                return
             }
         }
 
-        // 4. Steam.
+        // 4. Steam — installed quietly; progress shown in the row.
         if let bottle = model.bottles.first, !bottle.isSteamInstalled {
-            model.installSteam(in: bottle)
-            for _ in 0..<300 {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                if model.bottles.first?.isSteamInstalled == true { break }
-            }
+            steamInstalling = true
+            _ = await model.performSteamInstall(in: bottle, console: nil)
+            steamInstalling = false
         }
     }
 }

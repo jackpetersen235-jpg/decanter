@@ -79,7 +79,9 @@ enum GraphicsBackend: String, Codable, CaseIterable, Identifiable {
 struct BottleSettings: Codable, Equatable {
     var windowsVersion: WindowsVersion = .win10
     var syncMode: SyncMode = .msync
-    var graphics: GraphicsBackend = .d3dmetal
+    // DXMT is the backend Decanter's shipped engine (WhiskyWine 11) provides — the right default
+    // for a newly created bottle. CrossOver-imported bottles override this to .d3dmetal.
+    var graphics: GraphicsBackend = .dxmt
 
     var metalHUD: Bool = false        // MTL_HUD_ENABLED — Metal performance overlay (small cost)
     var metalFX: Bool = false         // MetalFX upscaling

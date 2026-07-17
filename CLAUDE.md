@@ -65,6 +65,31 @@ Data at runtime: `~/Library/Application Support/Decanter/`
   msync. See GAMING-STACK.md §2/§3. Only CrossOver has both msync and modern Steam TLS.
 - `Steam-Mythic` prefix + the CrossOver bottle (~3.2 GB total) are leftovers, safe to delete.
 
+## First-run automation (SetupWizard) — how it works
+
+A newcomer with **no Wine and no Rosetta** can press one button and end up at Steam. The wizard
+(`Views/SetupWizard.swift`) shows 4 self-checking steps and calls one model routine:
+
+- `AppModel.runGuidedSetup()` — the whole flow, factored OUT of the view so it survives view
+  lifecycle and is testable headlessly. Steps: `ensureRosetta()` → `installEngine()` (downloads
+  **WhiskyWine 11** via `WineInstaller`, ~317 MB, to `~/Library/Application Support/Decanter/Wine/`)
+  → `createBottleForSetup()` (quiet, no console) → `performSteamInstall(console:nil)`.
+- Headless test hooks: `Decanter --install-engine` and `Decanter --run-setup`. Both verified
+  end-to-end on 2026-07-17 (engine downloads at ~2 MB/s; bottle + Steam auto-created).
+- The app owns its own engine (`Paths.wineEngine*`, discovered first in `Wine.swift`), so it does
+  **not** depend on Whisky/Mythic/CrossOver being installed. That's what makes the friend build work.
+
+**Known limitation (documented, not a bug):** the wizard gets a bottle to *Steam-ready*, but does
+**not** auto-install per-game DXMT DLLs (copy `Libraries/DXMT/x64/*.dll` into the game folder +
+`AppDefaults\<game>.exe\DllOverrides`). Without that a demanding game falls back to slow WineD3D.
+Global DXMT overrides can't be used (they black-screen Steam's CEF — see GAMING-STACK.md §6).
+Per-game auto-DXMT is the obvious next feature.
+
+## Sharing with someone else
+
+`Scripts/package-for-friend.sh` → `~/Desktop/Decanter-for-friend.zip` (~2 MB; engine self-downloads).
+Strips quarantine + AppleDouble clutter, re-signs ad-hoc, writes a plain-language READ ME.
+
 ## Gotchas that already bit us (don't rediscover these)
 
 - **`sips` writes JPEG data into `.png` filenames** unless you pass `-s format png`.
