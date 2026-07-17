@@ -16,4 +16,4 @@ export MTL_HUD_ENABLED="${SEKIRO_HUD:-0}"   # set SEKIRO_HUD=1 to show fps
 export WINELOADER="$WB/wine" WINESERVER="$WB/wineserver" PATH="$WB:$PATH"
 export DYLD_FALLBACK_LIBRARY_PATH="$WINEROOT/lib:/usr/local/lib:/usr/lib"
 
-exec "$WB/wine" "$PREFIX/drive_c/Program Files (x86)/Steam/steam.exe" -silent -no-cef-sandbox -applaunch 814380
+exec "$WB/wine" "$PREFIX/drive_c/Program Files (x86)/Steam/steam.exe" -silent -no-cef-sandbox -skipinitialbootstrap -applaunch 814380

@@ -99,8 +99,18 @@ struct BottleSettings: Codable, Equatable {
     /// Extra environment variables the user wants layered on for launches.
     var environment: [String: String] = [:]
 
-    /// Optional default launch arguments passed to Steam.
-    var steamArguments: String = "-no-cef-sandbox -noverifyfiles"
+    /// Launch arguments passed to Steam.
+    ///
+    /// `-skipinitialbootstrap`: Steam normally re-execs itself for a startup update check, and
+    /// **both** processes stay resident — Wine gives each one a Dock tile, so you get two "Steam"
+    /// icons for one Steam. This skips that phase: 1 process, 1 tile. Verified to still log in and
+    /// keep Steam's normal self-update path (it still resolves client-update hosts).
+    ///
+    /// Do **not** add `-silent` here: it starts Steam with no window, so "Launch Steam" appears
+    /// to do nothing and the user has to click twice (the second click surfaces the already-
+    /// running instance). `-silent` is only appropriate on a per-game bottle that also passes
+    /// `-applaunch`, where Steam is just a DRM host and its UI is unwanted.
+    var steamArguments: String = "-no-cef-sandbox -skipinitialbootstrap"
 
     /// Environment variables implied purely by these settings (no Wine paths — those are
     /// added by `Wine.environment(...)`).

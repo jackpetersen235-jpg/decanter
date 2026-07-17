@@ -184,8 +184,11 @@ final class AppModel: ObservableObject {
                 added += 1; firstNew = firstNew ?? id
             }
             // Each installed Steam game → its own bottle that boots straight into the game.
+            // `-silent` belongs ONLY here: Steam is just a DRM host for a game bottle, so its
+            // window is unwanted. Never put -silent on a launcher bottle — Steam then starts
+            // with no window and the user has to click Launch twice to see it.
             for game in installedSteamGames(in: prefix) {
-                let args = "-applaunch \(game.appid) -no-cef-sandbox -noverifyfiles"
+                let args = "-silent -no-cef-sandbox -skipinitialbootstrap -applaunch \(game.appid)"
                 if let id = addImportedBottle(name: game.name, prefix: prefix, wineBin: coBin, steamArgs: args) {
                     added += 1; firstNew = firstNew ?? id
                 }
