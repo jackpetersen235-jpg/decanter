@@ -1,0 +1,13 @@
+# build output
+build/
+.build/
+*.o
+
+# large intermediates — AppIcon.icns + icon-1024.png are the masters worth keeping
+Assets/wizard-source.png
+Assets/wizard-clean.png
+Assets/wizard-full.png
+Assets/bbox.txt
+
+# macOS
+.DS_Store
