@@ -532,14 +532,20 @@ final class AppModel: ObservableObject {
     /// Remove the macOS menu-bar tray icon Wine creates for Steam.
     ///
     /// Wine's `explorer.exe` bridges a Windows systray icon to an `NSStatusItem` in the menu bar.
-    /// Steam doesn't need explorer, and (verified) it does NOT respawn once killed and Steam keeps
-    /// running fine. The tray icon is only added after Steam's UI loads, so we sweep for a while.
+    /// Killing explorer drops it; explorer does not respawn and Steam keeps running fine (verified).
+    ///
+    /// IMPORTANT: wait before the first kill. A game may run in a per-app Wine *virtual desktop*
+    /// for fullscreen (that desktop is itself an `explorer.exe`); killing it before the game's
+    /// window exists would prevent fullscreen. By the time we start (~15s) the window is up, so
+    /// killing explorer only drops the unneeded systray bridge — the game window survives (owned
+    /// by winemac.drv, not explorer). Verified with Sekiro's fullscreen setup.
     private func suppressWineSystray() {
         Task {
-            for _ in 0..<20 {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)   // 20 × 3s = 60s of coverage
+            try? await Task.sleep(nanoseconds: 15_000_000_000)     // let the window come up first
+            for _ in 0..<12 {                                       // then sweep ~48s for the tray icon
                 _ = try? await Shell.run(URL(fileURLWithPath: "/usr/bin/pkill"),
                                          arguments: ["-f", "explorer.exe"])
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
             }
         }
     }

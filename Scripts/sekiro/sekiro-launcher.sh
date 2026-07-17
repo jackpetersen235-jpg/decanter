@@ -1,6 +1,6 @@
 #!/bin/bash
 # Sekiro launcher — runs the Wine tree EMBEDDED in this bundle so every process
-# registers to macOS as "Sekiro" (games category) → Game Mode can engage in fullscreen.
+# registers to macOS as "Sekiro" (games category).
 CONTENTS="$(cd "$(dirname "$0")/.." && pwd)"
 WINEROOT="$CONTENTS/Frameworks/Wine"
 WB="$WINEROOT/bin"
@@ -12,8 +12,26 @@ export WINEPREFIX="$PREFIX" WINEDEBUG=-all WINEMSYNC=1 WINEESYNC=1 ROSETTA_ADVER
 export DXMT_METALFX_SPATIAL_SWAPCHAIN=1
 export DXMT_CONFIG="d3d11.metalSpatialUpscaleFactor=2.0;d3d11.preferredMaxFrameRate=60;d3d11.ignoreMapFlagNoWait=True"
 export DXMT_SHADER_CACHE=1 DXMT_SHADER_CACHE_PATH="$CACHE"
-export MTL_HUD_ENABLED="${SEKIRO_HUD:-0}"   # set SEKIRO_HUD=1 to show fps
+export MTL_HUD_ENABLED="${SEKIRO_HUD:-0}"   # set SEKIRO_HUD=1 to show the fps overlay
 export WINELOADER="$WB/wine" WINESERVER="$WB/wineserver" PATH="$WB:$PATH"
 export DYLD_FALLBACK_LIBRARY_PATH="$WINEROOT/lib:/usr/local/lib:/usr/lib"
 
-exec "$WB/wine" "$PREFIX/drive_c/Program Files (x86)/Steam/steam.exe" -silent -no-cef-sandbox -skipinitialbootstrap -applaunch 814380
+# Fullscreen: sekiro.exe runs in a per-app Wine virtual desktop sized to the screen's point
+# resolution (set once in the prefix registry — HKCU\Software\Wine\AppDefaults\sekiro.exe\Explorer
+# Desktop=Default, HKCU\Software\Wine\Explorer\Desktops\Default=1470x956). That gives a borderless
+# window filling the screen with the fast "Direct" presentation path — and Cmd+Tab still works
+# (it's a window, not a display capture). Steam itself stays rootless/normal (per-app, not global).
+
+# Remove the Steam menu-bar (systray) icon once the game window is up. Wine's explorer bridges
+# Steam's tray icon to the macOS menu bar. The fullscreen window is created via the per-app desktop
+# but is then owned by winemac.drv, so it SURVIVES explorer being killed (verified). We wait for the
+# window to exist first (killing explorer too early would prevent the fullscreen window), then sweep
+# a few times because Steam only adds its tray icon after its client finishes loading.
+(
+  until pgrep -f 'sekiro.exe' >/dev/null 2>&1; do sleep 2; done
+  sleep 18
+  for _ in 1 2 3 4 5 6; do pkill -f 'explorer.exe' 2>/dev/null; sleep 4; done
+) >/dev/null 2>&1 &
+
+exec "$WB/wine" "$PREFIX/drive_c/Program Files (x86)/Steam/steam.exe" \
+     -silent -no-cef-sandbox -skipinitialbootstrap -applaunch 814380

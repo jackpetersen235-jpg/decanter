@@ -126,7 +126,28 @@ directory, so only that exe gets them. That's what the current setup does.
 | Native macOS fullscreen (⌃⌘F) | **Wine doesn't implement it** — the green zoom button is greyed out |
 | **Game Mode** | Requires native fullscreen → **unreachable** |
 
-Windowed **1280×832 + MetalFX 2×** is the optimum, not a consolation prize.
+**UPDATE — borderless fullscreen IS achievable** (a per-app Wine virtual desktop):
+
+- Set a **per-app** virtual desktop for the game exe only, sized to the screen's *point*
+  resolution (this Air = **1470×956**):
+  ```
+  HKCU\Software\Wine\AppDefaults\<game>.exe\Explorer   Desktop = Default
+  HKCU\Software\Wine\Explorer\Desktops                  Default = 1470x956
+  ```
+  (Per-app, NOT global `HKCU\Software\Wine\Explorer\Desktop` — global forces Steam's own
+  window into the desktop too.)
+- Result (verified with Sekiro): fills the screen, **`Direct`** presentation (not Composited),
+  **60fps locked** (16.67ms frame interval), MetalFX still upscales 1470×956 → 2944×1912, and
+  **Cmd+Tab still works** (it's a window, not a display capture — `CGDisplayIsCaptured` = false).
+- The virtual desktop is an `explorer.exe`, which also bridges Steam's systray to the menu bar.
+  Kill explorer **after** the game window exists (`Scripts/sekiro/*` waits ~18s): the window is
+  owned by winemac.drv and **survives**, so you lose the menu-bar icon but keep fullscreen.
+  Killing it too early prevents the fullscreen window from being created.
+- Game Mode still won't engage (needs true native fullscreen), but the frame pacing is already
+  perfect, so it doesn't matter here.
+
+Setup script: `Scripts/sekiro/enable-fullscreen.sh`. Windowed 1280×832 + MetalFX remains a fine
+fallback, but per-app-desktop fullscreen is better (Direct path, locked 60fps).
 
 Game Mode also needs the app to be a **games-category bundle**. We fixed the identity by cloning
 the Wine tree *inside* `Sekiro.app` (`Contents/Frameworks/Wine`, APFS clone) — `lsappinfo` now
