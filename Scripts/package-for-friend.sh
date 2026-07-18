@@ -1,6 +1,7 @@
 #!/bin/bash
 # Build a clean, shareable Decanter.app + plain-language READ ME, zipped to the Desktop.
-# The zip is tiny (~2 MB) because the 317 MB Wine engine self-downloads on first run.
+# The zip is tiny (~2 MB) because the Wine engine self-downloads on first run (~480 MB in two
+# parts: the base bundle, then the upstream-wine-10-with-msync overlay that avoids frame spikes).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -41,7 +42,8 @@ has the app — no repo. Getting them going is short:
    ```
    then right-click ▸ Open.
 3. **Press "Set everything up for me"** in the app. It installs, in order and on its own:
-   Rosetta 2 → the Windows engine (WhiskyWine 11, ~317 MB) → a game bottle → Steam.
+   Rosetta 2 → the Windows engine (~480 MB: base bundle + upstream wine 10 + msync overlay,
+   which is what avoids the frame-spike stutter) → a game bottle → Steam.
    Progress shows inline. It self-skips anything already done, so it's safe to re-press.
 4. Sign into Steam, install games, play.
 
@@ -88,7 +90,7 @@ WHAT TO DO (3 steps, ~10 minutes)
 
    Decanter downloads and configures everything itself:
      • Apple's translation layer  (macOS may ask for your password — that's normal)
-     • The Windows engine         (about 317 MB — takes a minute)
+     • The Windows engine         (about 480 MB — takes a few minutes)
      • A private space for games
      • Steam
 
