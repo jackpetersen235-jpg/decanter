@@ -157,6 +157,50 @@ rather than opening Steam separately. `BottleSettings.derivedEnvironment` now al
 **Also:** a shader cache is engine-specific. After an engine swap, an old cache forces a full
 recompile (long first-load freeze). Caches live in `~/Library/Application Support/Decanter/ShaderCache/`.
 
+
+## 4c. GPU hangs on level load — diagnosed, NOT fixed (2026-07-18)
+
+**Symptom:** a 4-10 s freeze when loading a save or respawning after death. The **entire Mac**
+locks (can't switch windows); ordinary gameplay is unaffected and smooth.
+
+**Root cause: the GPU hangs and macOS force-resets it.** Confirmed with a hard counter — no sudo
+needed:
+```bash
+ioreg -r -d 1 -c IOAccelerator | tr ',' '\n' | grep -E 'recoveryCount|Device Utilization'
+```
+`recoveryCount` increments at the exact second of each freeze. Measured rate during play: **~20
+hangs/hour**, stable across every configuration tried.
+
+**Fingerprint** (why it looks like nothing else): Sekiro ~2 % CPU, `wineserver` ~0.6 %, disk
+*quieter* than normal play, memory fine, **every process on the machine idle**, yet the desktop is
+frozen. Nothing is computing — everything is blocked on the GPU. GPU work never shows up in CPU %.
+
+**Eliminated by measurement — do NOT re-litigate these:**
+
+| Suspect | Killed by |
+|---|---|
+| Shader compilation | CPU *collapses* to 2 %; compiling would be high-CPU, and the cache doesn't grow |
+| `winemetal.so` graft | byte-identical (`3d50d7f3…`) to DXMT's official v0.80 backend |
+| msync | froze with `WINEMSYNC=0` too (and msync-off is far worse: wineserver peaked 54 %) |
+| MetalFX | froze with `DXMT_METALFX_SPATIAL_SWAPCHAIN=0` too |
+| Disk I/O | during stall 183 MB/s avg vs **523 MB/s during normal play** |
+| `ignoreMapFlagNoWait` | 20.0 hangs/hour with AND without it |
+| Official DXMT 0.80 build | **errors — reverted.** frankea ships the "native per-prefix" variant paired with the builtin `winemetal`; the official tarball is the "builtin" variant. They are NOT interchangeable. |
+
+**Not caused by the wine 10 + msync swap:** every component that generates Metal commands
+(`winemetal.so`, `winemetal.dll`, the DXMT DLLs) is byte-identical before and after. The swap
+changed thread sync, not graphics.
+
+**What DID help:** in-game settings to Medium + MetalFX 2.0x -> 1.5x. Hang *rate* unchanged, but
+freezes are noticeably **shorter** and the game holds a **steady 60 fps**. Note this reverses the
+CPU-spike guidance in section 3 — lowering quality does nothing for CPU spikes, but does reduce GPU
+work at the hang point.
+
+**Accepted trade (user's choice):** a pause on load, smooth 60 fps afterwards.
+
+**Untested:** whether wine 11 hangs at the same rate. `recoveryCount` now makes that an objective
+per-hour comparison rather than anecdote. Fallback: `Backups/wine11-*/`.
+
 ## 5. MetalFX — semantics people get wrong
 
 `DXMT_METALFX_SPATIAL_SWAPCHAIN=1` + `d3d11.metalSpatialUpscaleFactor=N` upscales
