@@ -504,11 +504,19 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// True if a Steam client process is running in any bottle.
+    /// True if a Steam *client* process is running in any bottle.
+    ///
+    /// The pattern must be `/steam\.exe` (leading FORWARD slash), not bare `steam\.exe`.
+    /// Steam's webhelper processes carry `-steampath=C:\Program Files (x86)\Steam\steam.exe`
+    /// in their argv, so a bare match also hits them — and those orphans survive for hours
+    /// after Steam exits (see GAMING-STACK.md §10). That made `launchSteam` believe Steam was
+    /// already up and short-circuit to `activateRunningGame()`, so the Launch button silently
+    /// did nothing. The real client's argv[0] is a unix path (`…/winetemp-…/steam.exe`) which
+    /// contains `/steam.exe`; the webhelper only ever has the Windows form `\steam.exe`.
     private func isSteamRunning() async -> Bool {
         guard let result = try? await Shell.run(
             URL(fileURLWithPath: "/usr/bin/pgrep"),
-            arguments: ["-f", #"steam\.exe"#]) else { return false }
+            arguments: ["-f", #"/steam\.exe"#]) else { return false }
         return !result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
