@@ -143,3 +143,60 @@ be substantial but is not proven total — subjective play test is the real judg
 Steam-Wine11 + saves, bottles.json).
 
 Open: the `wineboot -u` prefix reconcile did not report completion; re-run if oddities appear.
+
+
+---
+
+# Full code + system audit (2026-07-18, end of session)
+
+Every source file read (19 files, ~2,650 lines). Two further bugs found and fixed.
+
+## Bugs fixed in this pass
+
+**🔴 `ContentView` — destructive delete had no confirmation.**
+"Delete Bottle & Files" fired immediately from the sidebar context menu, one item below the
+harmless "Delete Bottle (keep files)". A prefix holds the game install AND its save files
+(10-100 GB; saves exist nowhere else). One misclick = permanent loss, no undo. Now requires an
+explicit confirmation dialog naming the bottle.
+
+**🟠 `TaskConsole.text` grew without bound.**
+47 append call sites, and the "Verbose Wine logging" toggle sets
+`WINEDEBUG=warn+all,fixme-all`, which floods output. Every append also re-rendered the SwiftUI
+view over an ever-larger string. Now capped at 200k chars and trimmed to a line boundary.
+
+## Checked and cleared — do not re-investigate
+
+`Bottle` (id-only `==` is safe; nothing relies on value equality), `Paths` (shader cache keyed by
+prefix folder name; both bottles legitimately share `Steam-Wine11`), `SystemChecks`, `Panels`,
+`TaskConsole` (rest), `ProgramsView`, `SettingsView`, `ConsoleView`, `CreateBottleSheet`,
+`ConfigurationView`, `BottleDetailView`, `DecanterApp`, `ContentView` (rest).
+
+## System verification
+
+```
+doctor.sh          healthy - Rosetta ok, 154 GB free, AC power
+Decanter engine    wine-10.0  msync=2  winemetal.so present  94 dylibs
+Sekiro.app engine  wine-10.0  msync=2  winemetal.so present  94 dylibs   (identical - no drift)
+fallback           Backups/wine11-20260718-121514  (wine-11.0 + save file)
+git                clean, local == origin/main
+```
+
+## Storage
+
+Real overhead is ~3 GB, NOT what `du` reports:
+- Sekiro + Steam = **16 GB, but that's the game**, not the project.
+- Wine engines x3 (Decanter, Sekiro.app, Wine10-msync source) ~2.1 GB.
+- Source + git x2 ~470 MB real (the copy is an APFS clone).
+- **Backups report 35 GB but cost ~0** - APFS clones share blocks. This is why deleting 37 GB of
+  experiment artifacts only reclaimed **4.82 GB**, and why the rollback was free to create.
+
+Removed at end of session: `Wrappers/`, `Bottles/Steam-CX24test`, `Engines/WS12WineCX24`,
+`ShaderCache/SekiroW10`. Kept: all backups, `Engines/Wine10-msync`, `ShaderCache/Sekiro.wine11-stale`.
+
+## ⚠️ What is NOT in git
+
+`~/coding` holds only source/docs/scripts. NOT tracked anywhere in version control:
+`~/Applications/Sekiro.app`, `~/Library/Application Support/Decanter/` (engine, bottles,
+**save files**, backups), the friend zip. **The Sekiro save is the one irreplaceable item** - it
+lives only in the bottle plus local backups and whatever `Scripts/backup-decanter.sh` last put on
+the USB.
