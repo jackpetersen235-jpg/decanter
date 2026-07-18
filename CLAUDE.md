@@ -111,6 +111,11 @@ Strips quarantine + AppleDouble clutter, re-signs ad-hoc, writes a plain-languag
 - **`grep -rl` silently fails on these Mach-O trees.** Use `strings <file> | grep`. A tree-wide
   grep returned 0 hits for a term that `strings` found 27 times — nearly caused a wrong conclusion.
 - Backups/snapshots: use **`cp -Rc`** (APFS clone). 16 GB cloned in 1.4 s with ~0 disk used.
+- **`probeFastSync` must match `WINEMSYNC`, not bare `msync`.** Every ntdll has the POSIX
+  `_msync()` *syscall symbol* in its symbol table, so a raw-byte scan for `msync` false-positives
+  on wine 11 (which has no msync *feature*) → new bottles wrongly got `sync=msync`. `strings` hides
+  this (it skips the symbol table); a `Data.range(of:)` scan does not. Fixed to search `WINEMSYNC`
+  /`WINEESYNC` (the env vars only the feature reads). Verified: WhiskyWine 11 → false, Mythic → true.
 - **Steam adds a macOS menu-bar (top-right) icon** via Wine's `explorer.exe`, which bridges the
   Windows systray to an `NSStatusItem`. To remove it: `pkill -f explorer.exe` after launch.
   Verified: explorer does NOT respawn, and Steam keeps working without it (windows are managed by

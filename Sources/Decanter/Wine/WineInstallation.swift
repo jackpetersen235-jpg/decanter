@@ -47,14 +47,20 @@ struct WineInstallation: Codable, Equatable, Identifiable, Hashable {
     /// so wine 11 on macOS has no fast sync at all. See docs/GAMING-STACK.md §2.
     var supportsFastSync: Bool = false
 
-    /// Cheap probe: look for the msync/esync symbols in the build's unix-side ntdll.
+    /// Cheap probe for the msync/esync *feature* in the build's unix-side ntdll.
+    ///
+    /// We look for `WINEMSYNC` / `WINEESYNC` — the env-var names the feature's code reads. Do NOT
+    /// search for bare "msync"/"esync": every ntdll contains the POSIX `_msync()` syscall *symbol*
+    /// in its symbol table, which made this return a false positive for wine 11 (verified: fresh
+    /// WhiskyWine 11 ntdll has `_msync` but no `WINEMSYNC`; Mythic's has `WINEMSYNC`). `strings`
+    /// misses `_msync` because it skips the symbol table, but a raw byte scan does not.
     static func probeFastSync(binDirectory: URL) -> Bool {
         let ntdll = binDirectory
             .deletingLastPathComponent()
             .appendingPathComponent("lib/wine/x86_64-unix/ntdll.so")
         guard let data = try? Data(contentsOf: ntdll, options: .mappedIfSafe) else { return false }
-        return data.range(of: Data("msync".utf8)) != nil
-            || data.range(of: Data("esync".utf8)) != nil
+        return data.range(of: Data("WINEMSYNC".utf8)) != nil
+            || data.range(of: Data("WINEESYNC".utf8)) != nil
     }
 
     private enum CodingKeys: String, CodingKey {
