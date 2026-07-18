@@ -60,19 +60,30 @@ grep -ac WINEMSYNC <wine>/lib/wine/x86_64-unix/ntdll.so   # >0 = feature present
 > We once exported `WINEMSYNC=1` for hours on the upstream-11 engine where it did nothing (no
 > feature to read it). On CX24 the same flag is consumed — `msync: up and running`.
 
-## 2b. The free msync path — status & how to finish it
+## 2b. The free msync path — SOLVED (2026-07-18)
 
-`WS12WineCX24.0.7` is installed at `~/Library/Application Support/Decanter/Engines/WS12WineCX24`
-(msync active; support dylibs backfilled). Remaining work to make Sekiro actually run on it for
-free = give it the **wrapper's networking environment**. The clean way is to run the engine
-inside a real Sikarugir/Kegworks wrapper rather than bare (see `Sikarugir-App/Wrapper`). A
-Decanter *copy* that drives games through such a wrapper is the in-progress plan. Until then, the
-guaranteed fix is **CrossOver** (same wine + complete wrapper) — now a sure thing, not a gamble.
+**Resolved.** The blocker was never packaging — it was **CrossOver's own patches**, which break
+Steam's internal client↔UI loopback websocket (`steam.exe` LISTENs on 127.0.0.1 but nothing ever
+connects). Upstream wine has no such problem.
 
-## 3. The frame spikes — diagnosed, not fixed
+The engine now installed is **`WS11Wine10.0_3`** — free, upstream wine 10.0 **with msync**. On this
+Mac: `msync: up and running`, Steam logs on in ~24 s, loopback websocket ESTABLISHED, DXMT renders.
 
-**Cause:** the current (upstream wine 11) engine has no fast sync, so Sekiro's **103 threads**
-round-trip every mutex/event through `wineserver` over IPC.
+Ruled out along the way (all measured, none were the cause): msync itself (fails with fast-sync
+OFF too), support libraries, wrapper packaging, prefix version, wine version (CX 8 and 9 fail
+identically), and IPv6 (`::1` is configured and dead-port connects refuse in 0.000 s).
+
+**DXMT graft required:** the overlay ships no unix `winemetal.so` and only a 36 KB stub
+`winemetal.dll`. `WineInstaller.installMsyncEngine()` grafts back the base bundle's `winemetal.so`
+plus DXMT's real 73478-byte `winemetal.dll`. ⚠️ That runs a wine-11 unixlib inside a wine-10
+engine — unsupported ABI mix, and one GPU error/recovery was observed. Suspect it first if
+graphics get unstable; fallback lives in `Backups/wine11-*/`.
+
+## 3. The frame spikes — FIXED
+
+
+**Cause (now fixed):** an engine without fast sync makes Sekiro's **103 threads** round-trip every
+mutex/event through `wineserver` over IPC, which serialises them and produces the spikes.
 
 **Evidence (measured):**
 
@@ -81,10 +92,11 @@ round-trip every mutex/event through `wineserver` over IPC.
 | upstream wine 11 (no msync) | **39.9 %** |
 | Mythic/Whisky2.5 + `WINEMSYNC=1` | **0.1 %** |
 
-That ~400× drop proves the mechanism. **Correction (2026-07-17):** msync is NOT limited to wine
-7.7 — the free CrossOver-24-sourced `WS12WineCX24` (wine **9.0**) has msync and it activates (see
-§2). So the fix is a real, free-in-principle engine swap, blocked only by standalone Steam
-networking (§2b) — not "dead end without CrossOver."
+That drop proves the mechanism. **Result after switching to upstream wine 10 + msync
+(2026-07-18):** measured under real Sekiro gameplay over 108 samples — `wineserver` **avg 7.9 %,
+median 6.3 %, p95 18 %**, with only 2.8 % of samples above 20 %. A ~5× reduction versus 39.9 %.
+Note this is NOT the ~400× the old Mythic 0.1 % figure implied; that figure was likely taken under
+much lighter load. Spike relief is substantial but not proven total.
 
 Also measured: `GPU 3.04 ms` vs `Frame Interval 19.72 ms` → **the GPU is idle ~84 % of each
 frame**. Graphics settings are NOT the bottleneck. Lowering quality won't fix the spikes; it's
