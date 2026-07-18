@@ -31,6 +31,21 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .setupAssistantRequested)) { _ in
             showingWizard = true
         }
+        .confirmationDialog(
+            "Delete “\(pendingDeletion?.name ?? "")” and all its files?",
+            isPresented: Binding(get: { pendingDeletion != nil },
+                                 set: { if !$0 { pendingDeletion = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Bottle & Files", role: .destructive) {
+                if let bottle = pendingDeletion { model.deleteBottle(bottle, removeFiles: true) }
+                pendingDeletion = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDeletion = nil }
+        } message: {
+            Text("This permanently erases the Windows drive for this bottle — installed games and "
+               + "their save files. This cannot be undone.")
+        }
     }
 
     private var splitView: some View {
@@ -79,10 +94,16 @@ struct ContentView: View {
         Button("Apply Settings to Prefix") { model.applySettings(bottle) }
         Divider()
         Button("Delete Bottle (keep files)") { model.deleteBottle(bottle, removeFiles: false) }
-        Button("Delete Bottle & Files", role: .destructive) {
-            model.deleteBottle(bottle, removeFiles: true)
+        // Destructive + irreversible: a prefix holds the game install AND its saves (10-100 GB,
+        // and saves exist nowhere else). This is a context-menu item one slip away from the
+        // harmless "keep files" entry, so it MUST confirm first.
+        Button("Delete Bottle & Files…", role: .destructive) {
+            pendingDeletion = bottle
         }
     }
+
+    /// Bottle awaiting delete-with-files confirmation.
+    @State private var pendingDeletion: Bottle?
 
     @ViewBuilder
     private var detail: some View {
