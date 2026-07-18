@@ -109,3 +109,37 @@ connects, only on CrossOver-sourced engines. That is inside the engine binary.
 - `pkill caffeinate` when you're done — it's still holding your Mac awake (PID 2685).
 
 All three fixes are committed and pushed to `jackpetersen235-jpg/decanter`.
+
+---
+
+# ★ RESOLVED (2026-07-18 ~12:20) — the free msync path WORKS
+
+**The "you must buy CrossOver" conclusion was WRONG.** Root cause of the free-path failure was
+never the wine version, msync, packaging, libraries, IPv6 or the prefix — it was **CrossOver's own
+patches**. Upstream wine + msync has no such problem.
+
+**The winning engine:** `WS11Wine10.0_3` from the Sikarugir/Kegworks `Engines` mirror — free,
+**upstream wine 10.0 with msync already applied** (0 CrossOver markers, `WINEMSYNC` in ntdll).
+
+Verified on this Mac:
+- `msync: up and running` (Mach port bootstrapped)
+- Steam **logged on in ~24s**, and the loopback UI websocket **ESTABLISHED (8 conns)** — the exact
+  thing that never connected on CrossOver-sourced wine 8/9
+- DXMT active on Metal 3 (MSL 3.2), MetalFX config applied, rendered past frame 1732
+- Sekiro runs, 98-101 threads
+
+**DXMT graft required:** the engine ships a 36878-byte `winemetal.dll` and NO unix
+`winemetal.so`. Grafted the wine-11 `winemetal.so` + DXMT's 73478 `winemetal.dll` into it. This is
+an unsupported ABI mix (wine11 unixlib in a wine10 engine) — it works, but one GPU
+error/recovery (`kIOGPUCommandBufferCallbackErrorInnocentVictim`) was observed. **First suspect if
+graphics get unstable.**
+
+**Measured result:** `wineserver` under real gameplay **39.9% -> ~7.5% avg** (samples 2.3-13.5%).
+A real ~5x reduction, but NOT the ~400x (0.1%) the old Mythic figure implied. Spike relief should
+be substantial but is not proven total — subjective play test is the real judge.
+
+**Promoted to the live setup** (Sekiro.app engine, Decanter engine, syncMode=msync on both bottles).
+**Full wine-11 fallback** cloned at `Backups/wine11-20260718-121514/` (Sekiro.app, DecanterWine,
+Steam-Wine11 + saves, bottles.json).
+
+Open: the `wineboot -u` prefix reconcile did not report completion; re-run if oddities appear.
