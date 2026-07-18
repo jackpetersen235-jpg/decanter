@@ -93,10 +93,20 @@ mutex/event through `wineserver` over IPC, which serialises them and produces th
 | Mythic/Whisky2.5 + `WINEMSYNC=1` | **0.1 %** |
 
 That drop proves the mechanism. **Result after switching to upstream wine 10 + msync
-(2026-07-18):** measured under real Sekiro gameplay over 108 samples — `wineserver` **avg 7.9 %,
-median 6.3 %, p95 18 %**, with only 2.8 % of samples above 20 %. A ~5× reduction versus 39.9 %.
-Note this is NOT the ~400× the old Mythic 0.1 % figure implied; that figure was likely taken under
-much lighter load. Spike relief is substantial but not proven total.
+(2026-07-18):**
+
+| launch | wineserver CPU |
+|---|---|
+| baseline, upstream wine 11 (no msync) | **39.9 %** |
+| wine 10 + msync, but game inherited the WRONG env (see §4b) | ~6-8 % avg |
+| **wine 10 + msync, cold `Sekiro.app` launch (correct env)** | **~3.2 % avg** (2.3-5.7 %) |
+
+**~12× reduction**, and confirmed subjectively — "running smooth again". Note the middle row: an
+earlier 547-sample run averaged 7.9 % because the game had inherited a Decanter-started Steam's
+environment (stale shader cache, missing DXMT tuning). Always measure a cold launch.
+
+This is still not the ~400× the old Mythic 0.1 % figure implied; that figure was likely taken under
+much lighter load.
 
 Also measured: `GPU 3.04 ms` vs `Frame Interval 19.72 ms` → **the GPU is idle ~84 % of each
 frame**. Graphics settings are NOT the bottleneck. Lowering quality won't fix the spikes; it's
