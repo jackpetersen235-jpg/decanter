@@ -140,7 +140,14 @@ struct BottleSettings: Codable, Equatable {
             if metalFX {
                 env["DXMT_METALFX_SPATIAL_SWAPCHAIN"] = "1"
             }
-            var cfg = ["d3d11.preferredMaxFrameRate=60"]
+            // `ignoreMapFlagNoWait` matters more than it looks. A game launched via
+            // `steam.exe -applaunch` inherits the environment of the ALREADY-RUNNING Steam — so
+            // if Steam was started from Decanter, the game gets THIS config, not the tuned one in
+            // a per-game launcher like Sekiro.app. Keeping the two in sync means either launch
+            // order produces the same performance. (Diagnosed 2026-07-18: launching Sekiro while
+            // a Decanter-started Steam was up produced load freezes + stutter for exactly this
+            // reason.) Verified real DXMT key — see GAMING-STACK.md §5.
+            var cfg = ["d3d11.preferredMaxFrameRate=60", "d3d11.ignoreMapFlagNoWait=True"]
             if metalFX {
                 cfg.append("d3d11.metalSpatialUpscaleFactor=\(String(format: "%.1f", metalFXFactor))")
             }

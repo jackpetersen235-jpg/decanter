@@ -124,6 +124,29 @@ CPU-side (Rosetta translation + wineserver sync).
 - `-applaunch <id>` on a **cold** Steam gets consumed before login completes. Launch Steam first,
   then send applaunch — or accept a slow first attempt.
 
+
+## 4b. ⚠️ Launch order changes performance (diagnosed 2026-07-18)
+
+`steam.exe -applaunch <id>` does not start a fresh Steam — it tells an **already-running** Steam to
+start the game. The game therefore inherits **that Steam's environment**, not the environment of
+whatever launcher you just double-clicked.
+
+Consequence: launching `Sekiro.app` while a **Decanter-started Steam** is already open silently
+discards Sekiro.app's tuning — its `DXMT_CONFIG` (MetalFX 2x, `ignoreMapFlagNoWait`) and its
+`DXMT_SHADER_CACHE_PATH`. The game then runs on Decanter's bottle cache
+(`ShaderCache/Steam-Wine11`) instead of `ShaderCache/Sekiro`.
+
+Symptom: **~10 s freeze on load and stutter during play**, while a cold launch of the same build is
+smooth. Measured the same session: wrong-env run `wineserver` ~6-8 %; cold `Sekiro.app` launch
+**~3.2 % avg** (2.3-5.7 %) against a 39.9 % baseline.
+
+**Rule: quit Steam completely before launching a per-game app**, or start the game from that app
+rather than opening Steam separately. `BottleSettings.derivedEnvironment` now also emits
+`d3d11.ignoreMapFlagNoWait=True` so the two paths at least agree on DXMT config.
+
+**Also:** a shader cache is engine-specific. After an engine swap, an old cache forces a full
+recompile (long first-load freeze). Caches live in `~/Library/Application Support/Decanter/ShaderCache/`.
+
 ## 5. MetalFX — semantics people get wrong
 
 `DXMT_METALFX_SPATIAL_SWAPCHAIN=1` + `d3d11.metalSpatialUpscaleFactor=N` upscales
