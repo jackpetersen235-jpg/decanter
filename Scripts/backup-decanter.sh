@@ -77,6 +77,19 @@ prune() {  # $1 = glob prefix
 prune "Decanter-project"
 prune "Decanter-saves+config"
 
+# 4) Offsite: if this repo has a git 'origin' remote (e.g. a private GitHub repo), push the
+#    committed history too. The archives above already capture uncommitted work-in-progress;
+#    this keeps the offsite copy current. No-op / non-fatal if there's no remote or no network.
+if git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
+  if git -C "$REPO" push origin HEAD >/dev/null 2>&1; then
+    ok "pushed to origin ($(git -C "$REPO" remote get-url origin))"
+  else
+    echo "· could not push to origin (offline or auth not set up) — local + USB backups still done"
+  fi
+else
+  echo "· no git 'origin' remote yet — add one to also back up offsite to GitHub"
+fi
+
 echo
 ok "Backup complete → $DEST"
 df -h "$DEST_ROOT" | tail -1
