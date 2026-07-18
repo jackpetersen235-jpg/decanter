@@ -27,8 +27,13 @@ documents this; we found some from the *previous day* still alive). So:
 unix path (`…/winetemp-…/steam.exe`); the webhelper only ever has the Windows form `\steam.exe`.
 Verified against both real argv strings: real → still detected, webhelper → correctly ignored.
 
-**End-to-end verified:** launched Steam through Decanter's exact path/env into the real bottle —
-**logged on in ~8 seconds.** The launch mechanism and your bottle are both healthy.
+**End-to-end verified, twice:**
+1. Launched Steam through Decanter's exact path/env into the real bottle — logged on in ~8s.
+2. **GUI cold-launch test (the real proof):** tore Steam fully down (0 processes), clicked
+   **Launch Steam** in the rebuilt Decanter.app — Steam launched and logged on at 10:17:32.
+   Note the logon itself proves the UI is fine: Steam cannot complete login unless its internal
+   CEF UI websocket works, which is exactly what failed on CX24. (The Steam window doesn't appear
+   in screenshots because Wine windows belong to the `wine` process, which isn't screenshot-allowlisted.)
 
 ## Two more real bugs fixed
 
