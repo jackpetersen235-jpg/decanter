@@ -70,8 +70,14 @@ paths with spaces, repeated/leading/trailing whitespace, and empty string (no sp
    CrossOver-sourced engines (wine 8 *and* wine 9) fail Steam login — Steam's internal loopback UI
    websocket never ESTABLISHes (server LISTENs on `127.0.0.1:54327`, client connect never
    completes). Ruled out: msync itself (fails with fast-sync off), libraries, wrapper packaging,
-   prefix version, wine version. Untested hypothesis: IPv6 is broken on your network (162 IPv6-fail
-   lines) and Steam tries `::1` first. **CrossOver (~$74) remains the one guaranteed fix.**
+   prefix version, wine version. **IPv6 hypothesis now TESTED and DEAD (2026-07-18):** measured on
+   this Mac — `::1` is configured on `lo0` and a connect to a dead `::1` port is **refused in
+   0.000s**, so Steam would fall back to IPv4 instantly; it cannot be stalling there. Only
+   *external* IPv6 is broken (no default route), which is not the path the internal UI websocket
+   uses. **Do NOT bother disabling IPv6 — it would change nothing.** Since OS-level loopback
+   demonstrably works and the server genuinely LISTENs, the fault is inside the CrossOver-sourced
+   engine's socket layer (async connect completion never fires) — a wine bug, unreachable from any
+   macOS setting. **CrossOver (~$74) remains the one guaranteed fix.**
 3. **Per-game DXMT auto-install** is still the documented gap in the setup wizard (CLAUDE.md).
    Genuine missing feature, not a bug.
 
