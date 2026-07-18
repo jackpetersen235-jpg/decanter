@@ -10,9 +10,11 @@ enum Wine {
     private static var candidateBinDirectories: [(name: String, path: String)] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         // ORDER MATTERS: the first hit becomes the default for new bottles.
-        // WhiskyWine (wine 11) is first because it is the only free build that can complete a
-        // modern Steam login. The wine-7.7 builds below have msync but Steam's TLS has outgrown
-        // them, so they cannot launch Steam-DRM games. See docs/GAMING-STACK.md §2.
+        // The Decanter engine (upstream wine 11, frankea) is first because it runs Steam +
+        // DXMT standalone today — but it has NO msync, so thread-heavy games spike. A free
+        // CrossOver-sourced build (e.g. WS12WineCX24, wine 9) HAS msync but needs a proper
+        // wrapper for Steam networking; see docs/GAMING-STACK.md §2/§2b. Don't repeat the old
+        // "wine 7.7 is the only msync option" mistake — the axis is source tree, not version.
         return [
             // Decanter's own engine (installed by the setup wizard) — always preferred.
             ("Decanter Engine", Paths.wineEngineBin.path),
@@ -104,8 +106,9 @@ enum Wine {
         for (key, value) in bottle.settings.derivedEnvironment { env[key] = value }
 
         // …then strip fast-sync vars if this build can't honour them. Must come AFTER the
-        // settings merge above, which is what sets them. On wine 11 these are a silent no-op
-        // and only serve to mislead (see WineInstallation.supportsFastSync).
+        // settings merge above, which is what sets them. On a build without the msync feature
+        // (e.g. the current upstream-11 engine) these are a silent no-op and only mislead; on a
+        // CrossOver-sourced build they're consumed (see WineInstallation.supportsFastSync).
         if !installation.supportsFastSync {
             env.removeValue(forKey: "WINEMSYNC")
             env.removeValue(forKey: "WINEESYNC")

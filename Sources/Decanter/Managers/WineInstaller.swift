@@ -2,9 +2,12 @@ import Foundation
 
 /// Downloads and installs the Wine engine Decanter needs, with no user knowledge required.
 ///
-/// We install **WhiskyWine 11.0** specifically. That choice is not arbitrary — it is the only
-/// free build that can complete a modern Steam login *and* ship DXMT (DirectX → Metal).
-/// See docs/GAMING-STACK.md §2 before changing the URL.
+/// We install an **upstream wine 11.0** bundle (frankea/Whisky) because it runs Steam + DXMT
+/// standalone with zero glue. Its one downside: **no msync**, so thread-heavy games spike
+/// (GAMING-STACK.md §2/§3). It is NOT "the only free build that can log into Steam" — that older
+/// claim was wrong. A free CrossOver-sourced build (WS12WineCX24, wine 9) HAS msync but is not
+/// standalone-ready (needs a Sikarugir/Kegworks wrapper for Steam networking, §2b). Read §2
+/// before changing the URL.
 @MainActor
 final class WineInstaller: ObservableObject {
 

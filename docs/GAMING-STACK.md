@@ -19,43 +19,71 @@ Windows game (x86-64)
 **DXVK → DXMT was the single biggest win.** Sekiro was "extremely laggy" on DXVK; DXMT made it
 playable. DXVK drags in MoltenVK and an entire Vulkan emulation layer for no benefit here.
 
-## 2. ⚠️ The Wine build matrix — THE central constraint
+## 2. ⚠️ The Wine build matrix — the REAL constraint (corrected 2026-07-17)
 
-**No free Wine build has both things needed.** This is structural, not bad luck:
+**An earlier version of this doc said "no free build has both msync and modern Steam, it's
+structural." That is WRONG — and it was wrong because it varied the wrong axis.** It treated
+this as *wine version* (7.7 = msync, 11 = none). The axis that actually matters is the **source
+tree**:
 
-| Build | Version | Steam login (TLS) | msync/esync | Verdict |
-|---|---|---|---|---|
-| Mythic (GPTk) | 7.7 | ❌ too old for modern Steam | ✅ 59/77 hits in ntdll | can't launch Steam games |
-| Whisky 2.5 (CrossOver 22) | 7.7 | ❌ same | ✅ 27/28 hits | can't launch Steam games |
-| **WhiskyWine 11.0** | 11.0 | ✅ works | ❌ **none at all** | **current setup — spikes** |
-| Gcenx Wine Staging | 11.10 | ✅ downloads | ❌ none | Steam UI renders **black** |
-| CrossOver (paid) | 7.7+patched | ✅ | ✅ | **only build with both** |
+- **Upstream** wine (any version, 7.x→11) — **never had msync.** msync is a CodeWeavers/CrossOver
+  patch that was never upstreamed; upstream's replacement (`ntsync`) needs a Linux kernel driver.
+- **CrossOver-sourced** wine — **has msync, at modern versions too** (CrossOver 24 = wine 9,
+  CrossOver 25 = wine 10). Not tied to being old.
 
-**Why:** `msync` is a **CodeWeavers patch** existing only in wine-7.7-era CrossOver forks.
-Upstream wine 11 replaced it with `ntsync`, which **requires a Linux kernel driver** — so
-**wine 11 on macOS has no fast sync whatsoever**. Meanwhile Steam's client TLS has moved past
-what wine 7.7 can speak. The free builds are frozen on opposite sides of that split.
+| Build | Source | Version | msync | Steam login | Notes |
+|---|---|---|---|---|---|
+| Mythic (GPTk) | CrossOver | 7.7 | ✅ (`WINEMSYNC` in ntdll) | ❌ too old | good sync, can't launch Steam |
+| **frankea "WhiskyWine 11"** | **upstream** | 11.0 | ❌ **none** | ✅ | **current engine — spikes** |
+| Gcenx Wine Staging | upstream | 11.10 | ❌ none | ✅ | Steam UI black (GLES) |
+| **`WS12WineCX24.0.7`** (free) | **CrossOver 24** | **9.0** | ✅ **PROVEN ACTIVE** | ⚠️ see below | free, from Sikarugir/Kegworks `Engines` |
+| CrossOver (paid) | CrossOver | 9/10 | ✅ | ✅ | full wrapper — just works |
 
-Verify sync support before trusting any `WINEMSYNC=1`:
+**What was actually proven (measured on this M5 Air, 2026-07-17):** the FREE `WS12WineCX24.0.7`
+(wine 9.0) has msync and it **activates** — booted a prefix with `WINEMSYNC=1` and got
+`msync: up and running` + shared-memory sync traces. So "no free build has msync" is **false**.
+
+**The real remaining blocker is PACKAGING, not the engine.** The Kegworks/Sikarugir CX engines
+are built to run *inside their wrapper app*, which supplies a support environment. Extracted bare
+into Decanter's layout, the engine needs backfilled dylibs (`libinotify`, then the full 94-lib
+set: gnutls/freetype/MoltenVK/… — all copyable from the frankea bundle) — and *even then*
+**Steam's CM login won't complete**: the connectivity test (TCP:80) passes but the client never
+opens the CM connection (sockets close immediately, `WSAEOPNOTSUPP`). Inside a proper
+Kegworks/Sikarugir wrapper (or CrossOver) that networking works. See §2b.
+
+Verify msync support of any build (the feature, not the POSIX `_msync` syscall symbol):
 ```bash
-strings <wine>/lib/wine/x86_64-unix/ntdll.so | grep -ic msync   # 0 = NOT supported
+# raw byte scan — `strings` misses the symbol table, so it can false-NEGATIVE; grep -a does not
+grep -ac WINEMSYNC <wine>/lib/wine/x86_64-unix/ntdll.so   # >0 = feature present
 ```
-> We exported `WINEMSYNC=1` for hours on wine 11 where it **did nothing**. Assumption, not measured.
+> We once exported `WINEMSYNC=1` for hours on the upstream-11 engine where it did nothing (no
+> feature to read it). On CX24 the same flag is consumed — `msync: up and running`.
+
+## 2b. The free msync path — status & how to finish it
+
+`WS12WineCX24.0.7` is installed at `~/Library/Application Support/Decanter/Engines/WS12WineCX24`
+(msync active; support dylibs backfilled). Remaining work to make Sekiro actually run on it for
+free = give it the **wrapper's networking environment**. The clean way is to run the engine
+inside a real Sikarugir/Kegworks wrapper rather than bare (see `Sikarugir-App/Wrapper`). A
+Decanter *copy* that drives games through such a wrapper is the in-progress plan. Until then, the
+guaranteed fix is **CrossOver** (same wine + complete wrapper) — now a sure thing, not a gamble.
 
 ## 3. The frame spikes — diagnosed, not fixed
 
-**Cause:** wine 11 has no fast sync, so Sekiro's **103 threads** round-trip every mutex/event
-through `wineserver` over IPC.
+**Cause:** the current (upstream wine 11) engine has no fast sync, so Sekiro's **103 threads**
+round-trip every mutex/event through `wineserver` over IPC.
 
 **Evidence (measured):**
 
 | | wineserver CPU |
 |---|---|
-| WhiskyWine 11 (no msync) | **39.9 %** |
+| upstream wine 11 (no msync) | **39.9 %** |
 | Mythic/Whisky2.5 + `WINEMSYNC=1` | **0.1 %** |
 
-That ~400× drop proves the mechanism. But msync only exists on wine 7.7, which can't log Steam
-in → can't launch a Steam-DRM game. **Dead end without CrossOver.**
+That ~400× drop proves the mechanism. **Correction (2026-07-17):** msync is NOT limited to wine
+7.7 — the free CrossOver-24-sourced `WS12WineCX24` (wine **9.0**) has msync and it activates (see
+§2). So the fix is a real, free-in-principle engine swap, blocked only by standalone Steam
+networking (§2b) — not "dead end without CrossOver."
 
 Also measured: `GPU 3.04 ms` vs `Frame Interval 19.72 ms` → **the GPU is idle ~84 % of each
 frame**. Graphics settings are NOT the bottleneck. Lowering quality won't fix the spikes; it's
@@ -165,12 +193,17 @@ still can't produce the fullscreen state. Kept because it costs nothing.
 
 ## 9. Honest bottom line
 
-The current free setup is **playable with periodic spikes**. The only known fix is **CrossOver**
-(~$74) — the sole build with msync *and* current TLS. That is exactly why the expired CrossOver
-trial ran Sekiro smoothly and nothing free since has.
+The current free setup is **playable with periodic spikes**. Two fixes exist, and **both are now
+proven to be about msync, which is available free** (§2 corrected the old "only CrossOver has it"
+claim):
 
-If the Whisky fork ever ports msync/ntsync to its wine 11 build, this resolves itself — re-check
-with the `strings ... | grep -ic msync` test above.
+1. **CrossOver (~$74)** — the same CrossOver wine + a complete wrapper. Guaranteed to fix the
+   spikes; that's why the trial ran Sekiro smoothly. The sure thing.
+2. **Free path (in progress)** — the free `WS12WineCX24` (wine 9) has msync active; it just needs
+   to run inside a proper Sikarugir/Kegworks wrapper for Steam networking (§2b). A Decanter *copy*
+   built around that wrapper is the tracked plan.
+
+Re-check any candidate build with `grep -ac WINEMSYNC <wine>/lib/wine/x86_64-unix/ntdll.so`.
 
 ---
 

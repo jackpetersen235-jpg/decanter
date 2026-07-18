@@ -66,8 +66,12 @@ Data at runtime: `~/Library/Application Support/Decanter/`
 - Shareable build: `~/Desktop/Decanter-for-friend.zip` (2.1 MB — the engine self-downloads).
 
 ### Still open
-- Frame spikes in thread-heavy games are **unfixed and unfixable for free** — wine 11 has no
-  msync. See GAMING-STACK.md §2/§3. Only CrossOver has both msync and modern Steam TLS.
+- Frame spikes in thread-heavy games: **fixable, not "unfixable for free"** (old claim corrected
+  2026-07-17). The current upstream-wine-11 engine has no msync; the FREE CrossOver-24-sourced
+  `WS12WineCX24` (wine 9) **does**, and it activates (proven). Remaining blocker is standalone
+  Steam networking — the free engine wants a Sikarugir/Kegworks *wrapper*. See GAMING-STACK.md
+  §2/§2b/§3. In progress: a Decanter copy that drives games through such a wrapper. CrossOver
+  (~$74) is the guaranteed shortcut.
 - `Steam-Mythic` prefix + the CrossOver bottle (~3.2 GB total) are leftovers, safe to delete.
 
 ## First-run automation (SetupWizard) — how it works

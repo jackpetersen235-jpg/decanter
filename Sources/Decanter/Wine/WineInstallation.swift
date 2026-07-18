@@ -42,9 +42,12 @@ struct WineInstallation: Codable, Equatable, Identifiable, Hashable {
     /// 0.1% with msync** — which surfaces as frame spikes in thread-heavy games (Sekiro runs
     /// ~103 threads). `WINEMSYNC=1` is silently ignored by builds that lack it.
     ///
-    /// msync is a CodeWeavers patch, so it exists only in wine-7.7-era CrossOver forks.
-    /// Upstream wine 11 replaced it with `ntsync`, which needs a **Linux kernel driver** —
-    /// so wine 11 on macOS has no fast sync at all. See docs/GAMING-STACK.md §2.
+    /// msync is a CodeWeavers/CrossOver source patch — it depends on the **source tree, not the
+    /// wine version**. Upstream wine (any version, incl. the 11.0 we currently ship from
+    /// frankea/Whisky) never had it; CrossOver-sourced builds have it at modern versions too.
+    /// Verified 2026-07-17: the free `WS12WineCX24.0.7` (CrossOver 24 = wine 9.0) has msync and it
+    /// activates. So this being false is a property of the *current* engine, not of "wine 11."
+    /// See docs/GAMING-STACK.md §2.
     var supportsFastSync: Bool = false
 
     /// Cheap probe for the msync/esync *feature* in the build's unix-side ntdll.
