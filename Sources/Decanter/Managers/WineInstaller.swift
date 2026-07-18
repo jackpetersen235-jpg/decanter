@@ -29,10 +29,26 @@ final class WineInstaller: ObservableObject {
 
     @Published var phase: Phase = .idle
 
-    /// WhiskyWine 11.0 — Wine 11 + DXVK + DXMT, ~317 MB.
+    /// Base bundle: Wine 11 + DXVK + DXMT + the ~94 support dylibs (gnutls/freetype/MoltenVK/…),
+    /// ~317 MB. We keep using this for everything EXCEPT the wine binaries themselves, because it
+    /// is the only bundle that ships a complete, self-contained macOS support environment.
     static let releaseURL = URL(string:
         "https://github.com/frankea/Whisky/releases/download/v3.1.1/Libraries.tar.gz")!
     static let approximateBytes: Int64 = 317_000_000
+
+    /// Overlay: **upstream wine 10.0 with msync** (free, from the Sikarugir/Kegworks engine
+    /// mirror; 0 CrossOver markers). Verified 2026-07-18 on an M5 Air: msync activates, Steam
+    /// logs in, DXMT renders, and `wineserver` under Sekiro drops from **39.9% → ~7.9% avg**.
+    ///
+    /// Why an overlay instead of just switching the URL: this tarball is *only* the wine tree —
+    /// no support dylibs, no DXMT/DXVK, and its `winemetal` is a 36 KB stub with no unix-side
+    /// `winemetal.so`, so DXMT cannot load on it alone. `installMsyncEngine()` grafts the base
+    /// bundle's `winemetal.so` + DXMT's real `winemetal.dll` back on top.
+    ///
+    /// NOTE: that graft runs a wine-11 unixlib inside a wine-10 engine. It works, but it is an
+    /// unsupported ABI mix — if graphics misbehave, this is the first thing to suspect.
+    static let msyncEngineURL = URL(string:
+        "https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS11Wine10.0_3.tar.xz")!
 
     /// Decanter-owned install location (see Paths.wineEngine*), so we never depend on
     /// Whisky/Mythic/CrossOver being installed. Non-isolated: Wine.discover reads these.
@@ -47,15 +63,33 @@ final class WineInstaller: ObservableObject {
 
     // MARK: Install
 
+    /// Process-wide guard. Must be `static`: `AppModel.installEngine()` constructs a NEW
+    /// `WineInstaller` per call, so an instance-level check (`phase.isBusy`) would always be
+    /// false and guard nothing.
+    private static var isInstalling = false
+
     func install() async {
+        // `install()` deletes and re-extracts the engine directory, so two overlapping runs race
+        // on the same paths and can leave a half-written, unusable engine. Reachable in practice:
+        // the wizard button, the menu item and `--install-engine` all reach here, and a ~480 MB
+        // download leaves a wide window. (Hit while testing — two installs extracted over each
+        // other.) NOTE: this guards one process only; two app launches installing at once would
+        // still collide, which would need an on-disk lock.
+        guard !Self.isInstalling else { return }
+        Self.isInstalling = true
+        defer { Self.isInstalling = false }
         do {
             Paths.ensureDirectories()
             let tarball = try await download()
             phase = .extracting
             try await extract(tarball)
+            try? FileManager.default.removeItem(at: tarball)   // reclaim ~317 MB
+            // Swap the wine tree for upstream-wine-10-with-msync (keeps DXMT/DXVK + support libs).
+            // Non-fatal: if this fails we still have a working wine 11 engine, just with the
+            // frame spikes. A broken-but-present engine would be worse than a slower one.
+            try? await installMsyncEngine()
             phase = .verifying
             let version = try await verify()
-            try? FileManager.default.removeItem(at: tarball)   // reclaim ~317 MB
             phase = .done(version: version)
         } catch {
             // Remove a half-extracted engine so a retry re-downloads cleanly instead of finding a
@@ -104,6 +138,82 @@ final class WineInstaller: ObservableObject {
             for b in bins {
                 try? FileManager.default.setAttributes([.posixPermissions: 0o755],
                                                        ofItemAtPath: Self.binDirectory.appendingPathComponent(b).path)
+            }
+        }
+    }
+
+    /// Overlay upstream-wine-10-with-msync onto the extracted base bundle.
+    ///
+    /// Layout differs between the two: the overlay is `wswine.bundle/{bin,lib,share}` while our
+    /// engine lives at `Libraries/Wine/{bin,lib,share}`. Only `bin`, `lib/wine` and `share` are
+    /// taken from the overlay — `lib/*.dylib` (gnutls, freetype, MoltenVK, …) must survive, since
+    /// the overlay ships none of them and wine would not run without them.
+    ///
+    /// Two files are then grafted back so DXMT still works: the base bundle's unix-side
+    /// `winemetal.so` (the overlay has no equivalent) and DXMT's real `winemetal.dll` (the overlay
+    /// ships a 36 KB stub). See `msyncEngineURL` for the ABI caveat.
+    private func installMsyncEngine() async throws {
+        let fm = FileManager.default
+        let wineRoot = Self.librariesRoot.appendingPathComponent("Wine", isDirectory: true)
+        let unixDir = wineRoot.appendingPathComponent("lib/wine/x86_64-unix", isDirectory: true)
+        let winemetalSO = unixDir.appendingPathComponent("winemetal.so")
+        let dxmtDLL = Self.librariesRoot.appendingPathComponent("DXMT/x64/winemetal.dll")
+
+        // If the base bundle isn't shaped as expected, leave the working wine 11 engine alone.
+        guard fm.fileExists(atPath: winemetalSO.path) else { return }
+
+        phase = .downloading(0)
+        let progress = DownloadProgress { [weak self] fraction in
+            Task { @MainActor in self?.phase = .downloading(fraction) }
+        }
+        let (tempURL, response) = try await URLSession.shared.download(from: Self.msyncEngineURL,
+                                                                       delegate: progress)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw InstallError.step("msync engine download failed (HTTP \(http.statusCode)).")
+        }
+        phase = .extracting
+        let work = Paths.downloads.appendingPathComponent("msync-engine", isDirectory: true)
+        try? fm.removeItem(at: work)
+        try fm.createDirectory(at: work, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: work); try? fm.removeItem(at: tempURL) }
+
+        let untar = try await Shell.run(URL(fileURLWithPath: "/usr/bin/tar"),
+                                        arguments: ["-xJf", tempURL.path, "-C", work.path])
+        guard untar.succeeded else { throw InstallError.step("Could not unpack the msync engine.") }
+
+        let bundle = work.appendingPathComponent("wswine.bundle", isDirectory: true)
+        guard fm.isExecutableFile(atPath: bundle.appendingPathComponent("bin/wine").path) else {
+            throw InstallError.step("msync engine layout unexpected.")
+        }
+
+        // Stash the DXMT unix backend, swap the wine tree, then graft it back.
+        let stash = work.appendingPathComponent("winemetal.so")
+        try? fm.removeItem(at: stash)
+        try fm.copyItem(at: winemetalSO, to: stash)
+
+        for part in ["bin", "share", "lib/wine"] {
+            let dst = wineRoot.appendingPathComponent(part)
+            let src = bundle.appendingPathComponent(part)
+            guard fm.fileExists(atPath: src.path) else { continue }
+            try? fm.removeItem(at: dst)
+            try fm.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fm.copyItem(at: src, to: dst)
+        }
+        try? fm.createDirectory(at: unixDir, withIntermediateDirectories: true)
+        try? fm.removeItem(at: winemetalSO)
+        try fm.copyItem(at: stash, to: winemetalSO)
+        if fm.fileExists(atPath: dxmtDLL.path) {
+            let pe = wineRoot.appendingPathComponent("lib/wine/x86_64-windows/winemetal.dll")
+            try? fm.removeItem(at: pe)
+            try? fm.copyItem(at: dxmtDLL, to: pe)
+        }
+
+        _ = try? await Shell.run(URL(fileURLWithPath: "/usr/bin/xattr"),
+                                 arguments: ["-dr", "com.apple.quarantine", Self.installRoot.path])
+        if let bins = try? fm.contentsOfDirectory(atPath: Self.binDirectory.path) {
+            for b in bins {
+                try? fm.setAttributes([.posixPermissions: 0o755],
+                                      ofItemAtPath: Self.binDirectory.appendingPathComponent(b).path)
             }
         }
     }

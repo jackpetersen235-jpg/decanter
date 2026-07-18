@@ -34,7 +34,8 @@ tree**:
 | Build | Source | Version | msync | Steam login | Notes |
 |---|---|---|---|---|---|
 | Mythic (GPTk) | CrossOver | 7.7 | ✅ (`WINEMSYNC` in ntdll) | ❌ too old | good sync, can't launch Steam |
-| **frankea "WhiskyWine 11"** | **upstream** | 11.0 | ❌ **none** | ✅ | **current engine — spikes** |
+| frankea "WhiskyWine 11" | upstream | 11.0 | ❌ none | ✅ | base bundle (DXMT/DXVK + 94 dylibs); spikes |
+| **`WS11Wine10.0_3`** (free) | **upstream** | **10.0** | ✅ **msync** | ✅ | **CURRENT ENGINE — spikes fixed** |
 | Gcenx Wine Staging | upstream | 11.10 | ❌ none | ✅ | Steam UI black (GLES) |
 | **`WS12WineCX24.0.7`** (free) | **CrossOver 24** | **9.0** | ✅ **PROVEN ACTIVE** | ⚠️ see below | free, from Sikarugir/Kegworks `Engines` |
 | CrossOver (paid) | CrossOver | 9/10 | ✅ | ✅ | full wrapper — just works |

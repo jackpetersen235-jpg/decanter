@@ -127,8 +127,14 @@ Everything else is bulk that can be rebuilt.
 ## Exact re-download URLs (if a Wine build is lost)
 
 ```
-WhiskyWine 11.0  (IN USE — DXVK + DXMT included)
+Base bundle  (IN USE — DXVK + DXMT + 94 support dylibs; wine binaries get replaced, see below)
   https://github.com/frankea/Whisky/releases/download/v3.1.1/Libraries.tar.gz     (317 MB)
+
+Engine overlay: upstream wine 10.0 WITH msync  (IN USE — this is what fixes the frame spikes)
+  https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS11Wine10.0_3.tar.xz  (160 MB)
+  → replaces Libraries/Wine/{bin,lib/wine,share}; KEEP Libraries/Wine/lib/*.dylib
+  → graft back: base bundle's lib/wine/x86_64-unix/winemetal.so + DXMT/x64/winemetal.dll (73478)
+     (the overlay ships no winemetal.so and only a 36 KB stub .dll, so DXMT can't load without this)
   → extract to ~/Library/Application Support/com.isaacmarovitz.Whisky/Libraries/
   → xattr -dr com.apple.quarantine <that dir>   &&   chmod +x .../Wine/bin/*
 

@@ -54,24 +54,30 @@ Data at runtime: `~/Library/Application Support/Decanter/`
 
 ---
 
-## Current state (2026-07-17)
+## Current state (2026-07-18)
 
 - **First run is fully automated.** `SetupWizard` + `WineInstaller` download and configure
   everything (Rosetta → engine → bottle → Steam) with one button. No terminal, no Wine knowledge.
   Re-openable any time via **View → Setup Assistant…**.
-- **Decanter owns its engine**: `~/Library/Application Support/Decanter/Wine/` (WhiskyWine 11.0,
-  installed by the wizard). No dependency on Whisky/Mythic/CrossOver being present.
+- **Decanter owns its engine**: `~/Library/Application Support/Decanter/Wine/` — a base bundle
+  (DXMT/DXVK + 94 support dylibs) with **upstream wine 10 + msync** overlaid on top, installed by
+  the wizard. No dependency on Whisky/Mythic/CrossOver being present.
   `Paths.wineEngine*` — first in discovery order, so it's the default.
-- Bottles are synced to reality: **WhiskyWine 11 + DXMT + MetalFX 2x**, prefix `Steam-Wine11`.
+- Bottles are synced to reality: **wine 10 + msync + DXMT + MetalFX 2x**, prefix `Steam-Wine11`,
+  `syncMode: msync`.
 - Shareable build: `~/Desktop/Decanter-for-friend.zip` (2.1 MB — the engine self-downloads).
 
+### Recently FIXED
+- **Frame spikes — SOLVED for free (2026-07-18).** Every earlier claim that this needed CrossOver
+  was wrong. Cause of the free-path failure was **CrossOver's own patches** (they break Steam's
+  internal loopback UI websocket), not the wine version or msync. The engine now shipped is
+  **upstream wine 10.0 with msync** (`WS11Wine10.0_3`, free) overlaid on the base bundle.
+  Measured under real gameplay: `wineserver` **39.9% → ~7.9% avg** (median 6.3%, only 2.8% of
+  samples >20%). See GAMING-STACK.md §2/§2b and docs/OVERNIGHT-FINDINGS.md.
+  ⚠️ The DXMT `winemetal.so` graft is a wine-11 unixlib inside a wine-10 engine — unsupported ABI
+  mix; suspect it first if graphics get unstable. Fallback: `Backups/wine11-20260718-121514/`.
+
 ### Still open
-- Frame spikes in thread-heavy games: **fixable, not "unfixable for free"** (old claim corrected
-  2026-07-17). The current upstream-wine-11 engine has no msync; the FREE CrossOver-24-sourced
-  `WS12WineCX24` (wine 9) **does**, and it activates (proven). Remaining blocker is standalone
-  Steam networking — the free engine wants a Sikarugir/Kegworks *wrapper*. See GAMING-STACK.md
-  §2/§2b/§3. In progress: a Decanter copy that drives games through such a wrapper. CrossOver
-  (~$74) is the guaranteed shortcut.
 - `Steam-Mythic` prefix + the CrossOver bottle (~3.2 GB total) are leftovers, safe to delete.
 
 ## First-run automation (SetupWizard) — how it works
@@ -81,7 +87,8 @@ A newcomer with **no Wine and no Rosetta** can press one button and end up at St
 
 - `AppModel.runGuidedSetup()` — the whole flow, factored OUT of the view so it survives view
   lifecycle and is testable headlessly. Steps: `ensureRosetta()` → `installEngine()` (downloads
-  **WhiskyWine 11** via `WineInstaller`, ~317 MB, to `~/Library/Application Support/Decanter/Wine/`)
+  the base bundle ~317 MB **then overlays upstream wine 10 + msync** ~160 MB, via `WineInstaller`,
+  into `~/Library/Application Support/Decanter/Wine/`)
   → `createBottleForSetup()` (quiet, no console) → `performSteamInstall(console:nil)`.
 - Headless test hooks: `Decanter --install-engine` and `Decanter --run-setup`. Both verified
   end-to-end on 2026-07-17 (engine downloads at ~2 MB/s; bottle + Steam auto-created).
@@ -119,7 +126,8 @@ Strips quarantine + AppleDouble clutter, re-signs ad-hoc, writes a plain-languag
   `_msync()` *syscall symbol* in its symbol table, so a raw-byte scan for `msync` false-positives
   on wine 11 (which has no msync *feature*) → new bottles wrongly got `sync=msync`. `strings` hides
   this (it skips the symbol table); a `Data.range(of:)` scan does not. Fixed to search `WINEMSYNC`
-  /`WINEESYNC` (the env vars only the feature reads). Verified: WhiskyWine 11 → false, Mythic → true.
+  /`WINEESYNC` (the env vars only the feature reads). Verified: upstream wine 11 → false;
+  wine 10 + msync (current engine) and Mythic → true.
 - **Steam adds a macOS menu-bar (top-right) icon** via Wine's `explorer.exe`, which bridges the
   Windows systray to an `NSStatusItem`. To remove it: `pkill -f explorer.exe` after launch.
   Verified: explorer does NOT respawn, and Steam keeps working without it (windows are managed by

@@ -9,9 +9,9 @@ This is the fast path. Follow it top to bottom; each step says how to verify it 
    in the shared zip.
 2. **Never delete a user's bottle prefix, `bottles.json`, or a game save** without backing it up
    first (`cp -Rc` is an instant APFS clone). Prefixes hold 10–100 GB of games and irreplaceable saves.
-3. **Don't re-litigate the Wine choice.** Decanter uses **WhiskyWine 11** on purpose — it's the only
-   free build that can log into modern Steam *and* ship DXMT. See `docs/GAMING-STACK.md §2` before
-   even thinking about swapping it.
+3. **Don't re-litigate the Wine choice.** Decanter installs a base bundle (DXMT/DXVK + support
+   dylibs) and then overlays **upstream wine 10 + msync** on top — the combination that has fast
+   thread-sync *and* logs into modern Steam. See `docs/GAMING-STACK.md §2` before swapping it.
 
 ---
 
@@ -20,7 +20,7 @@ This is the fast path. Follow it top to bottom; each step says how to verify it 
 | # | Thing | How the app gets it | Verify |
 |---|---|---|---|
 | 1 | **Rosetta 2** | `softwareupdate --install-rosetta --agree-to-license` (no admin needed on macOS 26) | `ls /Library/Apple/usr/libexec/oah/libRosettaRuntime` |
-| 2 | **Wine engine** | Downloads WhiskyWine 11 (~317 MB) to `~/Library/Application Support/Decanter/Wine/` | `"~/Library/Application Support/Decanter/Wine/Libraries/Wine/bin/wine" --version` → `wine-11.0` |
+| 2 | **Wine engine** | Downloads the base bundle (~317 MB) then overlays upstream wine 10 + msync (~160 MB) into `~/Library/Application Support/Decanter/Wine/` | `"~/Library/Application Support/Decanter/Wine/Libraries/Wine/bin/wine" --version` → `wine-10.0`, and `grep -ac WINEMSYNC .../lib/wine/x86_64-unix/ntdll.so` > 0 |
 | 3 | **A bottle** | `wineboot` a fresh prefix under `.../Decanter/Bottles/<name>` | `bottles.json` lists it, `isInitialized: true` |
 | 4 | **Steam** | Silently installs `SteamSetup.exe` into the bottle | `steam.exe` exists in the bottle's `drive_c/Program Files (x86)/Steam/` |
 
@@ -107,8 +107,12 @@ Reference implementation: `Scripts/sekiro/sekiro-metalfx.sh`.
 Kernel anti-cheat (Valorant, most competitive shooters). No Mac tool can run these. Not fixable.
 
 **Frame spikes even after DXMT.**
-Known and structural: WhiskyWine 11 has no fast thread-sync (msync). The only build with both Steam
-login *and* msync is CrossOver (paid). Full analysis in GAMING-STACK.md §2–3. Don't chase it with flags.
+FIXED as of 2026-07-18 — and the old "only CrossOver has msync" claim was **wrong**. The engine now
+installed is upstream **wine 10 with msync**, which has fast thread-sync *and* logs into Steam.
+Measured on an M5 Air: `wineserver` under Sekiro dropped **39.9% → ~7.9% avg**. If you still see
+spikes, first check msync is actually live:
+`grep -ac WINEMSYNC "…/Decanter/Wine/Libraries/Wine/lib/wine/x86_64-unix/ntdll.so"` (want > 0) and
+that the bottle's `syncMode` is `msync`. Full analysis in GAMING-STACK.md §2/§2b.
 
 ---
 

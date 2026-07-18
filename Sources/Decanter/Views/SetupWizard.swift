@@ -27,7 +27,7 @@ struct SetupWizard: View {
         var blurb: String {
             switch self {
             case .rosetta: return "Lets your Mac understand software written for Intel chips. Made by Apple, already on most Macs."
-            case .engine:  return "Translates Windows games so they run on macOS. About 317 MB — Decanter downloads and sets it up for you."
+            case .engine:  return "Translates Windows games so they run on macOS. About 480 MB in two parts — Decanter downloads and sets it up for you, including the fast-sync build that avoids stutter."
             case .bottle:  return "A private Windows environment for your games. Nothing leaks into the rest of your Mac."
             case .steam:   return "The Steam app itself, installed inside that environment."
             }

@@ -122,17 +122,42 @@ final class AppModel: ObservableObject {
         Task { await enrichVersions() }
     }
 
+    /// Fill in version labels in the background.
+    ///
+    /// Must re-find each installation by id after every `await` instead of writing back a snapshot:
+    /// each `wine --version` shells out, and a `rescanInstallations()` (or an added directory) can
+    /// land in that window. Assigning a stale snapshot back over `installations` silently discarded
+    /// those changes.
     private func enrichVersions() async {
-        var updated = installations
-        for index in updated.indices where updated[index].version == nil {
-            updated[index].version = await Wine.version(of: updated[index])
+        for installation in installations where installation.version == nil {
+            let version = await Wine.version(of: installation)
+            guard let index = installations.firstIndex(where: { $0.id == installation.id }),
+                  installations[index].version == nil else { continue }
+            installations[index].version = version
         }
-        installations = updated
     }
 
     func addWineDirectory(_ url: URL) {
-        // Accept either a `bin` directory or a `wine` binary the user picked.
-        let dir = url.lastPathComponent == "bin" ? url : url.deletingLastPathComponent()
+        // Accept any of the three things a user plausibly picks:
+        //   1. the `bin` directory itself
+        //   2. the `wine` binary inside it
+        //   3. an engine ROOT that contains `bin/wine` (e.g. …/Wine10-msync, …/wswine.bundle)
+        // Case 3 used to silently resolve to the engine's PARENT directory, which never validates.
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        let exists = fm.fileExists(atPath: url.path, isDirectory: &isDirectory)
+        let dir: URL
+        if exists, isDirectory.boolValue {
+            if url.lastPathComponent == "bin" {
+                dir = url
+            } else if fm.isExecutableFile(atPath: url.appendingPathComponent("bin/wine").path) {
+                dir = url.appendingPathComponent("bin")
+            } else {
+                dir = url            // let WineInstallation.isValid reject it
+            }
+        } else {
+            dir = url.deletingLastPathComponent()   // a binary was picked
+        }
         guard !extraWineDirectories.contains(dir) else { return }
         extraWineDirectories.append(dir)
         rescanInstallations()
@@ -215,9 +240,21 @@ final class AppModel: ObservableObject {
         bottles.removeAll { $0.id == bottle.id }
         if selectedBottleID == bottle.id { selectedBottleID = bottles.first?.id }
         saveBottles()
-        if removeFiles {
-            try? FileManager.default.removeItem(at: bottle.url)
-        }
+        guard removeFiles else { return }
+
+        // Only ever delete a prefix Decanter itself created, and only when no remaining bottle
+        // still points at it. Both guards matter:
+        //  * Imported CrossOver bottles live OUTSIDE Decanter (~/Library/Application Support/
+        //    CrossOver/Bottles). Deleting there would destroy the user's CrossOver install.
+        //  * `importCrossOverBottles` registers SEVERAL bottles against the SAME prefix (a base
+        //    one plus one per installed game), so removing a single game bottle must not take the
+        //    shared prefix — and its siblings — with it.
+        let ourRoot = Paths.bottlesRoot.standardizedFileURL.path
+        let target = bottle.url.standardizedFileURL.path
+        let isOurs = target.hasPrefix(ourRoot + "/")
+        let stillReferenced = bottles.contains { $0.url.standardizedFileURL == bottle.url.standardizedFileURL }
+        guard isOurs, !stillReferenced else { return }
+        try? FileManager.default.removeItem(at: bottle.url)
     }
 
     func update(_ bottle: Bottle) {
@@ -384,7 +421,8 @@ final class AppModel: ObservableObject {
     /// Used by the setup wizard and by `--install-engine`.
     func installEngine() async {
         let console = openConsole(title: "Installing the Windows engine")
-        console.append("Downloading WhiskyWine 11.0 (~317 MB)…")
+        console.append("Downloading the Windows engine (~317 MB)…")
+        console.append("Then upgrading it to the msync build (faster; removes frame spikes)…")
         let installer = WineInstaller()
         var lastReported = -1
         let ticker = Task { @MainActor in
@@ -537,17 +575,10 @@ final class AppModel: ObservableObject {
                               onOutput: { _ in }, onExit: { _ in })
     }
 
-    /// Remove the macOS menu-bar tray icon Wine creates for Steam.
+    /// Remove Steam's macOS menu-bar (systray) icon by killing Wine's `explorer.exe`.
     ///
     /// Wine's `explorer.exe` bridges a Windows systray icon to an `NSStatusItem` in the menu bar.
     /// Killing explorer drops it; explorer does not respawn and Steam keeps running fine (verified).
-    ///
-    /// IMPORTANT: wait before the first kill. A game may run in a per-app Wine *virtual desktop*
-    /// for fullscreen (that desktop is itself an `explorer.exe`); killing it before the game's
-    /// window exists would prevent fullscreen. By the time we start (~15s) the window is up, so
-    /// killing explorer only drops the unneeded systray bridge — the game window survives (owned
-    /// by winemac.drv, not explorer). Verified with Sekiro's fullscreen setup.
-    /// Remove Steam's macOS menu-bar (systray) icon by killing Wine's `explorer.exe`.
     ///
     /// NOT done for game-launcher bottles. On those, `explorer.exe` is also the per-app virtual
     /// desktop that produces the borderless-fullscreen window, and GAMING-STACK.md §7 is explicit
