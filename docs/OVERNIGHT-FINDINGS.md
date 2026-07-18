@@ -78,6 +78,25 @@ paths with spaces, repeated/leading/trailing whitespace, and empty string (no sp
    demonstrably works and the server genuinely LISTENs, the fault is inside the CrossOver-sourced
    engine's socket layer (async connect completion never fires) — a wine bug, unreachable from any
    macOS setting. **CrossOver (~$74) remains the one guaranteed fix.**
+### Correction + rigorous retest (2026-07-18, later)
+
+Two of my earlier supporting arguments were **wrong**, found by finally running the control:
+
+- The CEF errors I cited (`WSALookupServiceBegin failed`, `WSAEOPNOTSUPP 10045`) are **noise**.
+  The engine that WORKS logs *more* of them (422 vs 241, and 115 vs 81). They prove nothing.
+- One CX run was **confounded**: a second Steam client (from the good engine) was still running,
+  and Steam allows only one client per machine. Also, your IPv6 came up during the session
+  (external IPv6 now SUCCEEDS, where this morning there was no route at all).
+
+**Clean retest under proper conditions** — CX engine alone (0 steam.exe / 0 webhelper /
+0 wineserver beforehand), single instance, IPv6 functional: **still no logon after 180s, and 0
+ESTABLISHED loopback connections.** The UI websocket never connects.
+
+So the conclusion is unchanged but now properly evidenced: the failure is real, reproducible, and
+independent of IPv6, instance count, msync, libraries, packaging, prefix version and wine version.
+The one differentiator that holds is that `steam.exe` LISTENs on 127.0.0.1 and nothing ever
+connects, only on CrossOver-sourced engines. That is inside the engine binary.
+
 3. **Per-game DXMT auto-install** is still the documented gap in the setup wizard (CLAUDE.md).
    Genuine missing feature, not a bug.
 
