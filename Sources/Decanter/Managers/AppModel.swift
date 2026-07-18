@@ -495,7 +495,7 @@ final class AppModel: ObservableObject {
             // Quiet: no console sheet pops over Decanter (which made the first click look like a
             // no-op). Steam just opens on its own.
             launchQuietly(bottle: bottle, arguments: args)
-            suppressWineSystray()
+            suppressWineSystray(isGameLauncher: isGameLauncher)
             Task {
                 // Hold the guard while Steam comes up, then let isSteamRunning take over.
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
@@ -547,7 +547,21 @@ final class AppModel: ObservableObject {
     /// window exists would prevent fullscreen. By the time we start (~15s) the window is up, so
     /// killing explorer only drops the unneeded systray bridge — the game window survives (owned
     /// by winemac.drv, not explorer). Verified with Sekiro's fullscreen setup.
-    private func suppressWineSystray() {
+    /// Remove Steam's macOS menu-bar (systray) icon by killing Wine's `explorer.exe`.
+    ///
+    /// NOT done for game-launcher bottles. On those, `explorer.exe` is also the per-app virtual
+    /// desktop that produces the borderless-fullscreen window, and GAMING-STACK.md §7 is explicit
+    /// that killing it too early *prevents that window from ever being created*. The game's own
+    /// launcher (`Scripts/sekiro/sekiro-launcher.sh`) handles this correctly — it waits for
+    /// `sekiro.exe` to exist and only then sweeps. A blind 15s timer here raced that and broke
+    /// fullscreen.
+    ///
+    /// CAVEAT: `pkill -f explorer.exe` is process-wide — Wine gives no way to scope it to one
+    /// prefix from argv (the prefix lives in the env, not the command line). So this also kills
+    /// explorer in *other* running bottles. That's why it's limited to the plain-Steam case,
+    /// where the only cost is losing a tray icon.
+    private func suppressWineSystray(isGameLauncher: Bool) {
+        guard !isGameLauncher else { return }
         Task {
             try? await Task.sleep(nanoseconds: 15_000_000_000)     // let the window come up first
             for _ in 0..<12 {                                       // then sweep ~48s for the tray icon
