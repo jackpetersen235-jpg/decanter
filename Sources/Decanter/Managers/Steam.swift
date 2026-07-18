@@ -45,7 +45,32 @@ enum Steam {
     }
 
     /// Split a user-provided argument string into an argv array.
+    /// Split a user-entered argument string into argv entries, honouring quotes.
+    ///
+    /// A plain `split(separator: " ")` breaks any argument containing a space — e.g.
+    /// `-foo "C:\Program Files\thing.exe"` became `-foo`, `"C:\Program`, `Files\thing.exe"`,
+    /// which Steam then rejects. Quoted runs (single or double) are kept intact, the quotes are
+    /// stripped, and runs of any whitespace (not just literal spaces) separate arguments.
     static func launchArguments(from raw: String) -> [String] {
-        raw.split(whereSeparator: { $0 == " " }).map(String.init)
+        var args: [String] = []
+        var current = ""
+        var started = false          // distinguishes an empty quoted arg ("") from no arg at all
+        var quote: Character?
+
+        for ch in raw {
+            if let q = quote {
+                if ch == q { quote = nil } else { current.append(ch) }
+            } else if ch == "\"" || ch == "'" {
+                quote = ch
+                started = true
+            } else if ch.isWhitespace {
+                if started { args.append(current); current = ""; started = false }
+            } else {
+                current.append(ch)
+                started = true
+            }
+        }
+        if started { args.append(current) }
+        return args
     }
 }
