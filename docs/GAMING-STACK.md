@@ -131,8 +131,17 @@ CPU-side (Rosetta translation + wineserver sync).
   inherent).
 - `-silent` hides the window but **still spawns ~6 steamwebhelper processes** — a negligible win,
   and actively wrong on a launcher bottle (§10).
-- `-applaunch <id>` on a **cold** Steam gets consumed before login completes. Launch Steam first,
-  then send applaunch — or accept a slow first attempt.
+- `-applaunch <id>` on a **cold** Steam gets consumed before login completes. **This bit us for
+  real (2026-07-18):** `Sekiro.app` sent `-silent … -applaunch 814380` in ONE shot, so Steam opened
+  and the game never started. Fixed with a **two-phase launch** in `Scripts/sekiro/sekiro-launcher.sh`:
+  start `steam.exe`, poll `logs/connection_log.txt` until a new `Logged On,` line appears, THEN
+  `exec wine steam.exe -applaunch <id>`. Verified: game up in 37 s.
+- **Launch-order trap — this one silently ruins your tuning.** `-applaunch` hands the game to the
+  ALREADY-RUNNING Steam, so the game inherits *that* client's environment. If Steam was started by
+  Decanter, the game runs with Decanter's settings (e.g. MetalFX 2.0x) and the launcher's tuned env
+  (msync, MetalFX 1.5x, fps cap) is silently discarded — measurably more GPU load and more hangs.
+  **Always quit Steam fully before launching `Sekiro.app`.** Verify with:
+  `ps -Ao command | grep wineserver` — it must say `Sekiro.app/Contents/Frameworks/Wine`, not `Decanter/Wine`.
 
 
 ## 4b. ⚠️ Launch order changes performance (diagnosed 2026-07-18)

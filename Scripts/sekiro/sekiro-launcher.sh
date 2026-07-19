@@ -10,9 +10,9 @@ mkdir -p "$CACHE"
 
 export WINEPREFIX="$PREFIX" WINEDEBUG=-all WINEMSYNC=1 WINEESYNC=1 ROSETTA_ADVERTISE_AVX=1
 export DXMT_METALFX_SPATIAL_SWAPCHAIN=1
-export DXMT_CONFIG="d3d11.metalSpatialUpscaleFactor=2.0;d3d11.preferredMaxFrameRate=60;d3d11.ignoreMapFlagNoWait=True"
+export DXMT_CONFIG="d3d11.metalSpatialUpscaleFactor=1.5;d3d11.preferredMaxFrameRate=60;d3d11.ignoreMapFlagNoWait=True"
 export DXMT_SHADER_CACHE=1 DXMT_SHADER_CACHE_PATH="$CACHE"
-export MTL_HUD_ENABLED="${SEKIRO_HUD:-0}"   # set SEKIRO_HUD=1 to show the fps overlay
+export MTL_HUD_ENABLED="${SEKIRO_HUD:-1}"   # set SEKIRO_HUD=1 to show the fps overlay
 export WINELOADER="$WB/wine" WINESERVER="$WB/wineserver" PATH="$WB:$PATH"
 export DYLD_FALLBACK_LIBRARY_PATH="$WINEROOT/lib:/usr/local/lib:/usr/lib"
 
@@ -33,5 +33,23 @@ export DYLD_FALLBACK_LIBRARY_PATH="$WINEROOT/lib:/usr/local/lib:/usr/lib"
   for _ in 1 2 3 4 5 6; do pkill -f 'explorer.exe' 2>/dev/null; sleep 4; done
 ) >/dev/null 2>&1 &
 
-exec "$WB/wine" "$PREFIX/drive_c/Program Files (x86)/Steam/steam.exe" \
-     -silent -no-cef-sandbox -skipinitialbootstrap -applaunch 814380
+STEAM_EXE="$PREFIX/drive_c/Program Files (x86)/Steam/steam.exe"
+CONNLOG="$PREFIX/drive_c/Program Files (x86)/Steam/logs/connection_log.txt"
+
+# TWO-PHASE LAUNCH. Sending -applaunch to a COLD Steam does not work: the client consumes the
+# argument before it finishes logging in, so Steam opens and the game never starts
+# (GAMING-STACK.md §4). Start the client first, wait for the logon to land in connection_log.txt,
+# and only then send the applaunch to the now-running client.
+BASE=$(grep -c 'Logged On,' "$CONNLOG" 2>/dev/null || echo 0)
+
+"$WB/wine" "$STEAM_EXE" -silent -no-cef-sandbox -skipinitialbootstrap >/dev/null 2>&1 &
+
+for _ in $(seq 1 75); do                       # up to ~150s; a cold login is usually <30s
+  NOW=$(grep -c 'Logged On,' "$CONNLOG" 2>/dev/null || echo 0)
+  [ "$NOW" -gt "$BASE" ] && break
+  sleep 2
+done
+
+# Hand the game to the running client. If the logon timed out we still try — a slow first
+# attempt beats not launching at all.
+exec "$WB/wine" "$STEAM_EXE" -applaunch 814380
