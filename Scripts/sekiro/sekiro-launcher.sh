@@ -17,11 +17,36 @@ mkdir -p "$CACHE"
 # Accessibility permission, so the call waits rather than failing — it hung a launch during
 # testing. The game is fullscreen in its own Space; Cmd-Tab and the Dock icon already raise it.
 if pgrep -f 'sekiro\.exe' >/dev/null 2>&1; then
+  # ...but do not leak the keep-alive. If the game is up without it (e.g. the reaper
+  # raced, or the game was started outside this bundle), re-opening the app is the
+  # natural moment to repair that. Verified 2026-07-19: a session ran 3 GPU hangs deep
+  # with no keep-alive because this path exited without checking.
+  KA="$CONTENTS/MacOS/gpukeepalive"
+  if [ -x "$KA" ] && ! pgrep -f gpukeepalive >/dev/null 2>&1; then
+    "$KA" 50000 >/dev/null 2>&1 &
+  fi
   exit 0
 fi
 
 export WINEPREFIX="$PREFIX" WINEDEBUG=-all WINEMSYNC=1 WINEESYNC=1 ROSETTA_ADVERTISE_AVX=1
 export DXMT_METALFX_SPATIAL_SWAPCHAIN=1
+# ignoreMapFlagNoWait: TESTED AND REVERTED to True on 2026-07-19. Do not retry it for stalls.
+# Hypothesis was that True made DXMT ignore MAP_FLAG_DO_NOT_WAIT and block until a resource
+# freed, causing the long pauses. DISPROVED: with it False, an identical 24s stall recurred
+# (11:12:18-11:12:43) — same `U` state, same ~2% cpu, same gpu_util pinned at 100%, same
+# recoveryCount unchanged. An apparent 23s->6s improvement beforehand was small-sample noise.
+#
+# MEMORY PRESSURE WAS ALSO TESTED AND DISPROVED (2026-07-19). Freeing ~2 GB (quitting the
+# Claude desktop app + Dropbox) made stalls WORSE, not better: 3 stalls in ~10 min at 88 MB
+# free, versus 9 stalls in ~4 min at 4.1 GB free, with free memory flat at 53-58% throughout.
+# Do not retry this either.
+#
+# Current cause class: a pathological shader. Across 12 captured stalls the signature is
+# identical — state U, cpu ~2%, gpu_util pinned at EXACTLY 100%, recoveryCount unchanged,
+# 2-25s. The GPU is executing, not hung (which is why the firmware watchdog never fires;
+# it only trips when progress STOPS). DXMT's changelog documents this exact class, fixed
+# case-by-case: Elite Dangerous (v0.70, "unoptimized compute shader with thousands of
+# branches"), Shadow of the Tomb Raider, Genshin Impact. Already on 0.80, the latest.
 export DXMT_CONFIG="d3d11.metalSpatialUpscaleFactor=1.5;d3d11.preferredMaxFrameRate=60;d3d11.ignoreMapFlagNoWait=True;d3d11.sampleNaNToZero=True;d3d11.defuseFma=True"
 export DXMT_LOG_LEVEL=warn DXMT_LOG_PATH="$HOME/Library/Application Support/Decanter/dxmt-log"
 export DXMT_SHADER_CACHE=1 DXMT_SHADER_CACHE_PATH="$CACHE"
@@ -57,12 +82,10 @@ export DYLD_FALLBACK_LIBRARY_PATH="$WINEROOT/lib:/usr/local/lib:/usr/lib"
 KA="$CONTENTS/MacOS/gpukeepalive"
 if [ -x "$KA" ] && ! pgrep -f gpukeepalive >/dev/null 2>&1; then
   "$KA" 50000 >/dev/null 2>&1 &
-  KA_PID=$!
-  (
-    for _ in $(seq 1 90); do pgrep -f 'sekiro\.exe' >/dev/null 2>&1 && break; sleep 2; done
-    while pgrep -f 'sekiro\.exe' >/dev/null 2>&1; do sleep 10; done
-    kill "$KA_PID" 2>/dev/null
-  ) >/dev/null 2>&1 &
+  # NO REAPER HERE. The binary manages its own lifetime and logs to
+  # ~/Library/Application Support/Decanter/gpukeepalive.log — check that file first if the
+  # keep-alive is ever missing. Two reaper subshells written on 2026-07-19 both silently
+  # killed it mid-launch and invalidated two validation sessions before anyone noticed.
 fi
 
 STEAM_EXE="$PREFIX/drive_c/Program Files (x86)/Steam/steam.exe"
