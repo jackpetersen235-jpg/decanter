@@ -1,9 +1,27 @@
 # Debug session findings — 2026-07-18
 
-**Read this first:** the scheduled 2:30am session **did not run**. Your Mac stayed awake
-(caffeinate held `PreventSystemSleep` all night, only 1 sleep/wake since boot) — the app-side
-scheduler simply never fired the job. Not a machine problem. The work below was done live
-starting ~10:00am instead, so it's a shorter pass than planned.
+**Read this first:** the scheduled 2:30am session produced nothing. The work below was done
+live starting ~10:00am instead, so it's a shorter pass than planned.
+
+> ### ⚠️ CORRECTION (2026-07-19) — the original diagnosis here was WRONG
+>
+> This section used to say "the app-side scheduler simply never fired the job." **It did fire.**
+> `lastRunAt` = `2026-07-18T08:30:49Z` — 49 seconds after the scheduled time. Session
+> `0a1caa0f-9abd-4554-b67e-d90b17c4cc08` ran for **11.6 seconds**, read the memory files and
+> docs correctly, then issued its first Bash command:
+>
+> ```
+> cd /Users/me/coding/Decanter && git log --oneline -20 && …
+> ```
+>
+> …and the transcript ends there. **It stalled on a permission prompt with nobody awake to
+> approve it.** All 88 rules in `~/coding/.claude/settings.local.json` are narrow exact
+> matches — there is no `Bash(git *)`, no `Bash(cd *)`, no wildcard.
+>
+> **Fix before scheduling another autonomous run:** add broad allow rules for the command
+> families the task needs, plus `deny` rules protecting `Sekiro.app`, `Bottles/Steam-Wine11`
+> (holds the save), and `Backups/`. Deny beats allow. Without this, any scheduled session
+> dies the same way.
 
 **Your working setup was never touched:** `~/Applications/Sekiro.app` and
 `Bottles/Steam-Wine11` are byte-for-byte as they were. Nothing was promoted onto them.

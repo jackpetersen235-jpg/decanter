@@ -8,9 +8,22 @@ PREFIX="$HOME/Library/Application Support/Decanter/Bottles/Steam-Wine11"
 CACHE="$HOME/Library/Application Support/Decanter/ShaderCache/Sekiro"
 mkdir -p "$CACHE"
 
+# ALREADY RUNNING? Then this is a re-open (Dock click, double-launch), not a start. Without this
+# guard we hand Steam a duplicate -applaunch and leave a short-lived `wine steam.exe` process
+# behind — which looks like "it opened the Sekiro wine thing again but not the game". Just exit.
+#
+# Do NOT try to raise the window from here. `System Events ... first process whose unix id is N`
+# BLOCKS INDEFINITELY on this Mac (measured: >2 min) because the parent process has no
+# Accessibility permission, so the call waits rather than failing — it hung a launch during
+# testing. The game is fullscreen in its own Space; Cmd-Tab and the Dock icon already raise it.
+if pgrep -f 'sekiro\.exe' >/dev/null 2>&1; then
+  exit 0
+fi
+
 export WINEPREFIX="$PREFIX" WINEDEBUG=-all WINEMSYNC=1 WINEESYNC=1 ROSETTA_ADVERTISE_AVX=1
 export DXMT_METALFX_SPATIAL_SWAPCHAIN=1
-export DXMT_CONFIG="d3d11.metalSpatialUpscaleFactor=1.5;d3d11.preferredMaxFrameRate=60;d3d11.ignoreMapFlagNoWait=True"
+export DXMT_CONFIG="d3d11.metalSpatialUpscaleFactor=1.5;d3d11.preferredMaxFrameRate=60;d3d11.ignoreMapFlagNoWait=True;d3d11.sampleNaNToZero=True;d3d11.defuseFma=True"
+export DXMT_LOG_LEVEL=warn DXMT_LOG_PATH="$HOME/Library/Application Support/Decanter/dxmt-log"
 export DXMT_SHADER_CACHE=1 DXMT_SHADER_CACHE_PATH="$CACHE"
 export MTL_HUD_ENABLED="${SEKIRO_HUD:-1}"   # set SEKIRO_HUD=1 to show the fps overlay
 export WINELOADER="$WB/wine" WINESERVER="$WB/wineserver" PATH="$WB:$PATH"
@@ -33,6 +46,25 @@ export DYLD_FALLBACK_LIBRARY_PATH="$WINEROOT/lib:/usr/local/lib:/usr/lib"
   for _ in 1 2 3 4 5 6; do pkill -f 'explorer.exe' 2>/dev/null; sleep 4; done
 ) >/dev/null 2>&1 &
 
+# GPU KEEP-ALIVE. This Mac's GPU firmware intermittently fails to resume from its lowest power
+# state: all 25 gpuEvent-*.ips reports show restart_reason "progress timeout" with
+# fw_power_state=0, every 3d/ta/cl slot idle, and command_buffer_trace_id=-1 — i.e. NOTHING was
+# executing. It is NOT a runaway shader (that would name a busy slot and a real command buffer),
+# which is why no graphics setting, engine, DXMT build or shader-cache change ever moved the rate.
+# Submitting a 256-byte blit every 50ms holds the GPU above that state. 3ms also worked but cost
+# 20-30% of GPU headroom via per-submission context switches; 50ms is the tuned value.
+# Guarded so a manually-started instance isn't duplicated; reaped when the game exits.
+KA="$CONTENTS/MacOS/gpukeepalive"
+if [ -x "$KA" ] && ! pgrep -f gpukeepalive >/dev/null 2>&1; then
+  "$KA" 50000 >/dev/null 2>&1 &
+  KA_PID=$!
+  (
+    for _ in $(seq 1 90); do pgrep -f 'sekiro\.exe' >/dev/null 2>&1 && break; sleep 2; done
+    while pgrep -f 'sekiro\.exe' >/dev/null 2>&1; do sleep 10; done
+    kill "$KA_PID" 2>/dev/null
+  ) >/dev/null 2>&1 &
+fi
+
 STEAM_EXE="$PREFIX/drive_c/Program Files (x86)/Steam/steam.exe"
 CONNLOG="$PREFIX/drive_c/Program Files (x86)/Steam/logs/connection_log.txt"
 
@@ -41,6 +73,14 @@ CONNLOG="$PREFIX/drive_c/Program Files (x86)/Steam/logs/connection_log.txt"
 # (GAMING-STACK.md §4). Start the client first, wait for the logon to land in connection_log.txt,
 # and only then send the applaunch to the now-running client.
 BASE=$(grep -c 'Logged On,' "$CONNLOG" 2>/dev/null || echo 0)
+
+# WARM START. If a client is already up AND already logged in, phase 1 has nothing to do: no NEW
+# 'Logged On,' line will ever appear, so the wait below burns its full ~150s before the game
+# starts — which looks like "Steam/wine opened but the app never launched". Hand the applaunch
+# straight to the running client instead.
+if [ "$BASE" -gt 0 ] && pgrep -f '/steam\.exe' >/dev/null 2>&1; then
+  exec "$WB/wine" "$STEAM_EXE" -applaunch 814380
+fi
 
 "$WB/wine" "$STEAM_EXE" -silent -no-cef-sandbox -skipinitialbootstrap >/dev/null 2>&1 &
 
