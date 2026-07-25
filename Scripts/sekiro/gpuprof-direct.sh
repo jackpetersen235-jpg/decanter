@@ -56,6 +56,17 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Resolve sync mode up front: Steam and the game share one wineserver for this prefix, so they
+# must use the SAME backend. Starting Steam with msync while the game runs server-side made the
+# game die before Metal init (observed twice, 2026-07-25) and silently invalidated the test.
+case "$SYNC_MODE" in
+  esync)  SYNC_ENV="WINEMSYNC=0 WINEESYNC=1" ;;
+  msync)  SYNC_ENV="WINEMSYNC=1 WINEESYNC=0" ;;
+  server) SYNC_ENV="WINEMSYNC=0 WINEESYNC=0" ;;
+  "")     SYNC_ENV="WINEMSYNC=1 WINEESYNC=1" ;;
+  *) echo "unknown --sync: $SYNC_MODE" >&2; exit 2 ;;
+esac
+
 CONTENTS="$APP_BUNDLE/Contents"
 WINEROOT="$CONTENTS/Frameworks/Wine"
 WB="$WINEROOT/bin"
@@ -73,7 +84,7 @@ mkdir -p "$CACHE"
 # Steam has to be up first — the game's steam_api64.dll talks to the running client.
 if ! pgrep -f '/steam\.exe' >/dev/null 2>&1; then
   echo "Steam is not running. Starting it (this does NOT need the profiler env)..."
-  ( export WINEPREFIX="$PREFIX" WINEDEBUG=-all WINEMSYNC=1 WINEESYNC=1
+  ( export WINEPREFIX="$PREFIX" WINEDEBUG=-all $SYNC_ENV
     "$WB/wine" "$PREFIX/drive_c/Program Files (x86)/Steam/steam.exe" \
        -silent -no-cef-sandbox -skipinitialbootstrap >/dev/null 2>&1 ) &
   CONNLOG="$PREFIX/drive_c/Program Files (x86)/Steam/logs/connection_log.txt"
@@ -94,13 +105,8 @@ fi
 # lot of measurement; a hand-copied duplicate would silently drift from the real setup.
 eval "$(grep -E '^export ' "$CONTENTS/MacOS/Sekiro")"
 
-case "$SYNC_MODE" in
-  esync)  export WINEMSYNC=0 WINEESYNC=1; echo "sync mode: ESYNC (msync off)" ;;
-  msync)  export WINEMSYNC=1 WINEESYNC=0; echo "sync mode: MSYNC" ;;
-  server) export WINEMSYNC=0 WINEESYNC=0; echo "sync mode: SERVER-SIDE (slow path)" ;;
-  "")     : ;;
-  *) echo "unknown --sync: $SYNC_MODE" >&2; exit 2 ;;
-esac
+export $SYNC_ENV
+[ -n "$SYNC_MODE" ] && echo "sync mode: $SYNC_MODE ($SYNC_ENV) — applied to Steam AND game"
 
 if [ "$NO_METALFX" = 1 ]; then
   export DXMT_METALFX_SPATIAL_SWAPCHAIN=0
