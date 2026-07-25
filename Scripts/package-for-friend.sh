@@ -137,6 +137,31 @@ IF SOMETHING GOES WRONG
   • Steam window is black
       -> Quit Steam and open it again from Decanter.
 
+
+KNOWN ISSUES (honest heads-up)
+
+These were seen on the Mac this was built and tested on — an M5 MacBook Air running
+macOS 26.5. Your Mac may be completely unaffected. Both are BELOW Decanter: they are
+in Apple's GPU driver / firmware, not in this app or in Wine, so there is nothing in
+Decanter to switch off to avoid them.
+
+  • Long freezes in-game (~26 seconds), game only, Mac stays usable.
+      Traced to the GPU command-submission system call blocking inside Apple's driver.
+      Cause NOT identified, despite a lot of investigation. Not reliably fixable today.
+      It did not stop the game being played and finished — it is an interruption, not
+      a crash. Nothing is lost; the game resumes on its own.
+
+  • Short freezes (~7 seconds) where the WHOLE Mac locks up.
+      A GPU firmware fault: the chip fails to wake from its deepest sleep state and
+      gets reset. Also Apple-side.
+
+If you hit either, it is not something you did wrong and not worth reinstalling over.
+If you DON'T hit them, great — that is useful information in itself, and worth telling
+whoever gave you this.
+
+Everything else in this README is unaffected: setup, Steam, and installing games all
+work normally.
+
 Enjoy.
 TXT
 
