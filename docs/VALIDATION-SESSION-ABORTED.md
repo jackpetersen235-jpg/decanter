@@ -33,6 +33,12 @@ generated, and the mechanism cannot be confirmed from this data source at all.**
 design flaw in the mechanism check worth knowing before relying on it: a clean PASS
 produces no mechanism evidence by construction.
 
+> **CORRECTION 2026-07-21 — the paragraph above is wrong, and the "design flaw" does not exist.**
+> `ioreg -r -d 1 -c IOAccelerator` exposes **`CurrentPowerState`** and **`DriverPowerState`** live,
+> no crash report needed. The keep-alive's mechanism (holding the GPU above power state 0) is
+> directly observable during a clean session. `Scripts/sekiro/gpusample.sh` logs it at 1 Hz.
+> A clean PASS *does* produce mechanism evidence — earlier sessions simply never sampled the key.
+
 ## To proceed
 
 1. Apply the `allow` + `deny` rules from `proposed-permissions.md` (deny half matters most —

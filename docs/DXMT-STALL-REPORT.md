@@ -2,9 +2,96 @@
 
 Upstream-ready bug report + isolation attempt record. **2026-07-19.**
 
+> # ⛔ 2026-07-24 — THE CENTRAL CONCLUSION OF THIS REPORT IS WRONG.
+>
+> The stalls are **not** a pathological shader. Measured directly, in-game, with the profiler in
+> PART 3. Two independent lines of evidence, from 3 captured stalls:
+>
+> **1. The duration is FIXED.** 26402.6 / 26388.8 / 26384.5 ms — mean 26392 ms, **spread 18 ms
+> (0.07%)**, across three unrelated moments (area load, death-reload, ordinary combat). Scene-
+> dependent GPU work cannot reproduce to 0.07%. That is a **timeout / fixed-length wait**.
+>
+> **2. Every suspect shader has an alibi.** The pipelines inside the slow command buffers also run
+> in *normal* buffers, at identical thread counts, in **13–15 ms**. `cs_f4330ff8` at `work=262144`:
+> 5.4 / 5.8 / 7.7 / 8.5 / 9.7 / 11.9 ms normally, versus 26 392 ms inside a stall. Same shader, same
+> work, ~3000x the time. The shaders are bystanders, not the cause.
+>
+> **3. The Metal timestamps are inverted.** `sched` (`GPUStartTime - kernelEndTime`) is **negative
+> by exactly the stall duration**, so `GPUEndTime - kernelEndTime ≈ +0.2 ms`. The GPU work
+> completed essentially instantly once submission finished; the 26.4 s sits *before* that, which is
+> what a **wait** looks like, not execution.
+>
+> **UPDATE 2026-07-24, later the same day — the `MTLFence` hypothesis is ALSO refuted.** It was
+> measured directly (encoder-level `updateFence:`/`waitForFence:` and command-buffer
+> `encodeWaitForEvent:`), and fence volume does not predict stalls — if anything it anticorrelates:
+>
+> | | encoders | fenceWait | GPU time |
+> |---|---|---|---|
+> | normal | 236 | 1183 | **15.2 ms** |
+> | normal | 145 | ~900 | ~13 ms |
+> | **stall** | **111** | **681** | **26 859 ms** |
+> | **stall** | **111** | **685** | **26 378 ms** |
+>
+> Buffers with 2x the encoders and 1.7x the fence waits complete in 15 ms. `eventWait=0` in both
+> stalls, so `MTLEvent` is out too. **DXMT's synchronisation is not the cause.** The downgrade path
+> is also closed: official DXMT ships only the *builtin* variant (tested — white screen + wine
+> debugger, reverted), and frankea/Whisky never shipped a pre-0.80 DXMT (v3.0.0 is Wine 11 + DXVK
+> only; DXMT arrives in v3.1.0, already 0.80).
+>
+> # ✅ 2026-07-24 — ROOT CAUSE FOUND. It is not DXMT at all.
+>
+> Thread stacks captured **during** four stalls (`Scripts/sekiro/stallstack.sh`) are identical, and
+> account for ~100% of every sample window (1748–1786 of ~1786 samples each):
+>
+> ```
+> Thread com.Metal.CommandQueueDispatch
+>   -[_MTLCommandQueue _submitAvailableCommandBuffers]   (Metal)
+>     -[IOGPUMetalCommandQueue submitCommandBuffers:count:]  (IOGPU)
+>       IOGPUCommandQueueSubmitCommandBuffers             (IOGPU)
+>         IOConnectTrap4                                  (IOKit)  ← blocked in the kernel
+> ```
+>
+> **The stall is Metal's command-buffer SUBMIT syscall blocking inside Apple's IOGPU kernel
+> driver** for a fixed ~26.4 s. This is below DXMT, below wine, below anything user space can patch.
+> It explains every observation at once: state `U` (literally an uninterruptible kernel trap), ~2%
+> CPU, device reported busy while nothing progresses, no firmware watchdog, and the fixed duration
+> (a driver timeout, not computation).
+>
+> Ruled out **by direct measurement**, in order: shader cost (alibis), `MTLFence` (fence-count
+> alibis), `MTLEvent` (`eventWait=0`), CPU-side encoding (`encode=6.7 ms` — the buffer is built and
+> committed normally; the block is in *submission*), and memory pressure (stalls averaged **more**
+> free RAM than normal play: 190 MB vs 105 MB). The system log emits **nothing** during a stall.
+>
+> **Remaining local variable: `gpukeepalive`** — a second process submitting to the same GPU 20x/s,
+> which *we* added for the unrelated firmware bug. It must be ruled in or out before this is filed
+> as an Apple driver bug: `gpuprof-direct.sh --no-keepalive`. If stalls persist without it, the
+> only realistic paths are an Apple bug report or a macOS update.
+>
+> ---
+>
+> **Superseded intermediate hypothesis (kept for the record): a CPU-side stall.** `GPUEndTime - kernelEndTime`
+> is ~+0.2 ms while `GPUStartTime` is ~26 s earlier — i.e. the GPU finished the moment the CPU
+> stopped feeding it, and the 26 s was spent with the command buffer **open on the CPU**. That fits
+> the process sitting in state `U` at ~2% CPU (blocked in a syscall, not computing) and the device
+> reading "busy" because a buffer is occupying the queue. Two instruments now test this:
+> `encode=` (time from `[queue commandBuffer]` to `commit`) in the profiler, and
+> `Scripts/sekiro/stallstack.sh`, which runs `sample` **during** a stall to name the blocking call.
+>
+> Everything below PART 2 predates this measurement. The "Why this looks like a known DXMT class"
+> section reasoned from a changelog to a conclusion that direct measurement has now falsified —
+> left in place as a record of how a plausible inference survived seven rounds of elimination
+> without ever being tested.
+
+> **2026-07-21 — PART 1 IS OBSOLETE. The isolation is no longer blocked, and Xcode is not needed.**
+> "The ask" at the end of this report has been answered locally: `Scripts/sekiro/gpustall.m`, a
+> `DYLD_INSERT_LIBRARIES` dylib that swizzles Metal directly, records per-command-buffer GPU time
+> and names the pipelines inside the slow ones. Built and verified end-to-end on this machine
+> (x86_64 under Rosetta, `AGXG17GFamilyCommandBuffer`). **Do not install Xcode for this.**
+> Run it: `bash Scripts/sekiro/gpuprof-run.sh --force`. See PART 3.
+
 ---
 
-## PART 1 — Isolation result: FAILED. What blocked it.
+## PART 1 — Isolation result: FAILED. What blocked it. *(superseded — see PART 3)*
 
 **Objective:** identify the pipeline hash executing during stalls.
 **Outcome:** not obtained. The blocker is a tooling limit, not a measurement mistake.
@@ -148,6 +235,78 @@ A pathological shader taking tens of seconds fits every observation here.
 
 What diagnostic will name the executing pipeline on a Command-Line-Tools-only machine? If the
 answer is "none — install Xcode," that is an acceptable answer and we will install it.
+
+**Answered 2026-07-21 — see PART 3. No Xcode required; upstream does not need to advise on this.**
+
+---
+
+## PART 3 — The diagnostic, built locally (2026-07-21)
+
+`Scripts/sekiro/gpustall.m` → `libgpustall.dylib`. Injected with `DYLD_INSERT_LIBRARIES`, it
+swizzles the Metal command-buffer and encoder classes and logs, for every command buffer whose
+**GPU** execution exceeds a threshold, the encoders it held and the pipeline bound to each.
+
+**Why this is possible at all:** `wine` here is ad-hoc signed with **no hardened runtime and no
+library validation** (`codesign -dvvv` → `flags=0x2(adhoc)`), so dyld does not strip the insertion;
+and env is inherited down the whole launcher → `steam.exe` → `sekiro.exe` chain — the same property
+that made the `MTL_SHADER_VALIDATION` trap so sticky, used deliberately this time.
+
+```bash
+bash Scripts/sekiro/build-gpustall.sh      # x86_64 — MUST match the Rosetta wine tree
+bash Scripts/sekiro/gpuprof-run.sh --force # plays the game with profiler + 1 Hz sampler attached
+bash Scripts/sekiro/gpustall-report.sh <STAMP>
+```
+
+`gpuprof-run.sh` **does not modify `Sekiro.app`** — it sets env and execs the bundle's existing
+launcher. Stop using it and nothing has changed.
+
+### What the report decides
+
+1. **Prime suspect** — pipelines ranked by *enrichment*: how much more often a pipeline appears in
+   slow command buffers than in normal ones. Raw frequency is useless on its own, because a
+   pipeline that runs every frame is inside 100% of slow buffers whether or not it is the cause.
+   The tool therefore also samples every Nth normal buffer as a baseline.
+2. **One fat encoder, or a backlog?** — the report's central premise is that a *single* encoder
+   runs for seconds. The competing explanation, a queue of ordinary work the render thread is
+   waiting behind, produces an identical outward signature (100% GPU, thread in `U`, no watchdog).
+   Queue depth at commit separates them: shallow ⇒ one runaway encoder, deep ⇒ backlog. **This
+   premise has not yet been tested against real gameplay — it is an inference, not a measurement.**
+3. **Renderer vs tiler split**, from the new sampler columns.
+
+### Verified before first use
+
+Built an x86_64 harness with a deliberately pathological compute kernel. The profiler armed under
+Rosetta, named the pipeline (`slow_kernel`, 64.9 ms GPU, queue depth 1), correctly ignored 20 cheap
+dispatches, named a render pipeline (`vs:vmain/fs:fmain`), and its arming gate refused a non-Sekiro
+process. Report ranking was checked against a synthetic session where a ubiquitous pipeline and a
+rare heavy one both appear in every stall — it ranked the heavy one 50× and the ubiquitous one 1.0×.
+
+**One bug found this way, worth remembering:** the swizzles of `new*PipelineState*` and the
+interposes of `MTLCopyAllDevices` / `MTLCreateSystemDefaultDevice` all return **+1 retained**
+objects (`NS_RETURNS_RETAINED` in `MTLDevice.h`). Wrapping them under ARC without
+`__attribute__((ns_returns_retained))` returns +0 instead, and the caller's release lands on an
+object nobody retained → `SIGSEGV` in `objc_autoreleasePoolPop`. Every run crashed at exit while
+the same binary without the dylib exited 0. **Injected into the game instead of a harness, this
+would have looked exactly like a DXMT crash and cost a whole session.** Check exit codes, not just
+log output — piping through `tail` hides them.
+
+### Sampler additions
+
+`Scripts/sekiro/gpusample.sh` captures `Renderer Utilization %`, `Tiler Utilization %`,
+`CurrentPowerState` and submission rate, none of which earlier sessions recorded — they only took
+`Device Utilization %`, which is the max of renderer and tiler and cannot distinguish them.
+
+⚠️ This partly corrects `VALIDATION-SESSION-ABORTED.md`, which states GPU power state is visible
+only in `gpuEvent-*.ips` crash reports. `CurrentPowerState` / `DriverPowerState` **are** live in
+`ioreg -r -d 1 -c IOAccelerator`. **But measured 2026-07-22: `MaxPowerState` on this GPU is 1**, so
+the live field is a coarse 0/1 flag, not the multi-level `fw_power_state` from the crash reports.
+It answers "is the GPU at its lowest state" — which is the keep-alive's actual question — and
+nothing finer. Don't read it as a DVFS/clock level.
+
+⚠️ **The `submits` column does not work.** `fSubmissionsSinceLastCheck` reads 0 in every sample,
+blocked and active alike, so its delta is always 0. It is kept in the CSV but no conclusion may be
+drawn from it until the field is validated. An earlier version of the report inferred "no new
+submissions while blocked" from it — that conclusion fired unconditionally and meant nothing.
 
 ---
 
