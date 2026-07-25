@@ -85,4 +85,4 @@ _(filled in as cells complete — numbers only until all four are done)_
 | 1 | ON | OFF | 0 | 2.8 | **INVALID — must re-run** |
 | 2 | ON | ON | 1 | 2.2 | **STALLED** (valid — sequential stop) |
 | 3 | OFF | OFF | | | |
-| 4 | OFF | ON | | | |
+| 4 | OFF | ON | 1 | 1.4 | **STALLED** (valid — sequential stop) |
