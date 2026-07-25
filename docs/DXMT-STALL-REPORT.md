@@ -1,3 +1,37 @@
+# ⛔ RETRACTED 2026-07-25 — CAUSE NOT IDENTIFIED
+
+**Every causal claim in this document was falsified.** In order, this investigation blamed: a
+pathological shader, `MTLFence`, `MTLEvent`, CPU-side encoding, memory pressure, the DXMT version,
+MetalFX, **msync**, **the wine 10 build**, and **gpukeepalive**. Each was disproved by a later run.
+An upstream issue (`marzent/wine-msync#10`) was filed, corrected twice, and **closed** as
+not-an-msync-issue.
+
+**What survives, and is solid:** Metal's command-buffer submit syscall intermittently blocks for a
+fixed **~26.4 s** inside `IOGPUCommandQueueSubmitCommandBuffers` → `IOConnectTrap4`, captured with
+`sample(1)` during four separate stalls at ~100% of every sample window. `recoveryCount` does not
+move, no `gpuEvent` report is written, and the system log is silent. It reproduces with msync on
+and off, on wine 10 and wine 11, with and without the keep-alive.
+
+**Configuration matrix (note the uneven session lengths — this is the methodological flaw that let
+three wrong conclusions through):**
+
+| MetalFX | keep-alive | stalls | min |
+|---|---|---|---|
+| ON | ON | 7 | 31.2 |
+| **ON** | **OFF** | **0** | **30.9** |
+| OFF | ON | 5 | 18.4 |
+| OFF | OFF | 1 | 2.6 |
+
+The live setup runs **MetalFX ON + keep-alive OFF** — the only cell with a meaningful clean run.
+That is *not* a proven fix; it is the best-supported guess. Cost: the ~7 s whole-Mac firmware
+freezes return.
+
+**If this is picked up again:** run a proper factorial, each cell 15+ minutes, before forming any
+hypothesis. The tooling (`Scripts/sekiro/gpustall.m`, `stallstack.sh`, `gpuprof-direct.sh`) is
+sound and reusable — it is the analysis, not the instrumentation, that failed here.
+
+---
+
 # Sekiro on DXMT 0.80 — long GPU-side stalls during gameplay
 
 Upstream-ready bug report + isolation attempt record. **2026-07-19.**
