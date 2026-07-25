@@ -64,7 +64,9 @@ if { [ "$KA" = ON ] && [ "$KA_N" -lt 1 ]; } || { [ "$KA" = OFF ] && [ "$KA_N" -g
   echo "ABORT: keep-alive state does not match the cell" >&2; exit 1
 fi
 echo
-echo "PLAY NOW. Quit the game when you have done at least $MIN_MIN minutes."
+echo "PLAY NOW."
+echo "  - if a 26s stall happens: QUIT IMMEDIATELY (sequential stopping rule) — cell is done"
+echo "  - if no stall: play the full $MIN_MIN min, then quit"
 echo
 
 START=$(date +%s)
@@ -78,6 +80,12 @@ echo "--- CELL $CELL RESULT (no interpretation, per protocol rule 6) ---"
 printf "  MetalFX %-3s  keep-alive %-3s  stalls %d  minutes %d" "$FX" "$KA" "$N" "$ELAPSED"
 [ "$ELAPSED" -gt 0 ] && printf "  rate %.3f/min" "$(echo "scale=4;$N/$ELAPSED" | bc)"
 echo
-if [ "$ELAPSED" -lt "$MIN_MIN" ] && [ "$N" -lt 3 ]; then
-  echo "  ⚠️  SHORT CELL ($ELAPSED < $MIN_MIN min, <3 stalls) — INVALID, re-run this cell."
+# Sequential rule: a short cell is VALID if it stopped because a stall occurred; it is invalid
+# only if it ended early with no stall (that is the near-zero-information case).
+if [ "$N" -ge 1 ]; then
+  echo "  verdict: STALLED (stopped early per sequential rule — valid)"
+elif [ "$ELAPSED" -ge "$MIN_MIN" ]; then
+  echo "  verdict: CLEAN ($ELAPSED min, no stalls — valid)"
+else
+  echo "  ⚠️  INVALID: ended at $ELAPSED min with no stall (needs >=$MIN_MIN). Re-run this cell."
 fi

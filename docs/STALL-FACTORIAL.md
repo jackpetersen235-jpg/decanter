@@ -48,10 +48,24 @@ standing still is not comparable to one spent loading.
 5. If all four cells stall, the conclusion is **neither factor matters** and both are dropped.
 6. **No hypothesis is formed until all four cells are complete.** No interim explanations.
 
-## Stopping rule
+## Stopping rule — AMENDED 2026-07-25, still BEFORE any data was collected
 
-A cell may be cut short ONLY if it reaches 3 stalls before 15 min (rate already established).
-A cell may not be extended to chase a clean result.
+Amending a pre-registration before data is legitimate; amending it after seeing results is not.
+This change is recorded with that distinction explicit, and the git history timestamps it.
+
+**Sequential rule:** stop a cell **at the first stall**. Otherwise run the full 15 minutes.
+
+Justification — the two outcomes are not symmetric:
+- **Presence** of stalls is established by a single event. The question per cell is "does this
+  configuration prevent stalls?", and one stall answers it: no. The rate is not needed.
+- **Absence** cannot be shortcut. A clean cell still needs >=15 min, or it carries the same
+  near-zero information as the 2-minute runs that produced three wrong conclusions.
+
+Consequence to keep in mind when reading the results: a stalling cell records only "stalled at
+T minutes", not a rate, so stalling cells are NOT comparable to each other by severity. They are
+comparable only as stalled / did-not-stall. Analysis rules 2-6 are unchanged and still binary.
+
+A cell may still not be extended to chase a clean result.
 
 ## Results
 
