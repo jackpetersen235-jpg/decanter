@@ -67,13 +67,22 @@ comparable only as stalled / did-not-stall. Analysis rules 2-6 are unchanged and
 
 A cell may still not be extended to chase a clean result.
 
+## Deviations from protocol (recorded as they happen)
+
+- **Cell 1, attempt 1: INVALID.** Ended at 2.8 min with no 26 s stall (needs >=15). Not counted.
+- **Order changed** from 1,2,3,4 to **2,4,1,3** — the keep-alive-OFF cells (1 and 3) suffer the
+  unrelated ~7 s firmware freezes (3 GPU resets in 2.8 min), which makes them unpleasant to play.
+  Doing the keep-alive-ON cells first. This weakens the design further: cell order is already
+  confounded with thermal drift, and now the two levels of the keep-alive factor are no longer
+  interleaved in time. Recorded rather than hidden.
+
 ## Results
 
 _(filled in as cells complete — numbers only until all four are done)_
 
 | # | MetalFX | keep-alive | stalls | min | rate |
 |---|---|---|---|---|---|
-| 1 | ON | OFF | | | |
+| 1 | ON | OFF | 0 | 2.8 | **INVALID — must re-run** |
 | 2 | ON | ON | | | |
 | 3 | OFF | OFF | | | |
 | 4 | OFF | ON | | | |
