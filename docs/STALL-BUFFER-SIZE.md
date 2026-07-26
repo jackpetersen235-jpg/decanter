@@ -1,3 +1,32 @@
+# ⚠️ 2026-07-25 (late): THE 26 s METRIC MAY BE A MEASUREMENT ARTIFACT
+
+**Jack, playing with the profiler attached, counted every pause and reports NONE were 26 seconds —
+and says he would obviously notice one. Meanwhile the profiler logged two buffers at 26 584 ms and
+27 225 ms in the same session.** Those cannot both be true descriptions of reality.
+
+The suspect is `gpuMS = GPUEndTime - GPUStartTime`. On every "stall",
+`sched = GPUStartTime - kernelEndTime` is **negative by almost exactly the whole gpuMS**, i.e.
+`GPUEndTime ~= kernelEndTime` and `GPUStartTime` sits ~26 s in the past. That was originally read
+as evidence of a long wait. **It is equally consistent with `GPUStartTime` being stale or invalid**,
+in which case `gpuMS` measures nothing and there was never a 26 s event.
+
+If so it explains every dead end at once: no shader, fence, event, config, engine, sync mode,
+keep-alive, or encoder structure correlates with it — **because there may be nothing to correlate
+with.**
+
+**Decisive test, now instrumented:** the completion handler logs raw `GPUStartTime` / `GPUEndTime`
+/ `kernelEndTime` plus **wall-clock time from commit to completion**. A real 26 s GPU wait *must*
+show ~26 s of wall clock; nothing can fake that. If wall time is milliseconds while `gpuMS` reads
+26 000+, the metric is definitively an artifact.
+
+**Also worth flagging: I primed the witness.** Earlier in this investigation I repeatedly told Jack
+the stalls were "26 seconds" before asking him to report them, so his early confirmations are not
+independent evidence. His unprompted count tonight is the more reliable observation.
+
+**Everything below predates this and should be read with that in mind.**
+
+---
+
 # The 26 s stalls occur only in LARGE command buffers (>=106 encoders)
 
 **2026-07-25.** Derived from data already collected — no new play session was required.

@@ -579,6 +579,14 @@ static void my_commit(id self, SEL _cmd) {
         int64_t outNow = atomic_fetch_sub(&g_outstanding, 1) - 1;
         double gpuMS   = (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
         double schedMS = (cb.GPUStartTime - cb.kernelEndTime) * 1000.0;
+        // RAW timestamps. Added 2026-07-25 because the user reports NO perceptible freeze while
+        // this code logs gpu=26000ms+. If GPUStartTime is invalid/stale rather than real, gpuMS is
+        // an artifact and the whole "26.4 s stall" is a measurement bug, not an event. Also record
+        // wall time either side of the completion handler: a real 26 s GPU wait must show up as
+        // ~26 s of wall-clock between commit and completion, and nothing can fake that.
+        double rawStart = cb.GPUStartTime, rawEnd = cb.GPUEndTime;
+        double rawKern  = cb.kernelEndTime;
+        double wallSinceCommit = (nowWall() - r.commitWall) * 1000.0;
 
         pthread_mutex_lock(&g_lock);
         g_gpuTimeAcc += gpuMS;
@@ -590,6 +598,9 @@ static void my_commit(id self, SEL _cmd) {
         unsigned long long seen = atomic_fetch_add(&g_cbTotal, 1);
         if (gpuMS >= g_slowMS) {
             atomic_fetch_add(&g_slowCount, 1);
+            logline(@"  RAW cb#%llu gpuStart=%.6f gpuEnd=%.6f kernelEnd=%.6f "
+                     "| gpuMS=%.1f  WALL commit->complete=%.1fms",
+                    r.seq, rawStart, rawEnd, rawKern, gpuMS, wallSinceCommit);
             dumpCB(@"SLOW", r, gpuMS, schedMS, outNow);
         } else if (g_baselineEvery && (seen % g_baselineEvery) == 0) {
             dumpCB(@"BASE", r, gpuMS, schedMS, outNow);
