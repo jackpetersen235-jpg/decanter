@@ -111,3 +111,36 @@ per frame — including `drawable_blocking_interval`, which nothing in our own p
 2. Only if the HUD exonerates all of those, instrument point 3 (time spent *inside*
    `[queue commandBuffer]`, tagged by queue) — the one gap in both DXMT's instrumentation and ours.
 3. Separately, the `gpuMS` validity check (wall clock commit→completion) still gates everything.
+
+
+## 🔬 ignoreMapFlagNoWait A/B — first arm result (2026-07-25)
+
+**`d3d11.ignoreMapFlagNoWait=False`: 14.6 min of normal play, ZERO long pauses.**
+P(0 by chance) = 3.0% at the pooled all-night rate (0.24/min), 0.07% at the factorial-cell rate
+(0.5/min). Short ~7 s firmware freezes occurred throughout as expected (keep-alive off,
+recoveryCount 12→26) and are unrelated.
+
+The mechanism is source-confirmed, unlike every earlier candidate:
+
+```cpp
+// d3d11_context_imm.cpp:238
+if (ignore_map_flag_no_wait_)
+    MapFlags &= ~D3D11_MAP_FLAG_DO_NOT_WAIT;
+```
+
+With the flag TRUE the game's non-blocking Map request is stripped, so instead of returning
+`DXGI_ERROR_WAS_STILL_DRAWING` and letting the game continue, control falls through to
+`Flush(); cmd_queue.WaitCPUFence(...)` — **blocking the GAME thread** until the GPU catches up.
+That blocking is counted in `sync_count`/`sync_interval`, which nothing in this project ever read,
+and it would NOT appear in our `gpuMS` metric at all.
+
+DXMT applies this workaround to exactly one title in its built-in config
+(`SONIC_X_SHADOW_GENERATIONS.exe`, `config.cpp:50`). It is not a general setting and was never
+intended for Sekiro.
+
+**NOT YET CONFIRMED.** This is one arm. The control arm (flag TRUE, same session length, same
+play pattern) has not been run, and tonight produced several promising clean runs that later
+collapsed. Do not promote the setting until the TRUE arm reproduces the pauses.
+
+Also unresolved: the flag may exist in Sekiro.app for a *rendering* reason, not a performance one.
+Watch for visual artifacts with it off before making it permanent.
