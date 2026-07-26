@@ -162,3 +162,23 @@ What IS notable: ~21 min of play across both arms with zero long pauses, on a co
 else is true, that config has now accumulated ~52 min of long-pause-free play.
 
 Investigation stopped here. If resumed, arm 2 needs a full ~15 min run.
+
+
+### ❌ FALSIFIED 2026-07-25: ignoreMapFlagNoWait is NOT the cause
+
+With `ignoreMapFlagNoWait=False` **and** the keep-alive ON — the never-before-tested combination
+of both candidate fixes — a **23 s stall occurred**, timed by the user.
+
+So the 14.6 min clean arm was luck, exactly as the 3% figure allowed. The flag joins the list.
+
+Also settled: **the long stalls are real and perceptible.** The user timed this one at 23 s
+unprompted, which retrospectively confirms that the earlier session where he counted zero was a
+true absence rather than inattention — and that the `gpuMS` metric's false positives are a
+separate problem from the stalls themselves.
+
+**Twelve eliminated causes:** pathological shader, MTLFence, MTLEvent, CPU-side encoding, memory
+pressure, DXMT version, MetalFX, msync, the wine 10 build, gpukeepalive, DXMT chunk backpressure,
+ignoreMapFlagNoWait.
+
+No candidate remains. The stall is real, reproducible, blocks in Apple's IOGPU submit path, and
+resists every user-space variable tested.
