@@ -1,7 +1,17 @@
 #!/bin/bash
-# HUD session — read DXMT's OWN blocking instrumentation instead of inferring from Metal-level
-# measurement. No rebuild, no hooks: DXMT's diagnostic overlay wraps Apple's
-# MTLDeveloperHUDProperties, so MTL_HUD_ENABLED=1 makes it print per frame.
+# ⚠️ THE HUD PART OF THIS DOES NOT WORK ON A STOCK BUILD. Kept because the A/B below is the point.
+#
+# DXMT computes commit_interval / sync_count / sync_interval / event_stall /
+# present_latency_interval / drawable_blocking_interval every frame — but HUDState::begin(),
+# printLine() and end() are ALL `#ifndef DXMT_DEBUG return;` (dxmt_hud_state.cpp). In a release
+# build they are no-ops. Only initialize() runs, which is why the on-screen HUD shows just
+# "DXMT D3D11 FL_11_0  v0.80" and no statistics lines.
+#
+# The format strings ARE present in the shipped d3d11.dll — dead data from std::format literals —
+# so `strings | grep 'Sync:'` FALSELY suggests the feature works. It does not. Reading these
+# counters needs DXMT rebuilt from source with DXMT_DEBUG defined.
+#
+# WHAT THIS SCRIPT IS ACTUALLY FOR: the ignoreMapFlagNoWait A/B, scored by perception.
 #
 # Lines to watch (docs/DXMT-SOURCE-DIG.md has the field mapping):
 #   Commit: N -avg -max      the 32-chunk ring wait                (ELIMINATED already: outstanding=1)
@@ -51,7 +61,7 @@ GAME="$PREFIX/drive_c/Program Files (x86)/Steam/steamapps/common/Sekiro/sekiro.e
 
 # take the tuned env from the real launcher, then override the two things this test controls
 eval "$(grep -E '^export ' "$CONTENTS/MacOS/Sekiro")"
-export MTL_HUD_ENABLED=1
+export MTL_HUD_ENABLED=1   # gives fps/GPU-ms/MetalFX info; DXMT stat lines will NOT appear
 export DXMT_CONFIG="d3d11.metalSpatialUpscaleFactor=1.5;d3d11.preferredMaxFrameRate=60;d3d11.ignoreMapFlagNoWait=$MAPWAIT;d3d11.sampleNaNToZero=True;d3d11.defuseFma=True"
 export SteamAppId=814380 SteamGameId=814380
 
@@ -84,13 +94,19 @@ echo
 echo "PLAY NORMALLY. Say when you feel a pause — the capture nearest that time is the evidence."
 echo
 
-# The HUD is drawn INTO the game window, so it can only be read from a screenshot. Wine runs the
-# game in its own Space; -x suppresses the shutter sound.
-i=0
-while pgrep -f 'sekiro\.exe' >/dev/null 2>&1; do
-  i=$((i+1))
-  screencapture -x "$SHOTS/$(date +%H%M%S)-$i.png" 2>/dev/null
-  sleep 2
-done
+# NO SCREENSHOT LOOP. A fullscreen wine window is its own macOS Space, so `screencapture` grabs
+# the desktop instead — 210 MB of useless desktop shots were produced this way on 2026-07-25
+# before it was noticed. And with the HUD stat lines compiled out there would be nothing to read
+# anyway. This arm is scored by the player's perception, which is the instrument that has actually
+# held up in this investigation.
+START=$(date +%s)
+while pgrep -f 'sekiro\.exe' >/dev/null 2>&1; do sleep 10; done
+MINS=$(( ($(date +%s) - START) / 60 ))
 
-echo "game exited. $(ls "$SHOTS" | wc -l | tr -d ' ') captures in $SHOTS"
+echo
+echo "=============================================="
+echo " ARM COMPLETE — ignoreMapFlagNoWait = $MAPWAIT"
+echo " played $MINS min"
+echo " record: how many LONG pauses (not the ~7s whole-Mac freezes)?"
+echo "=============================================="
+rmdir "$SHOTS" 2>/dev/null || true
