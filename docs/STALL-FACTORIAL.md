@@ -67,6 +67,24 @@ comparable only as stalled / did-not-stall. Analysis rules 2-6 are unchanged and
 
 A cell may still not be extended to chase a clean result.
 
+## Cross-title control (added 2026-07-25, outside the 2x2)
+
+**JoJo's Bizarre Adventure: All-Star Battle R — 15.0 min, 0 stalls, MEASURED with the profiler.**
+Meets the same >=15 min bar the factorial uses for "clean". P(0) = 2.7% at Sekiro's pooled rate
+(0.24/min), 0.06% at the recent-cells rate (0.5/min). Worst command buffer 23.5 ms.
+
+Held constant vs Sekiro: same Mac, same `Steam-Wine11` prefix, same wine 10 + msync, same DXMT
+0.80, same MetalFX ON, same launch method (`gpuprof-direct.sh --game asbr`), keep-alive OFF.
+**Only the title differs.**
+
+And it is not a lighter workload — JJBA submits **~1502 cb/5 s at 77% GPU busy** versus Sekiro's
+~900 cb/5 s at ~33%. It works the GPU roughly twice as hard and stays clean, which argues against
+submission volume or GPU pressure as the driver.
+
+**What this supports:** the stall is not simply "Apple's driver misbehaves on this M5" — it needs
+something Sekiro's workload specifically does. **What it does NOT identify:** what that something
+is. No hypothesis offered; this session already produced six wrong ones.
+
 ## Deviations from protocol (recorded as they happen)
 
 - **Cell 3: INVALID.** Stopped by request at 9.1 min with 0 stalls (needs >=15). Suggestive but

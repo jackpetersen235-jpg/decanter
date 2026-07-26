@@ -18,6 +18,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 DYL="$HERE/libgpustall.dylib"
 
 NO_KA=0
+GAME_KEY=sekiro
 NO_METALFX=0
 SYNC_MODE=
 KA_US=50000
@@ -36,6 +37,8 @@ while [ $# -gt 0 ]; do
     # it must be ruled in or out before blaming Apple's driver. Costs temporary exposure to the
     # firmware idle-wake hang (the other, unrelated bug) for the duration of the test.
     --no-keepalive) NO_KA=1; shift ;;
+    # --game sekiro|asbr — which title to launch and profile.
+    --game) GAME_KEY="$2"; shift 2 ;;
     # Disable MetalFX. Must be applied AFTER the launcher's exports are eval'd below, or they
     # overwrite it. NOTE this also RAISES GPU load: with spatial upscaling the game renders at a
     # lower internal resolution and MetalFX scales it up, so turning it off means rendering at
@@ -73,7 +76,15 @@ WB="$WINEROOT/bin"
 PREFIX="$HOME/Library/Application Support/Decanter/Bottles/Steam-Wine11"
 CACHE="$HOME/Library/Application Support/Decanter/ShaderCache/Sekiro"
 DATA="$HOME/Library/Application Support/Decanter"
-GAME="$PREFIX/drive_c/Program Files (x86)/Steam/steamapps/common/Sekiro/sekiro.exe"
+case "$GAME_KEY" in
+  sekiro) GAME="$PREFIX/drive_c/Program Files (x86)/Steam/steamapps/common/Sekiro/sekiro.exe"
+          GAME_PROC='sekiro\.exe'; APPID=814380 ;;
+  # ASBR.exe directly, NOT start_protected_game.exe — that is the Easy Anti-Cheat shim and EAC
+  # does not work under Wine on macOS. Offline/single-player only.
+  asbr)   GAME="$PREFIX/drive_c/Program Files (x86)/Steam/steamapps/common/JoJo's Bizarre Adventure All-Star Battle R/ASBR.exe"
+          GAME_PROC='ASBR\.exe'; APPID=1372110 ;;
+  *) echo "unknown --game: $GAME_KEY (sekiro|asbr)" >&2; exit 2 ;;
+esac
 [ -x "$CONTENTS/MacOS/Sekiro" ] || { echo "no launcher in $APP_BUNDLE" >&2; exit 1; }
 echo "engine: $APP_BUNDLE"
 
@@ -115,12 +126,15 @@ if [ "$NO_METALFX" = 1 ]; then
 fi
 
 # Tell steam_api64 which app this is, since Steam is not the one launching us.
-export SteamAppId=814380 SteamGameId=814380
+export SteamAppId=$APPID SteamGameId=$APPID
 
 export DYLD_INSERT_LIBRARIES="$DYL"
 export GPUSTALL_LOG="$DATA/gpustall-$STAMP.log"
 export GPUSTALL_SLOW_MS="$SLOW_MS"
 export GPUSTALL_VERBOSE=1
+# NOTE: no GPUSTALL_MATCH needed. The dylib arms on any process that creates a Metal device
+# (it stopped gating on argv after wine's argv rewriting made that unreliable), excluding only
+# GPUSTALL_EXCLUDE (default: gpukeepalive). So it profiles whichever game we launch.
 
 # Run the GPU keep-alive exactly as the bundle launcher does. The stalls we are chasing occur
 # WITH it running (it is part of Jack's accepted config), so omitting it here would change the
@@ -169,7 +183,7 @@ else
 fi
 
 wait $GAMEPID 2>/dev/null || true
-while pgrep -f 'sekiro\.exe' >/dev/null 2>&1; do sleep 5; done
+while pgrep -f "$GAME_PROC" >/dev/null 2>&1; do sleep 5; done
 kill $SAMPLER 2>/dev/null || true
 sleep 1
 echo
