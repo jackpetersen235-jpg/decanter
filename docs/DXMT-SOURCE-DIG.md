@@ -72,3 +72,42 @@ in this investigation; this one has a mechanism, a workload match, and an explan
 blind spot — but it has not been measured.
 
 Also still open: whether `gpuMS` (`GPUEndTime - GPUStartTime`) is valid at all.
+
+## ⭐ DXMT ALREADY INSTRUMENTS ITS OWN BLOCKING — do not rebuild it
+
+`d3d11_swapchain.cpp:814-891` draws a diagnostic overlay via `HUDState`, which wraps Apple's
+`MTLDeveloperHUDProperties` — i.e. it is driven by **`MTL_HUD_ENABLED=1`**, already the default in
+`Sekiro.app` (`MTL_HUD_ENABLED="${SEKIRO_HUD:-1}"`). No rebuild, no hooks, no code changes.
+
+Lines it prints, and what each one settles:
+
+| HUD line | fields | answers |
+|---|---|---|
+| `Commit: N -avg -max` | `command_buffer_count`, `commit_interval` avg/max | the 32-chunk ring wait — how long the game thread blocks for a free chunk |
+| `Sync: N avg  S lat L` | `sync_count`, `sync_interval`, `event_stall`, `present_latency_interval`, `latency` | event stalls **and** the `PresentBoundary` frame-latency block |
+| `Encode: p+f+d=t` | `encode_prepare_interval`, `encode_flush_interval`, `drawable_blocking_interval` | encode cost and **blocking on drawable acquisition** |
+| `Render:/Clear:` | pass counts + how many were optimized away | pass structure per frame |
+
+This covers every blocking point found in this document, measured by DXMT itself, in milliseconds,
+per frame — including `drawable_blocking_interval`, which nothing in our own profiler measures.
+
+### Game-thread blocking points, complete list
+
+1. `PresentBoundary()` → `frame_latency_fence_.wait(frame_count - max_latency_)`, **default
+   `max_latency_ = 3`** (`dxmt_command_queue.hpp:153`) — blocks EVERY present until frame N-3
+   finishes. Timed as `present_latency_interval`.
+2. `CommitCurrentChunk()` → `chunk_ongoing.wait(31)` — ELIMINATED (outstanding was 1).
+   Timed as `commit_interval`.
+3. `flushToWait()` → `flushInternal()` → `upload_queue_.commandBuffer()` with
+   **`maxCommandBufferCount = 2`** — blocks while holding `mutex_`. **NOT timed by the HUD**; this
+   remains the one candidate the built-in instrumentation does not cover.
+4. `WaitUntilGPUIdle()` → `WaitCPUFence` — swapchain resize / colorspace change / destruction only.
+5. `dxmt_presenter.cpp:123` `frame_presented_.wait(frame_requested_)` — presenter sync.
+
+### Plan (revised — build far less)
+
+1. **Turn the HUD on and read it during a stall.** Zero code. Settles points 1, 2 and the encode
+   path immediately, and `drawable_blocking_interval` is a candidate nothing else measures.
+2. Only if the HUD exonerates all of those, instrument point 3 (time spent *inside*
+   `[queue commandBuffer]`, tagged by queue) — the one gap in both DXMT's instrumentation and ours.
+3. Separately, the `gpuMS` validity check (wall clock commit→completion) still gates everything.
