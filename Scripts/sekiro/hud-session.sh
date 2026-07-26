@@ -39,9 +39,14 @@ pkill -9 -f 'sekiro\.exe' 2>/dev/null; pkill -9 -f 'wineserver' 2>/dev/null
 pkill -9 -f 'steam\.exe' 2>/dev/null; pkill -f 'MacOS/gpukeepalive' 2>/dev/null
 sleep 3
 
+# These names must match the ones the bundle launcher's own export lines reference, because we
+# eval those lines verbatim below rather than duplicating the tuned values.
 CONTENTS="$HOME/Applications/Sekiro.app/Contents"
-WB="$CONTENTS/Frameworks/Wine/bin"
+WINEROOT="$CONTENTS/Frameworks/Wine"
+WB="$WINEROOT/bin"
 PREFIX="$D/Bottles/Steam-Wine11"
+CACHE="$D/ShaderCache/Sekiro"
+mkdir -p "$CACHE"
 GAME="$PREFIX/drive_c/Program Files (x86)/Steam/steamapps/common/Sekiro/sekiro.exe"
 
 # take the tuned env from the real launcher, then override the two things this test controls
