@@ -221,7 +221,16 @@ static void (*orig_dispatchIndirect)(id, SEL, id, NSUInteger, MTLSize);
 static void (*orig_compEndEnc)(id, SEL);
 
 static void (*orig_setRendPSO)(id, SEL, id);
+// The BASE variants below are not enough on their own. A modern engine overwhelmingly uses the
+// baseVertex:baseInstance: form, and if it is not hooked the render encoders record no work, get
+// skipped by dumpCB, and the log looks like the game is 100% compute. That is exactly what
+// happened on 2026-07-25 and it made the encoder-composition analysis useless.
 static void (*orig_drawPrim)(id, SEL, MTLPrimitiveType, NSUInteger, NSUInteger, NSUInteger);
+static void (*orig_drawPrimBase)(id, SEL, MTLPrimitiveType, NSUInteger, NSUInteger, NSUInteger, NSUInteger);
+static void (*orig_drawIndexedBase)(id, SEL, MTLPrimitiveType, NSUInteger, MTLIndexType, id,
+                                    NSUInteger, NSUInteger, NSInteger, NSUInteger);
+static void (*orig_drawPrimIndirect)(id, SEL, MTLPrimitiveType, id, NSUInteger);
+static void (*orig_drawIndexedIndirect)(id, SEL, MTLPrimitiveType, MTLIndexType, id, NSUInteger, id, NSUInteger);
 static void (*orig_drawIndexed)(id, SEL, MTLPrimitiveType, NSUInteger, MTLIndexType, id,
                                 NSUInteger, NSUInteger);
 static void (*orig_rendEndEnc)(id, SEL);
@@ -343,6 +352,36 @@ static void my_encSignalEvent(id self, SEL _cmd, id ev, uint64_t val) {
     CBRec *r = cbRecFor(self, YES);
     if (r) r.eventSignals++;
     orig_encSignalEvent(self, _cmd, ev, val);
+}
+
+static void my_drawPrimBase(id self, SEL _cmd, MTLPrimitiveType t, NSUInteger start,
+                            NSUInteger count, NSUInteger inst, NSUInteger baseInst) {
+    EncRec *r = encRecFor(self);
+    if (r) [r tally:(uint64_t)count * (inst ?: 1)];
+    orig_drawPrimBase(self, _cmd, t, start, count, inst, baseInst);
+}
+
+static void my_drawIndexedBase(id self, SEL _cmd, MTLPrimitiveType t, NSUInteger idxCount,
+                               MTLIndexType it, id buf, NSUInteger off, NSUInteger inst,
+                               NSInteger baseVtx, NSUInteger baseInst) {
+    EncRec *r = encRecFor(self);
+    if (r) [r tally:(uint64_t)idxCount * (inst ?: 1)];
+    orig_drawIndexedBase(self, _cmd, t, idxCount, it, buf, off, inst, baseVtx, baseInst);
+}
+
+// Indirect draws: the counts live in a GPU buffer, so work is unknowable here. Tally 0 — the
+// encoder still gets recorded, which is what the composition analysis needs.
+static void my_drawPrimIndirect(id self, SEL _cmd, MTLPrimitiveType t, id buf, NSUInteger off) {
+    EncRec *r = encRecFor(self);
+    if (r) [r tally:0];
+    orig_drawPrimIndirect(self, _cmd, t, buf, off);
+}
+
+static void my_drawIndexedIndirect(id self, SEL _cmd, MTLPrimitiveType t, MTLIndexType it,
+                                   id ibuf, NSUInteger ioff, id abuf, NSUInteger aoff) {
+    EncRec *r = encRecFor(self);
+    if (r) [r tally:0];
+    orig_drawIndexedIndirect(self, _cmd, t, it, ibuf, ioff, abuf, aoff);
 }
 
 static void my_compEndEnc(id self, SEL _cmd) {
@@ -481,6 +520,20 @@ static void dumpCB(NSString *tag, CBRec *r, double gpuMS, double schedMS, int64_
             r.createWall > 0 ? (r.commitWall - r.createWall) * 1000.0 : -1.0,
             r.fenceWaits, r.fenceUpdates, r.eventWaits, r.eventSignals,
             r.firstEventWait ? [NSString stringWithFormat:@" firstEventWait=%@", r.firstEventWait] : @"");
+    // Compact kind sequence for EVERY encoder, in order, whether or not it recorded work:
+    // R=render C=compute B=blit. Needed for composition analysis — the per-pipeline lines below
+    // only appear for encoders that recorded a draw/dispatch, so on their own they misrepresent
+    // the buffer (they made Sekiro look 100% compute when ~90% of its encoders are render).
+    if (r.encoders.count) {
+        NSMutableString *seq = [NSMutableString string];
+        for (EncRec *e in r.encoders) {
+            unichar c = [e.kind isEqualToString:@"render"] ? 'R'
+                      : [e.kind isEqualToString:@"compute"] ? 'C' : 'B';
+            [seq appendFormat:@"%C", c];
+        }
+        logline(@"    seq %@", seq);
+    }
+
     NSUInteger i = 0;
     for (EncRec *e in r.encoders) {
         if (e.stats.count == 0) { i++; continue; }
@@ -616,6 +669,17 @@ static void bindEncoderClass(id enc, BOOL compute) {
                     (IMP *)&orig_setRendPSO);
             swizzle(g_rendEncCls, @selector(drawPrimitives:vertexStart:vertexCount:instanceCount:),
                     (IMP)my_drawPrim, (IMP *)&orig_drawPrim);
+            swizzle(g_rendEncCls,
+                    @selector(drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:),
+                    (IMP)my_drawPrimBase, (IMP *)&orig_drawPrimBase);
+            swizzle(g_rendEncCls,
+                    @selector(drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:baseVertex:baseInstance:),
+                    (IMP)my_drawIndexedBase, (IMP *)&orig_drawIndexedBase);
+            swizzle(g_rendEncCls, @selector(drawPrimitives:indirectBuffer:indirectBufferOffset:),
+                    (IMP)my_drawPrimIndirect, (IMP *)&orig_drawPrimIndirect);
+            swizzle(g_rendEncCls,
+                    @selector(drawIndexedPrimitives:indexType:indexBuffer:indexBufferOffset:indirectBuffer:indirectBufferOffset:),
+                    (IMP)my_drawIndexedIndirect, (IMP *)&orig_drawIndexedIndirect);
             swizzle(g_rendEncCls,
                     @selector(drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:),
                     (IMP)my_drawIndexed, (IMP *)&orig_drawIndexed);

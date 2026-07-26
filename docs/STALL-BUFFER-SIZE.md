@@ -60,6 +60,31 @@ lever, and it sits in DXMT.
 That also explains the cross-title contrast without invoking anything machine-specific: JJBA's
 render pattern simply never causes DXMT to accumulate 100+ encoders before committing.
 
+## Composition analysis: RUN, and it came back NEGATIVE (2026-07-25)
+
+The instrumentation gap was fixed first — the earlier "100% compute" result was an artifact of only
+hooking the basic draw entry points, so every render encoder recorded no work and was skipped.
+Added `drawPrimitives:...baseInstance:`, `drawIndexedPrimitives:...baseVertex:baseInstance:`, and
+both indirect variants, plus a per-buffer `seq` line (R/C/B per encoder, logged whether or not the
+encoder recorded work). Verified: 309 render encoder lines where the old build logged zero.
+
+Result on a captured stall (136 encoders, 26 584 ms):
+
+| | encoders | type-switches | mix |
+|---|---|---|---|
+| **STALLED** | 136 | 8.0 | R 94% / C 6% |
+| normal, >=100 encoders (n=131) | 130.5 | 9.4 | R 92% / C 8% |
+| normal, <100 encoders (n=392) | 13.5 | 1.0 | R 92% / C 8% |
+
+**The stalled buffer is structurally indistinguishable from normal large buffers.** Same length,
+same render/compute ratio, same transition count. n=1 for the stall, so this cannot firmly assert
+"identical" — but it shows no distinctive shape whatsoever.
+
+**Consequence: the size correlation has no mechanism behind it.** Large buffers stall sometimes and
+not others, with the same structure, so size alone is not the cause and the "batching policy"
+framing below is NOT supported by composition data. A DXMT report would rest on the count
+correlation and the JJBA contrast, with no proposed mechanism — weaker than it looked.
+
 ## What would actually test it
 
 Locally, the honest answer is **not much** — DXMT exposes no knob to cap encoders per command
