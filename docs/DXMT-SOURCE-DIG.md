@@ -144,3 +144,21 @@ collapsed. Do not promote the setting until the TRUE arm reproduces the pauses.
 
 Also unresolved: the flag may exist in Sekiro.app for a *rendering* reason, not a performance one.
 Watch for visual artifacts with it off before making it permanent.
+
+
+### Both arms, as run (2026-07-25, investigation stopped here)
+
+| arm | flag | played | long pauses |
+|---|---|---|---|
+| 1 | `ignoreMapFlagNoWait=False` | 14.6 min | 0 |
+| 2 | `ignoreMapFlagNoWait=True` | 6.2 min | 0 |
+
+Arm 2 was stopped early by request, so it is **not** a valid control — 6.2 min is below the
+threshold and cannot distinguish "flag is harmless" from "not enough time". **The flag is neither
+confirmed nor cleared.**
+
+What IS notable: ~21 min of play across both arms with zero long pauses, on a config of
+**MetalFX ON + keep-alive OFF** — the same combination that earlier went 30.9 min clean. Whatever
+else is true, that config has now accumulated ~52 min of long-pause-free play.
+
+Investigation stopped here. If resumed, arm 2 needs a full ~15 min run.
