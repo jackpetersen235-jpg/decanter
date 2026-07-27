@@ -533,7 +533,7 @@ final class AppModel: ObservableObject {
             // DIRECT-EXE bottles: run the game binary itself rather than `steam.exe -applaunch`.
             // Needed for titles whose Steam entry point is an anti-cheat shim (EAC does not work
             // under Wine on macOS). Steam must still be up first for steam_api64 to connect.
-            let direct = bottle.settings.directExecutable.trimmingCharacters(in: .whitespaces)
+            let direct = (bottle.settings.directExecutable ?? "").trimmingCharacters(in: .whitespaces)
             if !direct.isEmpty {
                 if await !isSteamRunning() {
                     let steamArgs = [bottle.steamExecutable.path]
@@ -619,7 +619,7 @@ final class AppModel: ObservableObject {
     /// `steam_api64.dll` has no other way to know which app it belongs to. Falls back to parsing
     /// `-applaunch <id>` out of the Steam arguments if the field is blank.
     private func steamAppEnvironment(for bottle: Bottle) -> [String: String] {
-        var id = bottle.settings.steamAppID.trimmingCharacters(in: .whitespaces)
+        var id = (bottle.settings.steamAppID ?? "").trimmingCharacters(in: .whitespaces)
         if id.isEmpty, let r = bottle.settings.steamArguments.range(of: "-applaunch ") {
             id = bottle.settings.steamArguments[r.upperBound...]
                 .prefix(while: { $0.isNumber }).description

@@ -126,10 +126,15 @@ struct BottleSettings: Codable, Equatable {
     /// Steam still has to be RUNNING — `steam_api64.dll` talks to the live client — so the
     /// launcher starts Steam first and only then runs this. `SteamAppId` tells the API which
     /// app the process is, since Steam is not the one spawning it.
-    var directExecutable: String = ""
+    /// OPTIONAL ON PURPOSE. `BottleSettings` uses synthesized `Codable`, and Swift's synthesized
+    /// decoder FAILS on a missing key for a non-optional property even when it has a default —
+    /// which means adding a plain `String` here makes every previously-saved bottle undecodable,
+    /// the whole array fails, and Decanter shows the first-run setup screen with no bottles.
+    /// That happened on 2026-07-27. Optional makes the decoder use decodeIfPresent instead.
+    var directExecutable: String? = nil
 
     /// Steam AppID, used to set SteamAppId/SteamGameId when `directExecutable` is used.
-    var steamAppID: String = ""
+    var steamAppID: String? = nil
 
     /// Environment variables implied purely by these settings (no Wine paths — those are
     /// added by `Wine.environment(...)`).
