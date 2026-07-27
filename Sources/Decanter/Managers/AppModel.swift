@@ -529,6 +529,28 @@ final class AppModel: ObservableObject {
                 return
             }
             launchingBottleIDs.insert(bottle.id)
+
+            // DIRECT-EXE bottles: run the game binary itself rather than `steam.exe -applaunch`.
+            // Needed for titles whose Steam entry point is an anti-cheat shim (EAC does not work
+            // under Wine on macOS). Steam must still be up first for steam_api64 to connect.
+            let direct = bottle.settings.directExecutable.trimmingCharacters(in: .whitespaces)
+            if !direct.isEmpty {
+                if await !isSteamRunning() {
+                    let steamArgs = [bottle.steamExecutable.path]
+                        + Steam.launchArguments(from: "-silent -no-cef-sandbox -skipinitialbootstrap")
+                    launchQuietly(bottle: bottle, arguments: steamArgs)
+                    // Let the client come up and log on before the game asks it anything.
+                    try? await Task.sleep(nanoseconds: 25_000_000_000)
+                }
+                launchQuietly(bottle: bottle, arguments: [direct], extraEnvironment: steamAppEnvironment(for: bottle))
+                suppressWineSystray(isGameLauncher: true)
+                Task {
+                    try? await Task.sleep(nanoseconds: 30_000_000_000)
+                    launchingBottleIDs.remove(bottle.id)
+                }
+                return
+            }
+
             let args = [bottle.steamExecutable.path] + Steam.launchArguments(from: bottle.settings.steamArguments)
             // Quiet: no console sheet pops over Decanter (which made the first click look like a
             // no-op). Steam just opens on its own.
@@ -568,9 +590,11 @@ final class AppModel: ObservableObject {
 
     /// Launch a long-lived program without popping a console sheet. Used for games/Steam, where
     /// the user just wants the app to open — not a log window.
-    private func launchQuietly(bottle: Bottle, arguments: [String]) {
+    private func launchQuietly(bottle: Bottle, arguments: [String],
+                               extraEnvironment: [String: String] = [:]) {
         guard let installation = installation(for: bottle) else { return }
-        let env = Wine.environment(for: bottle, using: installation)
+        var env = Wine.environment(for: bottle, using: installation)
+        for (k, v) in extraEnvironment { env[k] = v }
         _ = try? Shell.stream(installation.loader, arguments: arguments, environment: env,
                               onOutput: { _ in }, onExit: { _ in })
     }
@@ -591,6 +615,19 @@ final class AppModel: ObservableObject {
     /// prefix from argv (the prefix lives in the env, not the command line). So this also kills
     /// explorer in *other* running bottles. That's why it's limited to the plain-Steam case,
     /// where the only cost is losing a tray icon.
+    /// `SteamAppId`/`SteamGameId` for a direct-exe launch. Steam is not spawning the process, so
+    /// `steam_api64.dll` has no other way to know which app it belongs to. Falls back to parsing
+    /// `-applaunch <id>` out of the Steam arguments if the field is blank.
+    private func steamAppEnvironment(for bottle: Bottle) -> [String: String] {
+        var id = bottle.settings.steamAppID.trimmingCharacters(in: .whitespaces)
+        if id.isEmpty, let r = bottle.settings.steamArguments.range(of: "-applaunch ") {
+            id = bottle.settings.steamArguments[r.upperBound...]
+                .prefix(while: { $0.isNumber }).description
+        }
+        guard !id.isEmpty else { return [:] }
+        return ["SteamAppId": id, "SteamGameId": id]
+    }
+
     private func suppressWineSystray(isGameLauncher: Bool) {
         guard !isGameLauncher else { return }
         Task {
@@ -600,6 +637,36 @@ final class AppModel: ObservableObject {
                                          arguments: ["-f", "explorer.exe"])
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
             }
+        }
+    }
+
+    /// Remove a Steam menu-bar icon that OUTLIVES Steam itself.
+    ///
+    /// `suppressWineSystray` only sweeps for ~48s after a launch, so it cannot help here: when
+    /// Steam is quit later, Wine's `explorer.exe` survives (it is not a child of steam.exe) and
+    /// keeps its `NSStatusItem` in the menu bar indefinitely — a stale icon for a Steam that is
+    /// gone. Killing explorer is safe: game windows are owned by `winemac.drv`, not explorer, and
+    /// explorer does not respawn.
+    ///
+    /// Only fires when NOTHING is running in any bottle, so it can never kill the per-app virtual
+    /// desktop a running game depends on.
+    func reapOrphanedSystray() {
+        Task {
+            guard await !isSteamRunning(), await !isAnyGameRunning() else { return }
+            _ = try? await Shell.run(URL(fileURLWithPath: "/usr/bin/pkill"),
+                                     arguments: ["-f", "explorer.exe"])
+        }
+    }
+
+    /// True if any Windows game process is running in a bottle (not Steam itself).
+    private func isAnyGameRunning() async -> Bool {
+        guard let result = try? await Shell.run(URL(fileURLWithPath: "/bin/ps"),
+                                                arguments: ["-Ao", "command="]) else { return false }
+        return result.stdout.split(separator: "\n").contains { line in
+            line.contains(".exe") && !line.contains("steam.exe") && !line.contains("explorer.exe")
+                && !line.contains("services.exe") && !line.contains("winedevice.exe")
+                && !line.contains("svchost.exe") && !line.contains("rpcss.exe")
+                && !line.contains("plugplay.exe") && !line.contains("steamwebhelper.exe")
         }
     }
 

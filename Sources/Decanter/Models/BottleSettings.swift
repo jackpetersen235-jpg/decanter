@@ -114,6 +114,23 @@ struct BottleSettings: Codable, Equatable {
     /// `-applaunch`, where Steam is just a DRM host and its UI is unwanted.
     var steamArguments: String = "-no-cef-sandbox -skipinitialbootstrap"
 
+    /// Windows path of a game .exe to run DIRECTLY, instead of going through
+    /// `steam.exe -applaunch`. Empty means "launch via Steam" (the normal path).
+    ///
+    /// Why this exists: some titles ship an anti-cheat shim as their Steam entry point
+    /// (JJBA: All-Star Battle R launches `start_protected_game.exe`, which loads Easy
+    /// Anti-Cheat). EAC does not work under Wine on macOS, so `-applaunch` cannot start
+    /// those games at all. Running the real executable directly bypasses the shim and gets
+    /// single-player working; online play is not possible either way.
+    ///
+    /// Steam still has to be RUNNING — `steam_api64.dll` talks to the live client — so the
+    /// launcher starts Steam first and only then runs this. `SteamAppId` tells the API which
+    /// app the process is, since Steam is not the one spawning it.
+    var directExecutable: String = ""
+
+    /// Steam AppID, used to set SteamAppId/SteamGameId when `directExecutable` is used.
+    var steamAppID: String = ""
+
     /// Environment variables implied purely by these settings (no Wine paths — those are
     /// added by `Wine.environment(...)`).
     var derivedEnvironment: [String: String] {
