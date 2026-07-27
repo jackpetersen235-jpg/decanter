@@ -525,8 +525,13 @@ final class AppModel: ObservableObject {
             // For a plain Steam launcher, a second click while Steam runs should just focus it —
             // this is what fixes "every click reopens Steam".
             if !isGameLauncher, await isSteamRunning() {
-                activateRunningGame()
-                return
+                // Steam's PROCESS existing is not the same as Steam being usable. After a crash or
+                // a hard kill, steam.exe can linger for hours with no window — and focusing
+                // nothing made Decanter look broken ("Steam won't launch") while it was in fact
+                // behaving as designed. If there is nothing to focus, treat the prefix as wedged,
+                // shut it down cleanly and fall through to a fresh launch.
+                if activateRunningGame() { return }
+                await shutdownPrefix(for: bottle)
             }
             launchingBottleIDs.insert(bottle.id)
 
@@ -581,11 +586,41 @@ final class AppModel: ObservableObject {
     }
 
     /// Bring the already-running game/Steam window to the front (best effort).
-    private func activateRunningGame() {
+    /// Focus an already-running Steam/game window. Returns FALSE if there was no such window to
+    /// focus — which is the signal that a `steam.exe` process exists but has no GUI presence, i.e.
+    /// a wedged prefix. See `launchSteam`.
+    @discardableResult
+    private func activateRunningGame() -> Bool {
+        var activated = false
         for app in NSWorkspace.shared.runningApplications
         where app.localizedName == "wine" || app.localizedName == "Steam" {
             app.activate()
+            activated = true
         }
+        return activated
+    }
+
+    /// Shut a bottle's prefix down cleanly with `wineserver -k`, then sweep the stragglers.
+    ///
+    /// `wineserver -k` FIRST is not optional. Killing wineserver directly orphans its children —
+    /// `services.exe`, `winedevice.exe`, `explorer.exe` survive for hours, accumulate across
+    /// launches, and eventually wedge the prefix so no new Steam can start. That is exactly the
+    /// failure this function exists to recover from, so it must not cause it.
+    private func shutdownPrefix(for bottle: Bottle) async {
+        guard let installation = installation(for: bottle) else { return }
+        let env = Wine.environment(for: bottle, using: installation)
+        let server = installation.loader.deletingLastPathComponent()
+            .appendingPathComponent("wineserver")
+        if FileManager.default.isExecutableFile(atPath: server.path) {
+            _ = try? await Shell.run(server, arguments: ["-k"], environment: env)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+        }
+        for pattern in ["steam\\.exe", "steamwebhelper", "explorer\\.exe",
+                        "services\\.exe", "winedevice", "rpcss\\.exe", "plugplay"] {
+            _ = try? await Shell.run(URL(fileURLWithPath: "/usr/bin/pkill"),
+                                     arguments: ["-f", pattern])
+        }
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
     }
 
     /// Launch a long-lived program without popping a console sheet. Used for games/Steam, where
