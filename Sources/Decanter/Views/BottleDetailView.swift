@@ -62,6 +62,26 @@ struct BottleDetailView: View {
             // Primary gaming actions.
             GroupBox("Steam") {
                 VStack(alignment: .leading, spacing: 12) {
+                    // An engine older than wine 8 will start Steam and then kill it with
+                    // "Failed to load steamui.dll" — a fatal error that names a DLL instead of the
+                    // real cause. Say so BEFORE the user clicks Launch.
+                    if let inst = model.installation(for: bottle), !inst.isSteamCapable {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("This bottle's engine is too old for Steam")
+                                    .font(.callout.weight(.semibold))
+                                Text("\(inst.name) \(inst.version ?? "") cannot load modern Steam "
+                                     + "(it fails with \"Failed to load steamui.dll\"). "
+                                     + "Run View ▸ Setup Assistant to install the Decanter engine, "
+                                     + "then make a new bottle.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        }
+                        .padding(.bottom, 4)
+                    }
+
                     if bottle.isSteamInstalled {
                         let launching = model.launchingBottleIDs.contains(bottle.id)
                         Text("Steam is installed in this bottle.").foregroundStyle(.secondary)

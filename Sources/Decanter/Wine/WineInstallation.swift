@@ -7,6 +7,19 @@ struct WineInstallation: Codable, Equatable, Identifiable, Hashable {
     var name: String
     var version: String?
 
+    /// Modern Steam needs wine 8+. Older engines load the client but then die with
+    /// "Failed to load steamui.dll" — reported on a friend's machine 2026-07-27, where Decanter's
+    /// own engine was never installed and discovery fell through to a Whisky wine-7.7.
+    ///
+    /// The failure is silent and misleading: the bottle says "Steam ready", Steam starts, and only
+    /// then throws a fatal error that names a DLL rather than the real cause (the engine).
+    var isSteamCapable: Bool {
+        guard let version else { return true }          // unknown: don't block the user
+        let digits = version.drop(while: { !$0.isNumber })
+        let major = Int(digits.prefix(while: { $0.isNumber })) ?? 0
+        return major == 0 || major >= 8
+    }
+
     var id: String { binDirectory.path }
 
     var wine: URL { binDirectory.appendingPathComponent("wine") }
