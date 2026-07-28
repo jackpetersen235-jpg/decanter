@@ -552,8 +552,27 @@ static void dumpCB(NSString *tag, CBRec *r, double gpuMS, double schedMS, int64_
 
 // Queue-level hook so we know when the buffer was born, not just when it was committed.
 static id (*orig_queueCB)(id, SEL);
+// How long [queue commandBuffer] BLOCKS, per queue.
+//
+// This is the one candidate DXMT-SOURCE-DIG.md flagged and never measured: the resource
+// initializer's upload queue is created with maxCommandBufferCount = 2 (kResourceInitializerChunks,
+// dxmt_resource_initializer.hpp:13) against the main queue's 32. Metal blocks in `commandBuffer`
+// once that many are in flight, so the GAME THREAD stalls there -- while holding mutex_.
+//
+// It predicts what is actually observed: stalls cluster at area loads and death reloads, which is
+// exactly when the asset-upload path is busiest, and the GPU is saturated during a stall because
+// the outstanding upload buffers really are executing.
+//
+// Queues are reported by pointer. The main queue is whichever accumulates the most buffers; a
+// long block on any OTHER queue is the upload queue and would settle this.
+static double g_qbWarnMS = 100.0;
+
 static id my_queueCB(id self, SEL _cmd) {
+    double t0 = nowWall();
     id cb = orig_queueCB(self, _cmd);
+    double dtMS = (nowWall() - t0) * 1000.0;
+    if (dtMS >= g_qbWarnMS)
+        logline(@"QUEUE-BLOCK %.1fms  queue=%p", dtMS, (__bridge void *)self);
     if (cb) {
         CBRec *r = cbRecFor(cb, YES);
         if (r) r.createWall = nowWall();
@@ -852,6 +871,54 @@ static void *keepaliveThread(void *ctx) {
     return NULL;
 }
 
+
+// ---------------------------------------------------------------------------- drawable blocking
+//
+// WHY THIS EXISTS. Command-buffer SIZE was falsified on 2026-07-28: DXVK builds bigger buffers than
+// DXMT (max 393 vs 233) on identical wine/prefix/Steam/GPU/game and never stalls. So the stall is
+// not about how much work is batched. What survives is the shape of the stall itself -- one submit
+// blocked in IOConnectTrap4 with the encode thread idle and the chunk ring nearly empty, i.e.
+// waiting on something EXTERNAL to DXMT.
+//
+// Drawable acquisition is exactly such a thing, and it is the one blocking path this project has
+// never measured. DXMT computes `drawable_blocking_interval` itself but the HUD counters are
+// `#ifndef DXMT_DEBUG` no-ops in release builds. Hooking CAMetalLayer directly gets the same number
+// out of a stock DXMT, and works for DXVK and D3DMetal too, so layers stay comparable.
+//
+// The user also observed the Metal HUD flipping Direct <-> Composited during play, and the HUD
+// freezing. Both are display-side reconfigurations, and both would show up here as a long
+// nextDrawable.
+static IMP    g_origNextDrawable = NULL;
+static double g_drawableWarnMS   = 100.0;
+static _Atomic(uint64_t) g_drawableBlocks = 0;
+static _Atomic(uint64_t) g_drawableWorstUS = 0;
+
+// NOT ns_returns_retained: -[CAMetalLayer nextDrawable] returns an autoreleased +0 object, unlike
+// the MTLDevice creators above. Returning void* keeps ARC out of the ownership decision entirely.
+static void *my_nextDrawable(id self, SEL _cmd) {
+    double t0 = nowWall();
+    void *d = ((void *(*)(id, SEL))g_origNextDrawable)(self, _cmd);
+    double dtMS = (nowWall() - t0) * 1000.0;
+    if (dtMS >= g_drawableWarnMS) {
+        atomic_fetch_add(&g_drawableBlocks, 1);
+        uint64_t us = (uint64_t)(dtMS * 1000.0), prev = atomic_load(&g_drawableWorstUS);
+        while (us > prev && !atomic_compare_exchange_weak(&g_drawableWorstUS, &prev, us)) {}
+        logline(@"DRAWABLE-BLOCK %.1fms   drawable=%s", dtMS, d ? "ok" : "NIL");
+    }
+    return d;
+}
+
+static void installDrawableHook(void) {
+    Class cls = objc_getClass("CAMetalLayer");
+    if (!cls) { logline(@"drawable hook: CAMetalLayer not found"); return; }
+    if (getenv("GPUSTALL_DRAWABLE_MS")) g_drawableWarnMS = atof(getenv("GPUSTALL_DRAWABLE_MS"));
+    if (getenv("GPUSTALL_QUEUE_MS")) g_qbWarnMS = atof(getenv("GPUSTALL_QUEUE_MS"));
+    if (swizzle(cls, @selector(nextDrawable), (IMP)my_nextDrawable, &g_origNextDrawable))
+        logline(@"drawable hook armed (warn >= %.0fms)", g_drawableWarnMS);
+    else
+        logline(@"drawable hook FAILED to install");
+}
+
 static void bootstrap(id<MTLDevice> dev) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -859,6 +926,10 @@ static void bootstrap(id<MTLDevice> dev) {
         g_encRecs   = mkTable();
         g_encToCB   = mkTable();
         g_pipeNames = mkTable();
+
+        // Display-side blocking. Installed here rather than at load time because CAMetalLayer is
+        // only guaranteed to be present once something has actually touched Metal.
+        installDrawableHook();
 
         Class devCls = object_getClass(dev);
         swizzle(devCls, @selector(newComputePipelineStateWithFunction:error:),

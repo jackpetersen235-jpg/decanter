@@ -395,3 +395,50 @@ the one recorded above from the same session: **Direct <-> Composited presentati
 DXMT's never-read `drawable_blocking_interval`. That fits the stall signature — one submit blocked
 in `IOConnectTrap4`, encode thread idle, chunk ring nearly empty, i.e. waiting on something
 external to DXMT rather than on queued work.
+
+## ✅ 2026-07-28 (evening): the stall is GPU EXECUTION. Every CPU-side path is cleared.
+
+Nine stalls captured with wall-clock confirmation, GPU utilisation sampling, queue-block timing,
+drawable timing, and stacks taken *inside* the stall window (verified against stall start/end).
+
+**Where the time goes** — `dxmt-finish-thr`, 1187 of 1303 samples (91%) during a live stall:
+
+```
+??? (in winemetal.so)
+  -[_MTLCommandBuffer waitUntilCompleted]
+    _pthread_cond_wait
+```
+
+The CPU is asleep on a condition variable. Meanwhile `device_util` = **98.8%** (vs 75.0% in normal
+play) and the process sits in state `U`. The GPU really is executing for ~26.5 s.
+
+**Every CPU-side candidate measured and cleared, in one session:**
+
+| candidate | measurement | verdict |
+|---|---|---|
+| resource-initializer upload queue (depth 2) | `[queue commandBuffer]` timed per queue | **0** blocks >100 ms, ever |
+| drawable acquisition | `-[CAMetalLayer nextDrawable]` timed | 1 s cap, 3-for-3, *downstream* symptom |
+| kernel submit (`IOConnectTrap4`) | stack sampling in-stall | 1 sample of 1303 |
+| mutex contention | stack sampling in-stall | 26 samples total across all threads |
+| GPU firmware reset | `recoveryCount` | flat at 41 across all stalls |
+| memory / paging | `vm_fault`/pageout frames in stacks | **0**; GPU memory *fell* as stalls sped up |
+| scheduling delay | `sched` = gpuStart − kernelEnd | stall #94669 was normal (−6.5 ms), still 26.7 s |
+
+**The user's opening hypothesis was right and this document had it filed as falsified.** He said on
+day one: "a shader-cost problem, not a synchronization, memory, scheduling, or driver-hang problem."
+All four excluded categories are now excluded by direct measurement. The early falsification rested
+on `gpuMS` (later shown to produce false positives) and on pipeline data collected before the
+render-encoder hooks were fixed — it was never as settled as recorded.
+
+**What is NOT explained.** The pipelines in stalled buffers appear in hundreds of healthy buffers,
+and duration is ~26.5 s ± 2% across nine events. A merely-expensive shader would be slow every
+time; variable work would give variable duration. So it is not "one pathological shader" naively —
+it is a condition under which ordinary GPU work takes a fixed, enormous time.
+
+**Falsified today, for the record:** command-buffer size (DXVK builds bigger, never stalls), firmware
+reset, drawable acquisition, periodicity, memory accumulation, process-local accumulation (restart
+did not reset the interval), and the upload queue. Plus the twelve from before.
+
+**Where to look next:** GPU-side only. Everything CPU-side is now measured. A GPU counter capture
+(Metal System Trace with counter sampling, `mtrace.sh`) is the obvious instrument, since it can
+attribute time *within* the GPU timeline rather than around it.
