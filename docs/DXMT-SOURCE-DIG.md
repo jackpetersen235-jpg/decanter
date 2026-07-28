@@ -362,3 +362,36 @@ How to check cheaply, in order:
    direct presentation at all.
 3. Only then consider reading `drawable_blocking_interval`, which needs the DXMT_DEBUG build
    (now buildable — see the wine_builtin_dll finding above).
+
+## ❌❌ FALSIFIED 2026-07-28: command-buffer SIZE is not the cause
+
+**DXVK builds BIGGER command buffers than DXMT and never stalls.** Measured on the same machine,
+same wine 10 + msync, same prefix, same Steam, same game, same GPU — only the translation layer
+differs.
+
+| layer | buffers | avg enc | **MAX enc** | >=50 enc | >=100 enc | long stalls |
+|---|---|---|---|---|---|---|
+| **DXVK** (7 min) | 821 | 34.7 | **393** | 110 | **107** | **0** |
+| DXMT arm 1 (8m55) | 654 | 47.5 | 233 | 256 | 170 | 4 |
+| DXMT arm 2 (6m) | 607 | 40.0 | 250 | 231 | 91 | 4 |
+
+This also **resolves the "too slow to stall" confound**, and in the direction that kills the
+hypothesis: DXVK is not failing to reach the dangerous size, it **exceeds** it — 393 encoders in a
+single command buffer, 107 buffers over 100 encoders — with zero stalls.
+
+**Therefore the `>=106 encoders` correlation reported in STALL-BUFFER-SIZE.md is a MARKER, not a
+mechanism.** All 21 stalls landing in that range remains true; it just is not what causes them.
+Sekiro's heavy moments produce both big buffers and stalls, and the buffers are the innocent
+correlate. The p = 1.7e-13 figure quoted there measures association only, and the composition
+analysis that found stalled buffers structurally indistinguishable from healthy large ones was
+already pointing this way.
+
+**Thirteenth eliminated cause, and the first eliminated by a cross-layer control rather than by
+this project's own instrumentation.** It also retires the whole batching line of enquiry: no reason
+remains to cap batching, split chunks at encode time, or ask upstream to.
+
+**What survives.** Whatever is DXMT-specific and NOT buffer size. The strongest remaining lead is
+the one recorded above from the same session: **Direct <-> Composited presentation flipping** and
+DXMT's never-read `drawable_blocking_interval`. That fits the stall signature — one submit blocked
+in `IOConnectTrap4`, encode thread idle, chunk ring nearly empty, i.e. waiting on something
+external to DXMT rather than on queued work.
