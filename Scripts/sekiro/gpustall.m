@@ -50,7 +50,7 @@ static double   g_slowMS      = 250.0;   // dump any command buffer slower than 
 
 // Per-encoder GPU timestamp sampling (see the counter-sampling section below). Declared up here
 // because the command-buffer completion handler rewinds g_tsNext and runs earlier in the file.
-#define TS_SLOTS 4096
+#define TS_SLOTS 16384
 static id<MTLCounterSampleBuffer> g_tsBuf = nil;
 static _Atomic(uint32_t) g_tsNext = 0;
 static uint32_t g_tsCap = 0;
@@ -960,12 +960,23 @@ static uint32_t attachTimestamps(MTLRenderPassDescriptor *desc) {
 // command buffer's own GPUStartTime/GPUEndTime rather than assumed to be nanoseconds.
 static void reportEncoderTimes(uint64_t cbSeq, double cbGpuMS, uint32_t lo, uint32_t hi) {
     if (!g_tsBuf) return;
-    if (hi <= lo || hi > g_tsCap) {
+    if (hi > g_tsCap || lo >= g_tsCap || hi == lo) {
         logline(@"  ENCDIAG nothing sampled (range %u..%u attached=%u bailInUse=%u bailFull=%u)",
                 lo, hi, atomic_load(&g_tsAttached), atomic_load(&g_tsBailInUse),
                 atomic_load(&g_tsBailFull)); return; }
-    uint32_t n = hi - lo;
-    NSData *raw = [g_tsBuf resolveCounterRange:NSMakeRange(lo, n)];
+
+    // A buffer whose encoders straddle the ring wrap has hi < lo. Resolving only [lo,hi) there
+    // yields an empty range, which is how the second stall of 2026-07-28 lost its attribution
+    // (range 4002..64). Resolve the two segments and stitch them instead of discarding the buffer.
+    NSData *raw;
+    if (hi < lo) {
+        NSMutableData *m = [NSMutableData dataWithData:[g_tsBuf resolveCounterRange:NSMakeRange(lo, g_tsCap - lo)]];
+        [m appendData:[g_tsBuf resolveCounterRange:NSMakeRange(0, hi)]];
+        raw = m;
+    } else {
+        raw = [g_tsBuf resolveCounterRange:NSMakeRange(lo, hi - lo)];
+    }
+    uint32_t n = (uint32_t)(raw.length / sizeof(MTLCounterResultTimestamp));
     logline(@"  ENCDIAG attached=%u bailNoBuf=%u bailInUse=%u bailFull=%u n=%u rawLen=%lu",
             atomic_load(&g_tsAttached), atomic_load(&g_tsBailNoBuf),
             atomic_load(&g_tsBailInUse), atomic_load(&g_tsBailFull), n,
