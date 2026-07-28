@@ -130,6 +130,11 @@ static _Atomic double g_lastGameCommit;   // wall time of the last GAME commit (
 @property (nonatomic)         uint64_t seq;
 @property (nonatomic)         double   commitWall;
 @property (nonatomic)         int64_t  outstandingAtCommit;
+// Timestamp slot range owned by THIS command buffer. A single shared index with a global reset
+// raced: one buffer's completion rewound the counter while another was still recording, so the
+// second resolved an empty range and reported "nothing sampled".
+@property (nonatomic)         uint32_t tsStart;
+@property (nonatomic)         uint32_t tsEnd;
 @property (nonatomic, strong) NSMutableArray<EncRec *> *encoders;
 // GPU-side synchronisation recorded per command buffer. This is the direct test of the
 // fence/event hypothesis: if a stalled buffer is waiting rather than computing, the wait has to
@@ -509,10 +514,17 @@ static id my_computeEncDesc(id self, SEL _cmd, id desc) {
 }
 // Defined further down, next to the rest of the counter-sampling machinery.
 static uint32_t attachTimestamps(MTLRenderPassDescriptor *desc);
-static void     reportEncoderTimes(uint64_t cbSeq, double cbGpuMS);
+static void     reportEncoderTimes(uint64_t cbSeq, double cbGpuMS, uint32_t lo, uint32_t hi);
 
 static id my_renderEnc(id self, SEL _cmd, id desc) {
-    attachTimestamps((MTLRenderPassDescriptor *)desc);   // must happen BEFORE the encoder is made
+    uint32_t ti = attachTimestamps((MTLRenderPassDescriptor *)desc);  // BEFORE the encoder is made
+    if (ti != UINT32_MAX) {
+        CBRec *tr = cbRecFor(self, YES);
+        if (tr) {
+            if (tr.tsEnd == 0 && tr.tsStart == 0) tr.tsStart = ti;    // first encoder in this buffer
+            tr.tsEnd = ti + 2;
+        }
+    }
     id e = orig_renderEnc(self, _cmd, desc);
     attachEncoder(self, e, @"render");
     return e;
@@ -633,15 +645,11 @@ static void my_commit(id self, SEL _cmd) {
                      "| gpuMS=%.1f  WALL commit->complete=%.1fms",
                     r.seq, rawStart, rawEnd, rawKern, gpuMS, wallSinceCommit);
             dumpCB(@"SLOW", r, gpuMS, schedMS, outNow);
-            reportEncoderTimes(r.seq, gpuMS);
+            reportEncoderTimes(r.seq, gpuMS, r.tsStart, r.tsEnd);
         } else if (g_baselineEvery && (seen % g_baselineEvery) == 0) {
             dumpCB(@"BASE", r, gpuMS, schedMS, outNow);
         }
 
-        // Rewind the timestamp slots for the next command buffer. MUST be unconditional: doing it
-        // only for slow buffers exhausted all 4096 slots within seconds and silently disabled
-        // sampling long before any stall happened.
-        if (g_tsBuf && atomic_load(&g_outstanding) <= 1) atomic_store(&g_tsNext, 0);
 
         double t = nowWall();
         if (t - last >= g_summarySec) {
@@ -935,7 +943,9 @@ static uint32_t attachTimestamps(MTLRenderPassDescriptor *desc) {
     if (!g_tsBuf || !desc) { atomic_fetch_add(&g_tsBailNoBuf, 1); return UINT32_MAX; }
     // Never clobber a sample buffer the app set up itself.
     if (desc.sampleBufferAttachments[0].sampleBuffer != nil) { atomic_fetch_add(&g_tsBailInUse, 1); return UINT32_MAX; }
-    uint32_t i = atomic_fetch_add(&g_tsNext, 2);
+    // Wrap rather than reset globally. A global rewind on completion raced with buffers still
+    // recording; wrapping keeps every in-flight buffer's range valid until it is far behind.
+    uint32_t i = atomic_fetch_add(&g_tsNext, 2) % (g_tsCap - 2);
     if (i + 1 >= g_tsCap) { atomic_fetch_add(&g_tsBailFull, 1); return UINT32_MAX; }
     atomic_fetch_add(&g_tsAttached, 1);
     desc.sampleBufferAttachments[0].sampleBuffer = g_tsBuf;
@@ -948,13 +958,14 @@ static uint32_t attachTimestamps(MTLRenderPassDescriptor *desc) {
 
 // Called from the completion handler. Deltas are raw GPU ticks; they are calibrated against the
 // command buffer's own GPUStartTime/GPUEndTime rather than assumed to be nanoseconds.
-static void reportEncoderTimes(uint64_t cbSeq, double cbGpuMS) {
+static void reportEncoderTimes(uint64_t cbSeq, double cbGpuMS, uint32_t lo, uint32_t hi) {
     if (!g_tsBuf) return;
-    uint32_t n = atomic_load(&g_tsNext);
-    if (n < 2) { logline(@"  ENCDIAG nothing sampled (n=%u attached=%u bailInUse=%u bailFull=%u)",
-                          n, atomic_load(&g_tsAttached), atomic_load(&g_tsBailInUse),
-                          atomic_load(&g_tsBailFull)); return; }
-    NSData *raw = [g_tsBuf resolveCounterRange:NSMakeRange(0, n)];
+    if (hi <= lo || hi > g_tsCap) {
+        logline(@"  ENCDIAG nothing sampled (range %u..%u attached=%u bailInUse=%u bailFull=%u)",
+                lo, hi, atomic_load(&g_tsAttached), atomic_load(&g_tsBailInUse),
+                atomic_load(&g_tsBailFull)); return; }
+    uint32_t n = hi - lo;
+    NSData *raw = [g_tsBuf resolveCounterRange:NSMakeRange(lo, n)];
     logline(@"  ENCDIAG attached=%u bailNoBuf=%u bailInUse=%u bailFull=%u n=%u rawLen=%lu",
             atomic_load(&g_tsAttached), atomic_load(&g_tsBailNoBuf),
             atomic_load(&g_tsBailInUse), atomic_load(&g_tsBailFull), n,
@@ -962,14 +973,29 @@ static void reportEncoderTimes(uint64_t cbSeq, double cbGpuMS) {
     if (!raw) return;
     const MTLCounterResultTimestamp *t = (const MTLCounterResultTimestamp *)raw.bytes;
     uint32_t pairs = (uint32_t)(raw.length / sizeof(MTLCounterResultTimestamp)) / 2;
-    uint64_t span = 0, worst = 0; uint32_t worstIdx = 0;
+    uint64_t span = 0, worst = 0; uint32_t worstIdx = 0, valid = 0;
+    uint64_t firstStart = UINT64_MAX, lastEnd = 0;
     for (uint32_t k = 0; k < pairs; k++) {
         uint64_t a = t[2*k].timestamp, b = t[2*k+1].timestamp;
         if (!a || !b || b <= a) continue;                // unresolved slots read back as 0
         uint64_t d = b - a;
-        span += d;
+        span += d; valid++;
+        if (a < firstStart) firstStart = a;
+        if (b > lastEnd)    lastEnd = b;
         if (d > worst) { worst = d; worstIdx = k; }
     }
+
+    // COVERAGE is the point of this whole function, and it needs no calibration: it compares the
+    // SUM of encoder durations against the WALL of the encoder timeline (first start -> last end),
+    // both in raw GPU ticks.
+    //   ~1.0  -> encoders fill the buffer; the GPU is genuinely executing the whole time
+    //   <<1.0 -> dead time BETWEEN encoders; the GPU is idle inside the buffer and waiting
+    // Scaling the encoder times so they sum to the command buffer's duration (as the ms figures
+    // below do) silently spreads any such gap across the encoders and hides exactly this.
+    uint64_t range = (lastEnd > firstStart) ? (lastEnd - firstStart) : 0;
+    if (range)
+        logline(@"  ENCSPAN cb#%llu ticks: sum=%llu range=%llu coverage=%.3f  valid=%u/%u",
+                cbSeq, span, range, (double)span / (double)range, valid, pairs);
     if (!span) { logline(@"  ENCDIAG all %u pairs unresolved (span=0)", pairs); return; }
     double ticksPerMS = (double)span / (cbGpuMS > 0 ? cbGpuMS : 1.0);
     logline(@"  ENCTIME cb#%llu worst=enc[%u] %.1fms of %.1fms (%.0f%%)  pairs=%u",
