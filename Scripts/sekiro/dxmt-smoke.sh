@@ -40,7 +40,10 @@ export WINEDEBUG="${SMOKE_WINEDEBUG:--all}"
 # command-buffer shape rather than merely failing to crash.
 if [ -n "${SMOKE_PROFILE:-}" ]; then
   export DYLD_INSERT_LIBRARIES="$(cd "$(dirname "$0")" && pwd)/libgpustall.dylib"
-  export GPUSTALL_LOG="$LOG/gpustall.log" GPUSTALL_VERBOSE=1 GPUSTALL_SLOW_MS=250
+  export GPUSTALL_LOG="$LOG/gpustall.log" GPUSTALL_VERBOSE=1
+  # Respect a caller-supplied threshold. Hardcoding 250 ms meant a 60 s smoke run never logged a
+  # single SLOW buffer, so anything that only reports on slow buffers looked silently broken.
+  export GPUSTALL_SLOW_MS="${GPUSTALL_SLOW_MS:-250}"
 fi
 export SteamAppId=814380 SteamGameId=814380
 

@@ -47,6 +47,13 @@
 
 static int      g_fd          = -1;
 static double   g_slowMS      = 250.0;   // dump any command buffer slower than this
+
+// Per-encoder GPU timestamp sampling (see the counter-sampling section below). Declared up here
+// because the command-buffer completion handler rewinds g_tsNext and runs earlier in the file.
+#define TS_SLOTS 4096
+static id<MTLCounterSampleBuffer> g_tsBuf = nil;
+static _Atomic(uint32_t) g_tsNext = 0;
+static uint32_t g_tsCap = 0;
 static double   g_summarySec  = 5.0;
 static BOOL     g_armed       = NO;
 
@@ -631,6 +638,11 @@ static void my_commit(id self, SEL _cmd) {
             dumpCB(@"BASE", r, gpuMS, schedMS, outNow);
         }
 
+        // Rewind the timestamp slots for the next command buffer. MUST be unconditional: doing it
+        // only for slow buffers exhausted all 4096 slots within seconds and silently disabled
+        // sampling long before any stall happened.
+        if (g_tsBuf && atomic_load(&g_outstanding) <= 1) atomic_store(&g_tsNext, 0);
+
         double t = nowWall();
         if (t - last >= g_summarySec) {
             pthread_mutex_lock(&g_lock);
@@ -893,10 +905,6 @@ static void *keepaliveThread(void *ctx) {
 // RENDER ENCODERS ONLY, deliberately. Stalled buffers measure ~94% render, and compute would need
 // the descriptor-taking variant of computeCommandEncoder, which DXMT does not always use. Scope
 // kept small so this cannot change what the game renders.
-static id<MTLCounterSampleBuffer> g_tsBuf = nil;
-static _Atomic(uint32_t) g_tsNext = 0;
-static uint32_t g_tsCap = 0;
-#define TS_SLOTS 4096
 
 typedef struct { uint32_t idx; uint64_t cbSeq; uint32_t ord; } TSRec;
 static TSRec  g_tsRecs[TS_SLOTS/2];
@@ -921,12 +929,15 @@ static void setupCounterBuffer(id<MTLDevice> dev) {
 }
 
 // Returns the base index used, or UINT32_MAX if not sampling this encoder.
+static _Atomic(uint32_t) g_tsAttached = 0, g_tsBailNoBuf = 0, g_tsBailInUse = 0, g_tsBailFull = 0;
+
 static uint32_t attachTimestamps(MTLRenderPassDescriptor *desc) {
-    if (!g_tsBuf || !desc) return UINT32_MAX;
+    if (!g_tsBuf || !desc) { atomic_fetch_add(&g_tsBailNoBuf, 1); return UINT32_MAX; }
     // Never clobber a sample buffer the app set up itself.
-    if (desc.sampleBufferAttachments[0].sampleBuffer != nil) return UINT32_MAX;
+    if (desc.sampleBufferAttachments[0].sampleBuffer != nil) { atomic_fetch_add(&g_tsBailInUse, 1); return UINT32_MAX; }
     uint32_t i = atomic_fetch_add(&g_tsNext, 2);
-    if (i + 1 >= g_tsCap) return UINT32_MAX;             // one pass per launch; no wraparound
+    if (i + 1 >= g_tsCap) { atomic_fetch_add(&g_tsBailFull, 1); return UINT32_MAX; }
+    atomic_fetch_add(&g_tsAttached, 1);
     desc.sampleBufferAttachments[0].sampleBuffer = g_tsBuf;
     desc.sampleBufferAttachments[0].startOfVertexSampleIndex   = i;
     desc.sampleBufferAttachments[0].endOfVertexSampleIndex     = MTLCounterDontSample;
@@ -940,8 +951,14 @@ static uint32_t attachTimestamps(MTLRenderPassDescriptor *desc) {
 static void reportEncoderTimes(uint64_t cbSeq, double cbGpuMS) {
     if (!g_tsBuf) return;
     uint32_t n = atomic_load(&g_tsNext);
-    if (n < 2) return;
+    if (n < 2) { logline(@"  ENCDIAG nothing sampled (n=%u attached=%u bailInUse=%u bailFull=%u)",
+                          n, atomic_load(&g_tsAttached), atomic_load(&g_tsBailInUse),
+                          atomic_load(&g_tsBailFull)); return; }
     NSData *raw = [g_tsBuf resolveCounterRange:NSMakeRange(0, n)];
+    logline(@"  ENCDIAG attached=%u bailNoBuf=%u bailInUse=%u bailFull=%u n=%u rawLen=%lu",
+            atomic_load(&g_tsAttached), atomic_load(&g_tsBailNoBuf),
+            atomic_load(&g_tsBailInUse), atomic_load(&g_tsBailFull), n,
+            (unsigned long)(raw ? raw.length : 0));
     if (!raw) return;
     const MTLCounterResultTimestamp *t = (const MTLCounterResultTimestamp *)raw.bytes;
     uint32_t pairs = (uint32_t)(raw.length / sizeof(MTLCounterResultTimestamp)) / 2;
@@ -953,12 +970,11 @@ static void reportEncoderTimes(uint64_t cbSeq, double cbGpuMS) {
         span += d;
         if (d > worst) { worst = d; worstIdx = k; }
     }
-    if (!span) return;
+    if (!span) { logline(@"  ENCDIAG all %u pairs unresolved (span=0)", pairs); return; }
     double ticksPerMS = (double)span / (cbGpuMS > 0 ? cbGpuMS : 1.0);
     logline(@"  ENCTIME cb#%llu worst=enc[%u] %.1fms of %.1fms (%.0f%%)  pairs=%u",
             cbSeq, worstIdx, worst / ticksPerMS, cbGpuMS,
             100.0 * (double)worst / (double)span, pairs);
-    atomic_store(&g_tsNext, 0);
 }
 
 // ---------------------------------------------------------------------------- drawable blocking
