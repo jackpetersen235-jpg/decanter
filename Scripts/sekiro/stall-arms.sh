@@ -45,8 +45,12 @@ arm_kind() {  # 1|2 -> control|capped
 case "${1:-run}" in
   run)
     # Refuse to run the experiment against a DXMT that has no cap option at all.
-    if ! strings -n 6 "$D/Bottles/Steam-Wine11/drive_c/Program Files (x86)/Steam/steamapps/common/Sekiro/d3d11.dll" \
-         2>/dev/null | grep -q maxPassesPerCommandBuffer; then
+    # `grep -c`, not `grep -q`. Under `set -o pipefail`, grep -q closes the pipe on its first
+    # match, strings dies of SIGPIPE, and the pipeline reports failure -- so the guard fires
+    # hardest exactly when the right build IS installed. grep -c reads to EOF and cannot SIGPIPE.
+    DLL="$D/Bottles/Steam-Wine11/drive_c/Program Files (x86)/Steam/steamapps/common/Sekiro/d3d11.dll"
+    HITS=$(strings -n 6 "$DLL" 2>/dev/null | grep -c maxPassesPerCommandBuffer || true)
+    if [ "${HITS:-0}" -eq 0 ]; then
       echo "The installed DXMT has no maxPassesPerCommandBuffer option." >&2
       echo "  bash $HERE/dxmt-swap.sh install ~/src/dxmt/install-capped" >&2
       exit 1
