@@ -50,7 +50,11 @@ static double   g_slowMS      = 250.0;   // dump any command buffer slower than 
 
 // Per-encoder GPU timestamp sampling (see the counter-sampling section below). Declared up here
 // because the command-buffer completion handler rewinds g_tsNext and runs earlier in the file.
-#define TS_SLOTS 16384
+// 4096 is the HARD CEILING, not a tuning choice: Metal rejects a counter sample buffer longer
+// than 32768 B, and each sample is 8 B. Raising this to 16384 produced
+//   "Invalid sample buffer length: 131072 B. Expected range: 8 -> 32768"
+// and the buffer silently failed to create, so encoder timing never armed at all.
+#define TS_SLOTS 4096
 static id<MTLCounterSampleBuffer> g_tsBuf = nil;
 static _Atomic(uint32_t) g_tsNext = 0;
 static uint32_t g_tsCap = 0;
