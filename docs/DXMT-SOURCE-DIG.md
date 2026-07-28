@@ -442,3 +442,59 @@ did not reset the interval), and the upload queue. Plus the twelve from before.
 **Where to look next:** GPU-side only. Everything CPU-side is now measured. A GPU counter capture
 (Metal System Trace with counter sampling, `mtrace.sh`) is the obvious instrument, since it can
 attribute time *within* the GPU timeline rather than around it.
+
+## 🎯 2026-07-28: IDENTIFIED — DXMT's geometry-shader emulation marshalling pass
+
+**One encoder is the entire stall.**
+
+```
+SLOW    cb#6217  gpu=26353.6ms  encoders=125
+ENCTIME cb#6217  worst=enc[37]  26299.3ms of 26353.6ms  (100%)   pairs=112
+```
+
+Mapping render-index 37 through the buffer's `seq` string to dump position **enc[47]**, the pipeline
+bound there is:
+
+```
+vs:gs_draw_arguments_marshal/fs:-    n=1  work=1
+```
+
+`gs_draw_arguments_marshal` is **DXMT's own internal shader**, created in `dxmt_command.cpp:46-52`.
+Metal has no geometry shaders, so DXMT emulates D3D11 GS; this pass marshals the draw arguments for
+that path (`src/airconv/dxbc_converter_gs.cpp` builds the `draw_arguments` struct — vertex_count,
+start_index, base_vertex_id, base_instance_id).
+
+**A marshalling draw with `n=1 work=1` takes 26.3 seconds.** That is a pathological draw argument,
+not expensive rendering.
+
+### Coverage confirms the shape
+
+| | coverage (sum of encoder durations / timeline span, raw ticks) |
+|---|---|
+| healthy buffers (n=29) | median **6.50**, max 10.74 — encoders overlap ~6x, normal GPU parallelism |
+| **stalled buffer** | **1.0010** — a single encoder spans the entire timeline |
+
+### Why this fits everything that survived
+
+- **fixed ~26.5 s ± 2% across 10 stalls** — the same bad argument each time; variable work would vary
+- **same pipelines in healthy buffers** — this is DXMT's shader, not the game's
+- **buffer structurally ordinary** — one encoder out of 125
+- **GPU saturated, every CPU path idle** — the GPU really is grinding
+- **DXVK and D3DMetal never stall** — different geometry-shader implementations
+- **clusters at area loads / death reloads** — when GS-using effects are drawn
+- **JJBA never stalls** — worth checking whether it uses geometry shaders at all
+
+### ⚠️ Confidence
+
+**n=1.** This is one stall attributed with the corrected per-buffer-range code. An earlier
+attribution ("no encoder dominates, worst 2%") came from the buggy shared-index build and is void.
+Confirm on further stalls before reporting upstream. The mapping from ENCTIME's render-only index
+to the dump position also assumes every render encoder was sampled (112 sampled vs 114 R in `seq`,
+so two were not) — a second stall pointing at the same pipeline would settle both doubts.
+
+### The user was right from message one
+
+His opening framing was "a shader-cost problem ... one MTLCommandBuffer containing a pathologically
+long dispatch." That is precisely what this is. It was filed as falsified early, on `gpuMS` (later
+shown to give false positives) and on pipeline data collected before the render-encoder hooks were
+fixed, and the investigation spent a day eliminating alternatives instead.
