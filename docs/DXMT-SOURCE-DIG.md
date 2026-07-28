@@ -182,3 +182,57 @@ ignoreMapFlagNoWait.
 
 No candidate remains. The stall is real, reproducible, blocks in Apple's IOGPU submit path, and
 resists every user-space variable tested.
+
+## Building DXMT from source with DXMT_DEBUG (recipe — toolchain was deleted)
+
+Done 2026-07-27. The build **compiles cleanly but does not run** (see below), so the 4.1 GB
+toolchain was deleted afterwards. This is the exact recipe to recreate it; `DEVELOPMENT.md`
+overstates the work — Wine and llvm-mingw are prebuilt downloads, not source builds.
+
+**Prerequisites that needed the user:** full Xcode (App Store), then `sudo xcodebuild -license`
+and `sudo xcodebuild -downloadComponent MetalToolchain`. The Metal Toolchain is a SEPARATE
+component in Xcode 26 — `xcrun -f metal` returns a path even when it is missing, and only fails at
+first use, so check by actually compiling a `.metal` file. It also mounts as a cryptex a few
+seconds after download; an immediate re-test can still fail.
+
+```sh
+python3 -m pip install --user meson ninja cmake     # no Homebrew needed
+export PATH="$HOME/Library/Python/3.14/bin:$PATH"
+
+git clone --depth 1 --branch v0.80 https://github.com/3Shain/DXMT.git dxmt && cd dxmt
+git submodule update --init --recursive             # REQUIRED; meson errors out without it
+mkdir -p toolchains && cd toolchains
+curl -L -o wine.tar.gz       https://github.com/3Shain/wine/releases/download/v8.16-3shain/wine.tar.gz
+curl -L -o llvm-mingw.tar.xz https://github.com/mstorsjo/llvm-mingw/releases/download/20251216/llvm-mingw-20251216-ucrt-macos-universal.tar.xz
+mkdir -p wine llvm-mingw
+tar xzf wine.tar.gz -C wine
+tar xJf llvm-mingw.tar.xz -C llvm-mingw --strip-components=1
+git clone --depth 1 --branch llvmorg-15.0.7 https://github.com/llvm/llvm-project.git llvm-project
+cd ..
+
+cmake -B toolchains/llvm-build -S toolchains/llvm-project/llvm -G Ninja \
+  -DCMAKE_INSTALL_PREFIX="$PWD/toolchains/llvm" -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+  -DLLVM_HOST_TRIPLE=x86_64-apple-darwin -DLLVM_ENABLE_ASSERTIONS=Off -DLLVM_ENABLE_ZSTD=Off \
+  -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD="" -DLLVM_BUILD_TOOLS=Off \
+  -DLLVM_INCLUDE_TESTS=Off -DLLVM_INCLUDE_BENCHMARKS=Off -DLLVM_INCLUDE_EXAMPLES=Off
+ninja -C toolchains/llvm-build install               # ~1-3 h; llvm-config is intentionally absent
+
+export PATH="$PWD/toolchains/llvm-mingw/bin:$PATH"
+meson setup build-debug --cross-file build-win64.txt --buildtype release \
+  -Ddxmt_debug=true -Dnative_llvm_path="toolchains/llvm" \
+  -Dwine_install_path="$PWD/toolchains/wine"
+ninja -C build-debug                                 # check $? — do NOT pipe through tail
+```
+
+Two meson traps: `native_llvm_path` defaults to a Homebrew path (`/usr/local/opt/llvm@15`) and
+must be pointed at the local build; and pass **only** `wine_install_path` — passing
+`wine_build_path` too selects a source-tree layout (`libs/winecrt0`, `tools/winebuild`) that a
+release tarball does not have.
+
+**RESULT: the build does not work.** `d3d11.dll`/`dxgi.dll`/`d3d10core.dll`/`winemetal.{dll,so}`
+all link, but with them installed the game process starts and sits at 0% CPU without ever loading
+d3d11 — twice, including with Steam bypassed entirely, so it is not the launcher. The `winemetal.so`
+is **27 757 256 bytes vs the official 31 805 040** — ~4 MB smaller, so something is not being
+compiled in. NOT an 8.16-vs-wine-10 ABI mismatch: official DXMT 0.80 is itself built against wine
+8.16 and runs fine on this engine. Before retrying, diff this meson configuration against
+`.github/workflows/ci.yml` (upstream uses Xcode 16.1, not 26.6).
