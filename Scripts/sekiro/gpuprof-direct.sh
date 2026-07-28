@@ -23,12 +23,17 @@ NO_METALFX=0
 SYNC_MODE=
 KA_US=50000
 SLOW_MS=250
+CAP=
 STAMP="$(date +%Y%m%d-%H%M%S)"
 # --app points at an alternative bundle so a different ENGINE (e.g. a DXMT downgrade) can be
 # A/B tested on an APFS clone without touching the known-good ~/Applications/Sekiro.app.
 APP_BUNDLE="$HOME/Applications/Sekiro.app"
 while [ $# -gt 0 ]; do
   case "$1" in
+    # Bound how many passes accumulate into one MTLCommandBuffer. Needs the locally-built DXMT
+    # (dxmt-build.sh capped); on stock DXMT the option simply does not exist and is ignored, which
+    # would silently turn the experimental arm into a second control.
+    --cap)     CAP="$2"; shift 2 ;;
     --slow-ms) SLOW_MS="$2"; shift 2 ;;
     --stamp)   STAMP="$2"; shift 2 ;;
     --app)     APP_BUNDLE="$2"; shift 2 ;;
@@ -123,6 +128,11 @@ if [ "$NO_METALFX" = 1 ]; then
   export DXMT_METALFX_SPATIAL_SWAPCHAIN=0
   export DXMT_CONFIG="d3d11.preferredMaxFrameRate=60;d3d11.ignoreMapFlagNoWait=True;d3d11.sampleNaNToZero=True;d3d11.defuseFma=True"
   echo "MetalFX DISABLED (no spatial upscale, full-res render)"
+fi
+
+# Appended LAST so neither the launcher's exports nor the --no-metalfx branch can clobber it.
+if [ -n "$CAP" ]; then
+  export DXMT_CONFIG="$DXMT_CONFIG;d3d11.maxPassesPerCommandBuffer=$CAP"
 fi
 
 # Tell steam_api64 which app this is, since Steam is not the one launching us.
