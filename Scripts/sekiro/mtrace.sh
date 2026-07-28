@@ -40,8 +40,22 @@ echo
 echo "PLAY NORMALLY. Say when you feel a pause; the trace timeline is what we correlate against."
 echo
 
+# DEFAULT TO A SHORT WINDOW, and refuse to start without headroom.
+#
+# On 2026-07-25 this was sized from an 8 s capture of an IDLE process (~69 MB) and left running
+# against a busy game. xctrace buffers into /private/var/folders rather than --output, so a progress
+# check on $OUT showed nothing while the real file grew to 110 GB. Two guards: a time limit unless
+# one is given, and a free-space floor checked up front.
+[ -z "$LIMIT" ] && LIMIT="60s" && echo "no --limit given; defaulting to 60s (see comment)"
+FREE_GB=$(df -g / | awk 'NR==2{print $4}')
+if [ "${FREE_GB:-0}" -lt 30 ]; then
+  echo "Only ${FREE_GB}GB free. Metal System Trace can consume tens of GB - free space first." >&2
+  exit 1
+fi
+echo "free disk before: ${FREE_GB}GB"
+
 ARGS=(record --template 'Metal System Trace' --attach "$PID" --output "$OUT")
-[ -n "$LIMIT" ] && ARGS+=(--time-limit "$LIMIT")
+ARGS+=(--time-limit "$LIMIT")
 
 # NOTE: traces are large (~69 MB for 8 s of an idle process; a busy game will be far more).
 # Watch disk if recording long sessions.

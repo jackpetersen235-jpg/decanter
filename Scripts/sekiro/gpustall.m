@@ -500,7 +500,12 @@ static id my_computeEncDesc(id self, SEL _cmd, id desc) {
     attachEncoder(self, e, @"compute");
     return e;
 }
+// Defined further down, next to the rest of the counter-sampling machinery.
+static uint32_t attachTimestamps(MTLRenderPassDescriptor *desc);
+static void     reportEncoderTimes(uint64_t cbSeq, double cbGpuMS);
+
 static id my_renderEnc(id self, SEL _cmd, id desc) {
+    attachTimestamps((MTLRenderPassDescriptor *)desc);   // must happen BEFORE the encoder is made
     id e = orig_renderEnc(self, _cmd, desc);
     attachEncoder(self, e, @"render");
     return e;
@@ -621,6 +626,7 @@ static void my_commit(id self, SEL _cmd) {
                      "| gpuMS=%.1f  WALL commit->complete=%.1fms",
                     r.seq, rawStart, rawEnd, rawKern, gpuMS, wallSinceCommit);
             dumpCB(@"SLOW", r, gpuMS, schedMS, outNow);
+            reportEncoderTimes(r.seq, gpuMS);
         } else if (g_baselineEvery && (seen % g_baselineEvery) == 0) {
             dumpCB(@"BASE", r, gpuMS, schedMS, outNow);
         }
@@ -872,6 +878,89 @@ static void *keepaliveThread(void *ctx) {
 }
 
 
+
+// ---------------------------------------------------------------------------- per-encoder GPU time
+//
+// THE QUESTION THIS ANSWERS. As of 2026-07-28 the stall is established as real GPU execution:
+// dxmt-finish-thr sleeps in waitUntilCompleted for 91% of it while device_util sits at 98.8%, and
+// every CPU-side path (upload queue, drawable, submit, mutex, paging) has been measured and
+// cleared. What is still unknown is WHICH of the ~80-130 encoders in the buffer eats the 26.5 s.
+//
+// MTLCounterSamplingPointAtStageBoundary is supported on this M5 (probed), so a timestamp can be
+// taken either side of each render encoder. That turns "this buffer took 26.5 s" into "encoder #37
+// running pipeline X took 26.4 s of it" -- which is one shader to look at instead of a hundred.
+//
+// RENDER ENCODERS ONLY, deliberately. Stalled buffers measure ~94% render, and compute would need
+// the descriptor-taking variant of computeCommandEncoder, which DXMT does not always use. Scope
+// kept small so this cannot change what the game renders.
+static id<MTLCounterSampleBuffer> g_tsBuf = nil;
+static _Atomic(uint32_t) g_tsNext = 0;
+static uint32_t g_tsCap = 0;
+#define TS_SLOTS 4096
+
+typedef struct { uint32_t idx; uint64_t cbSeq; uint32_t ord; } TSRec;
+static TSRec  g_tsRecs[TS_SLOTS/2];
+static _Atomic(uint32_t) g_tsRecN = 0;
+
+static void setupCounterBuffer(id<MTLDevice> dev) {
+    if (!getenv("GPUSTALL_ENCODER_TIMING")) return;      // opt-in: it mutates the game's descriptors
+    id<MTLCounterSet> ts = nil;
+    for (id<MTLCounterSet> cs in dev.counterSets)
+        if ([cs.name isEqualToString:@"timestamp"]) { ts = cs; break; }
+    if (!ts) { logline(@"encoder timing: no timestamp counter set"); return; }
+    if (![dev supportsCounterSampling:MTLCounterSamplingPointAtStageBoundary]) {
+        logline(@"encoder timing: stage-boundary sampling unsupported"); return;
+    }
+    MTLCounterSampleBufferDescriptor *d = [MTLCounterSampleBufferDescriptor new];
+    d.counterSet = ts; d.sampleCount = TS_SLOTS; d.storageMode = MTLStorageModeShared;
+    NSError *err = nil;
+    g_tsBuf = [dev newCounterSampleBufferWithDescriptor:d error:&err];
+    if (!g_tsBuf) { logline(@"encoder timing: buffer failed: %@", err); return; }
+    g_tsCap = TS_SLOTS;
+    logline(@"encoder timing ARMED (%u slots)", g_tsCap);
+}
+
+// Returns the base index used, or UINT32_MAX if not sampling this encoder.
+static uint32_t attachTimestamps(MTLRenderPassDescriptor *desc) {
+    if (!g_tsBuf || !desc) return UINT32_MAX;
+    // Never clobber a sample buffer the app set up itself.
+    if (desc.sampleBufferAttachments[0].sampleBuffer != nil) return UINT32_MAX;
+    uint32_t i = atomic_fetch_add(&g_tsNext, 2);
+    if (i + 1 >= g_tsCap) return UINT32_MAX;             // one pass per launch; no wraparound
+    desc.sampleBufferAttachments[0].sampleBuffer = g_tsBuf;
+    desc.sampleBufferAttachments[0].startOfVertexSampleIndex   = i;
+    desc.sampleBufferAttachments[0].endOfVertexSampleIndex     = MTLCounterDontSample;
+    desc.sampleBufferAttachments[0].startOfFragmentSampleIndex = MTLCounterDontSample;
+    desc.sampleBufferAttachments[0].endOfFragmentSampleIndex   = i + 1;
+    return i;
+}
+
+// Called from the completion handler. Deltas are raw GPU ticks; they are calibrated against the
+// command buffer's own GPUStartTime/GPUEndTime rather than assumed to be nanoseconds.
+static void reportEncoderTimes(uint64_t cbSeq, double cbGpuMS) {
+    if (!g_tsBuf) return;
+    uint32_t n = atomic_load(&g_tsNext);
+    if (n < 2) return;
+    NSData *raw = [g_tsBuf resolveCounterRange:NSMakeRange(0, n)];
+    if (!raw) return;
+    const MTLCounterResultTimestamp *t = (const MTLCounterResultTimestamp *)raw.bytes;
+    uint32_t pairs = (uint32_t)(raw.length / sizeof(MTLCounterResultTimestamp)) / 2;
+    uint64_t span = 0, worst = 0; uint32_t worstIdx = 0;
+    for (uint32_t k = 0; k < pairs; k++) {
+        uint64_t a = t[2*k].timestamp, b = t[2*k+1].timestamp;
+        if (!a || !b || b <= a) continue;                // unresolved slots read back as 0
+        uint64_t d = b - a;
+        span += d;
+        if (d > worst) { worst = d; worstIdx = k; }
+    }
+    if (!span) return;
+    double ticksPerMS = (double)span / (cbGpuMS > 0 ? cbGpuMS : 1.0);
+    logline(@"  ENCTIME cb#%llu worst=enc[%u] %.1fms of %.1fms (%.0f%%)  pairs=%u",
+            cbSeq, worstIdx, worst / ticksPerMS, cbGpuMS,
+            100.0 * (double)worst / (double)span, pairs);
+    atomic_store(&g_tsNext, 0);
+}
+
 // ---------------------------------------------------------------------------- drawable blocking
 //
 // WHY THIS EXISTS. Command-buffer SIZE was falsified on 2026-07-28: DXVK builds bigger buffers than
@@ -930,6 +1019,7 @@ static void bootstrap(id<MTLDevice> dev) {
         // Display-side blocking. Installed here rather than at load time because CAMetalLayer is
         // only guaranteed to be present once something has actually touched Metal.
         installDrawableHook();
+        setupCounterBuffer(dev);
 
         Class devCls = object_getClass(dev);
         swizzle(devCls, @selector(newComputePipelineStateWithFunction:error:),
