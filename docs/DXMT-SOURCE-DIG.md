@@ -300,3 +300,40 @@ GPU firmware, same Rosetta, same game, msync in both; the translation layer is t
 That is the first evidence implicating DXMT that does not come from this project's own
 instrumentation, which matters because `gpuMS` produced false positives. Confound: CrossOver also
 swaps wine.
+
+## ❌ 2026-07-28: D3DMetal cannot be grafted into the wine-10 engine
+
+Attempted the clean single-variable test — same wine 10 + msync, same prefix, same Steam, same
+game, swap only the translation layer. **Wine 10 refuses D3DMetal's builtin**: `err:module:import_dll
+Library d3d11.dll ... not found`, then `loader_init ... status c0000135`.
+
+Not a missing dependency — D3DMetal's PE imports only `kernel32/kernelbase/ntdll/user32`, all
+present. Its unixlib exports `__wine_unix_call_funcs` like the engine's own, though it lacks
+`__wine_unix_call_wow64_funcs`. The components come from Mythic's GPTk engine (**wine 7.7**) and
+wine 10 will not load them as builtins. Three major versions is far wider than the winemetal.so
+graft (11-into-10) already flagged as an unsupported ABI mix.
+
+Note for anyone retrying: D3DMetal's four `x86_64-unix/*.so` files are **33-byte symlinks** all
+pointing at one `lib/external/libd3dshared.dylib`.
+
+### ✅ But the accident was worth more than the experiment: a DXVK datapoint
+
+The first graft attempt silently ran **DXVK** instead — `native,builtin` resolves native first, and
+this prefix has DXVK in `system32`, so emptying only the game folder handed the game to DXVK rather
+than falling through to the builtin. The user played it:
+
+| translation layer | long stalls | framerate | wine |
+|---|---|---|---|
+| **DXMT** | **yes** | steady 60 | 10 + msync |
+| **DXVK** | **no** | ~13 fps | **10 + msync (identical)** |
+| D3DMetal (CrossOver) | no | worse than DXMT | CrossOver's |
+
+DXVK is the strongest control yet: it holds wine, prefix, Steam, GPU and game **all** fixed, where
+the CrossOver observation also swapped wine. Only DXMT stalls.
+
+**Confound, and it is not small:** at ~13 fps DXVK may simply never build a command buffer big
+enough to trigger the fault. "Too slow to stall" and "structurally immune" are indistinguishable
+from the couch. Testable without any new build — the gpustall profiler hooks Metal generically, so
+it will measure DXVK's encoders-per-command-buffer too (DXVK reaches Metal via MoltenVK). If DXVK
+also builds 100+ encoder buffers and still never stalls, the batching hypothesis is in serious
+trouble; if it never exceeds ~50, that is real support.
