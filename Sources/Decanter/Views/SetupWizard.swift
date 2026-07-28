@@ -47,9 +47,15 @@ struct SetupWizard: View {
     private func isDone(_ step: Step) -> Bool {
         switch step {
         case .rosetta: return model.isRosettaInstalled
-        case .engine:  return model.defaultInstallation != nil
-        case .bottle:  return !model.bottles.isEmpty
-        case .steam:   return model.bottles.contains { $0.isSteamInstalled }
+        // NOT `defaultInstallation != nil` / `!bottles.isEmpty`. Any wine satisfied those, so on a
+        // Mac with Whisky wine-7.7 every step self-reported DONE, `allDone` became true, and the
+        // wizard rendered "Start using Decanter" INSTEAD of the setup button — leaving the user
+        // with no way to run setup at all. See AppModel.hasUsableEngine.
+        case .engine:  return model.hasUsableEngine
+        case .bottle:  return model.bottles.contains { model.installation(for: $0)?.isSteamCapable == true }
+        case .steam:   return model.bottles.contains {
+            $0.isSteamInstalled && model.installation(for: $0)?.isSteamCapable == true
+        }
         }
     }
 
@@ -130,7 +136,9 @@ struct SetupWizard: View {
         if allDone {
             VStack(spacing: 10) {
                 Button {
-                    if let b = model.bottles.first(where: { $0.isSteamInstalled }) {
+                    if let b = model.bottles.first(where: {
+                        $0.isSteamInstalled && model.installation(for: $0)?.isSteamCapable == true
+                    }) ?? model.bottles.first(where: { $0.isSteamInstalled }) {
                         model.selectedBottleID = b.id
                     }
                     dismiss?()
@@ -188,21 +196,21 @@ struct SetupWizard: View {
         }
 
         // 2. Engine — download + unpack + verify (progress shown in the row).
-        if model.defaultInstallation == nil {
+        if !model.hasUsableEngine {
             await installer.install()
-            model.rescanInstallations()
+            model.adoptDecanterEngine()          // rescan alone leaves a stale saved default
             if case .failed(let message) = installer.phase {
                 failureMessage = "Couldn't set up the Windows engine: \(message)"
                 return
             }
         }
-        guard model.defaultInstallation != nil else {
+        guard model.hasUsableEngine else {
             failureMessage = "No Windows engine is available. Please check your internet connection and try again."
             return
         }
 
         // 3. Bottle — created quietly (no scary wineboot log for a first-timer).
-        if model.bottles.isEmpty {
+        if !isDone(.bottle) {
             if await model.createBottleForSetup(name: bottleName) == nil {
                 failureMessage = "Couldn't create the game environment. Please try again."
                 return
@@ -210,7 +218,8 @@ struct SetupWizard: View {
         }
 
         // 4. Steam — installed quietly; progress shown in the row.
-        if let bottle = model.bottles.first, !bottle.isSteamInstalled {
+        if let bottle = model.bottles.first(where: { model.installation(for: $0)?.isSteamCapable == true }),
+           !bottle.isSteamInstalled {
             steamInstalling = true
             _ = await model.performSteamInstall(in: bottle, console: nil)
             steamInstalling = false

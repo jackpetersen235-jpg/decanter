@@ -70,17 +70,20 @@ final class AppModel: ObservableObject {
 
         guard await ensureRosetta() else { return }              // 1. Rosetta
 
-        if defaultInstallation == nil {                          // 2. Engine
+        if !hasUsableEngine {                                    // 2. Engine
             await installEngine()
-            rescanInstallations()
+            adoptDecanterEngine()
         }
-        guard defaultInstallation != nil else { return }
+        guard hasUsableEngine else { return }
 
-        if bottles.isEmpty {                                     // 3. Bottle
+        // A bottle built on an engine that can't run Steam does not count as done — see
+        // `hasUsableEngine`. Such a user needs a NEW bottle, not a skipped step.
+        if !bottles.contains(where: { installation(for: $0)?.isSteamCapable == true }) {  // 3. Bottle
             _ = await createBottleForSetup(name: "Games")
         }
 
-        if let bottle = bottles.first, !bottle.isSteamInstalled { // 4. Steam
+        if let bottle = bottles.first(where: { installation(for: $0)?.isSteamCapable == true }),
+           !bottle.isSteamInstalled {                            // 4. Steam
             _ = await performSteamInstall(in: bottle, console: nil)
         }
     }
@@ -93,6 +96,46 @@ final class AppModel: ObservableObject {
             return match
         }
         return installations.first
+    }
+
+    /// Decanter's own downloaded engine, if it is actually on disk.
+    var decanterEngine: WineInstallation? {
+        installations.first {
+            $0.binDirectory.standardizedFileURL == Paths.wineEngineBin.standardizedFileURL
+        }
+    }
+
+    /// Does the build that new bottles would use actually run modern Steam?
+    ///
+    /// THE SETUP WIZARD MUST GATE ON THIS, NOT ON `defaultInstallation != nil`. Discovery finds
+    /// ANY wine, including Whisky's wine-7.7, which cannot load modern Steam ("Failed to load
+    /// steamui.dll"). Gating on non-nil made every step of the wizard report DONE on such a Mac:
+    /// engine "done" because some wine existed, bottle "done" because one existed, Steam "done"
+    /// because Steam was installed in it. The wizard then showed "Start using Decanter" with NO
+    /// setup button at all — the user could not run setup even though nothing worked. Reported
+    /// by a first-time user on 2026-07-27.
+    ///
+    /// Deliberately CONSERVATIVE where `WineInstallation.isSteamCapable` is lenient: an unknown
+    /// version counts as unusable here. Version labels are filled in asynchronously, so treating
+    /// "not known yet" as "fine" would let the same skip happen as a race. The cost of being
+    /// wrong in this direction is one download of an engine that works; in the other direction
+    /// it is a user with no path forward.
+    var hasUsableEngine: Bool {
+        guard let inst = defaultInstallation else { return false }
+        if inst.binDirectory.standardizedFileURL == Paths.wineEngineBin.standardizedFileURL { return true }
+        guard inst.version != nil else { return false }
+        return inst.isSteamCapable
+    }
+
+    /// Rescan, then make Decanter's own engine the default if it is now present.
+    ///
+    /// Rescanning alone is NOT enough: `defaultInstallationID` is persisted in UserDefaults and is
+    /// set to whatever was found first on the very first launch. On a Mac with Whisky that is
+    /// wine-7.7, so `defaultInstallation` keeps returning 7.7 even after the good engine downloads,
+    /// and the bottle we then create is built on the broken build again.
+    func adoptDecanterEngine() {
+        rescanInstallations()
+        if let engine = decanterEngine { defaultInstallationID = engine.id }
     }
 
     /// The Wine build associated with a specific bottle (falls back to the default).
