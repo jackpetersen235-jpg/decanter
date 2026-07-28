@@ -337,3 +337,28 @@ from the couch. Testable without any new build — the gpustall profiler hooks M
 it will measure DXVK's encoders-per-command-buffer too (DXVK reaches Metal via MoltenVK). If DXVK
 also builds 100+ encoder buffers and still never stalls, the batching hypothesis is in serious
 trouble; if it never exceeds ~50, that is real support.
+
+## 📌 Unexplored lead (user observation, 2026-07-28): Direct ↔ Composited flipping
+
+The Metal HUD keeps flipping between **Direct** and **Composited** presentation during play.
+Observed on a DXVK run; **not yet established whether it also happens under DXMT**, which is the
+first thing to check.
+
+Why it may matter: switching presentation mode makes WindowServer reconfigure how the layer reaches
+the display, and the drawable the app renders into is re-created around that. DXMT already computes
+**`drawable_blocking_interval`** — time blocked acquiring a drawable (`dxmt_hud_state.cpp`) — and
+this project has **never read that number**, because the HUD statistics are `#ifndef DXMT_DEBUG`
+no-ops in release builds. It is one of the few blocking paths never ruled out.
+
+It also fits the stall's signature better than most falsified candidates: a stall shows
+`com.Metal.CommandQueueDispatch` blocked in `IOConnectTrap4` with the encode thread idle and the
+chunk ring nearly empty — i.e. not a queue backup but a single submit waiting on something external.
+A display-side reconfiguration is exactly the kind of external thing that would do that.
+
+How to check cheaply, in order:
+1. Watch the HUD under DXMT and see whether the flipping happens there too, and whether flips
+   coincide with stalls. Zero code.
+2. Force one mode and see if stalls change — full-screen vs windowed changes whether macOS can use
+   direct presentation at all.
+3. Only then consider reading `drawable_blocking_interval`, which needs the DXMT_DEBUG build
+   (now buildable — see the wine_builtin_dll finding above).
