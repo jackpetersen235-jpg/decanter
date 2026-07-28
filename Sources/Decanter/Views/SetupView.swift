@@ -113,7 +113,7 @@ struct SetupView: View {
                        + "Install via Homebrew, then point Decanter at its bin folder.")
                 bullet("CrossOver — commercial; Decanter detects it automatically at /Applications/CrossOver.app.")
                 bullet("An existing Whisky install — its bundled Wine is detected automatically.")
-                Text("Decanter never ships or downloads these builds for you — pick one you have a license to use.")
+                Text("Decanter installs its OWN Wine engine — use View ▸ Setup Assistant for that, and it is the recommended option. The builds above are alternatives you may already have; Decanter does not download those for you.")
                     .font(.caption).foregroundStyle(.secondary).padding(.top, 4)
             }
             .padding(6)
