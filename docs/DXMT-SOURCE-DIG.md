@@ -236,3 +236,67 @@ is **27 757 256 bytes vs the official 31 805 040** — ~4 MB smaller, so somethi
 compiled in. NOT an 8.16-vs-wine-10 ABI mismatch: official DXMT 0.80 is itself built against wine
 8.16 and runs fine on this engine. Before retrying, diff this meson configuration against
 `.github/workflows/ci.yml` (upstream uses Xcode 16.1, not 26.6).
+
+## ✅ SOLVED 2026-07-28: why a local build "compiles but never loads d3d11"
+
+**`wine_builtin_dll`, a meson option that defaults to TRUE.** It stamps `Wine builtin DLL` into
+each DLL's DOS stub. Sekiro's DllOverrides ask for **native** d3d11; wine will not accept a
+builtin-marked file in that role, so it silently falls back to its own d3d11 → **wined3d → OpenGL**.
+The game still launches, which is exactly why this reads as a DXMT bug rather than a build flag.
+
+Diagnosed by diffing `wine --debugmsg +loaddll` between the shipped DLLs and a local build:
+
+| | official | default-configured local build |
+|---|---|---|
+| `d3d11.dll` | **native** | **builtin** |
+
+Build with `-Dwine_builtin_dll=false`; the D3D DLLs then install to `system32/` instead of
+`x86_64-windows/`, and `winemetal.dll` correctly stays a builtin.
+
+**None of the previously-suspected causes were involved** — not LLVM assertions, not the wine 8.16
+vs wine 10 ABI, not the Xcode/AIR version, not `dxmt_debug`. Two of those were still worth fixing
+and are now handled in `Scripts/sekiro/dxmt-build.sh`, but neither was the fault.
+
+Two genuine upstream-source problems found on the way:
+- **v0.80 does not compile with GCC 16** (what Homebrew now ships): `com_guid.cpp` uses
+  `std::setfill`/`std::setw` without including `<iomanip>`.
+- **`dxmt_command.metal` has no pinned target**, so the AIR version baked into the shipped DLL
+  depends on the host Xcode (16.1 → `air64`; Xcode 26 → `air64_v28`).
+
+Tooling: `dxmt-build.sh` (reproducible, refuses wrong toolchains), `dxmt-swap.sh` (install/restore
+across both trees, pristine stash), `dxmt-smoke.sh` (**5-minute pass/fail for "did DXMT actually
+initialise", replacing a play session as the way to find out**).
+
+## ❌ FAILED 2026-07-28: `d3d11.maxPassesPerCommandBuffer` does not bound anything
+
+Added a pass counter next to `promote_flush` in the D3D11 layer, exposed as a config option, and
+ran a **blinded** A/B at cap=32. Result:
+
+| | arm 1 (capped, 32) | arm 2 (control) |
+|---|---|---|
+| long stalls | 4 in 8m55s | 4 in 6m |
+| avg encoders/cb | **47.5** | 38.1 |
+| **max encoders/cb** | **233** | 250 |
+| buffers ≥100 enc | 170 | 78 |
+
+**A cap of 32 producing 233-encoder buffers is not a cap.** The intervention never engaged, so
+this is NOT a falsification of the batching hypothesis and must not be counted as a thirteenth
+eliminated cause.
+
+**Why it cannot work from there.** The real count, `ArgumentEncodingContext::encoder_count_`, is
+incremented inside `endPass()` (`dxmt_context.cpp:666`). The D3D11 layer emits `enc.endPass()` as a
+**deferred lambda** that runs later on the encode thread — after the chunk boundary is already
+fixed — and the encoding layer calls `endPass()` at a dozen of its own sites the D3D11 layer never
+sees. A recording-side counter is structurally incapable of bounding the buffer. Doing this
+properly means splitting a chunk at encode time, which breaks the 1-chunk-1-`MTLCommandBuffer`
+invariant this document opens with. That is an upstream design decision, not a patch.
+
+**Also learned:** a 60 s smoke run is worthless for judging this. It showed avg 6.9 encoders where
+real gameplay averages ~44, and the apparent improvement in it was noise on a menu screen.
+
+**New evidence worth more than the experiment:** the user played Sekiro on **CrossOver** (D3DMetal,
+not DXMT) on this same Mac — **no long stalls, but a less steady framerate**. Same machine, same
+GPU firmware, same Rosetta, same game, msync in both; the translation layer is the differentiator.
+That is the first evidence implicating DXMT that does not come from this project's own
+instrumentation, which matters because `gpuMS` produced false positives. Confound: CrossOver also
+swaps wine.
