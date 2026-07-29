@@ -498,3 +498,51 @@ His opening framing was "a shader-cost problem ... one MTLCommandBuffer containi
 long dispatch." That is precisely what this is. It was filed as falsified early, on `gpuMS` (later
 shown to give false positives) and on pipeline data collected before the render-encoder hooks were
 fixed, and the investigation spent a day eliminating alternatives instead.
+
+## 🎯🎯 CONFIRMED 2026-07-28: the emulated geometry-shader DRAW, not the marshal
+
+Second stall attributed with **exact** mapping (136/136 render encoders sampled) corrects and
+confirms the first.
+
+```
+cb#6217  worst encoder  26299.3 ms   (mapping uncertain by 2 - 112/114 sampled)
+cb#5728  worst encoder  26300.7 ms   (mapping EXACT - 136/136 sampled)
+                        ---------
+difference                  1.4 ms   (0.005%)
+```
+
+**Two stalls, different command buffers, minutes apart, identical encoder duration to 1.4 ms.**
+Variable work cannot do that. It is the same draw executing the same arguments.
+
+Both buffers show the same local structure, and the exactly-mapped one lands on the draw:
+
+```
+enc[n-1]  vs:gs_draw_arguments_marshal/fs:-                 <- DXMT GS-emulation setup
+enc[n]    vs:vs_f9918d6d_82ab3bf2.../fs:ps_a3c42878         <- 26,300 ms = 100% of the buffer
+```
+
+So the stall is **the emulated geometry-shader draw**, consuming the indirect arguments the marshal
+pass just wrote — not the marshal itself, which is what the first (inexactly-mapped) attribution
+suggested. `vs_f9918d6d` appears in 55.3% of genuine stalls vs 14.8% of healthy buffers (~4x), but
+the direct attribution carries this, not the correlation.
+
+**Mechanism.** Metal has no geometry shaders; DXMT emulates them by marshalling draw arguments
+(`gs_draw_arguments_marshal`, `dxmt_command.cpp:46`; the `draw_arguments` struct is built in
+`src/airconv/dxbc_converter_gs.cpp` — vertex_count, start_index, base_vertex_id, base_instance_id)
+and issuing an indirect draw. A draw recording `work=3` that runs 26.3 s means the marshalled
+arguments are pathological — a garbage or stale count. A CONSTANT bad value explains the fixed
+duration down to the 1.4 ms agreement.
+
+**Explains every control:** DXVK and D3DMetal implement GS differently and never stall; JJBA never
+stalls; the buffer is structurally ordinary (one encoder of 125/136); the GPU saturates while every
+CPU path is idle; stalls cluster at area loads and death reloads, when GS effects are drawn.
+
+**Reproduce:** `GPUSTALL_ENCODER_TIMING=1 bash Scripts/sekiro/gpuprof-direct.sh --slow-ms 250`
+then read `ENCTIME` / `ENCSPAN`. Trust an attribution only when `ENCSPAN valid=N/N` matches the R
+count in `seq`; a short count makes the render-index -> dump-position mapping uncertain by the
+difference, which is exactly how the first attribution named the wrong encoder.
+
+**Instrument caveats, learned the hard way:** TS_SLOTS is capped at 4096 (Metal rejects counter
+sample buffers over 32768 B, 8 B/sample) and exceeding it fails silently at creation; ring
+wraparound needs the two-segment resolve or valid ranges read as empty; and env vars must be set in
+the same invocation as the launcher, since shell state does not persist between tool calls.
