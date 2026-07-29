@@ -546,3 +546,31 @@ difference, which is exactly how the first attribution named the wrong encoder.
 sample buffers over 32768 B, 8 B/sample) and exceeding it fails silently at creation; ring
 wraparound needs the two-segment resolve or valid ranges read as empty; and env vars must be set in
 the same invocation as the launcher, since shell state does not persist between tool calls.
+
+## Outcome (2026-07-29)
+
+**Shipping build: `overflow-only`** — the two arithmetic guards, WITHOUT `index++`.
+Installed d3d11.dll sha1 prefix `6aacd1ae14f5`; rebuild with `dxmt-build.sh ovf`.
+
+| build | index++ | overflow guards | result |
+|---|---|---|---|
+| official v0.80 | ✗ | ✗ | stalls every 2-5 min |
+| `install-fix` | ✓ | ✓ | no stalls, but a sustained drop to 30 fps |
+| **`install-ovf`** | ✗ | ✓ | **no stalls reported since** |
+
+**`index++` is correct but costly.** Upstream clearly intends the loop to walk every task, and
+without it tasks 1..n never get dispatch arguments written. Adding it makes the GPU render geometry
+it was previously skipping, which pushed frame time past 16.7 ms and locked display sync to half
+rate. Kept out of the shipping build; it belongs in an upstream report as a separate correctness
+issue, not a performance one.
+
+**Framerate roughness afterwards was NOT a DXMT problem.** Diagnosed as ambient: max in-game
+settings, plus (at the time) 19 h uptime, 89% swap, iOS Simulator services resident, and load
+average 6 with the game closed. GPU sat at 74-79% during play - the same as the stock baseline -
+so the shipping build adds no measurable GPU load.
+
+**Two upstream bugs worth reporting to 3Shain regardless of the stall:**
+1. `gs_/ts_draw_arguments_marshal` never increment `index`, so any multi-task batch loops forever
+   (`dxmt_command.metal`; CPU side sets `end_of_command` on the last task only).
+2. The dispatch-size guard underflows on `draw_arguments.x == 0` and does a 32-bit multiply against
+   a 64-bit limit, so a large product wraps and passes the check meant to reject it.
