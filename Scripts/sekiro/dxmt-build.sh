@@ -35,8 +35,9 @@ done
 BRANCH="${1:?usage: dxmt-build.sh stock|capped}"
 
 case "$BRANCH" in
-  stock)  REF=build-fixes ;;
-  capped) REF=batch-cap   ;;
+  stock)  REF=build-fixes   ;;
+  capped) REF=batch-cap     ;;
+  fix)    REF=gs-marshal-fix ;;   # the GS/TS marshal infinite-loop fix
   *) echo "arg must be stock|capped" >&2; exit 2 ;;
 esac
 
