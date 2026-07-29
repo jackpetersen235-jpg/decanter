@@ -22,6 +22,12 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Decanter"
 [ -f "$ROOT/Assets/AppIcon.icns" ] && cp "$ROOT/Assets/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 [ -f "$ROOT/Assets/wallpaper.png" ] && cp "$ROOT/Assets/wallpaper.png" "$APP/Contents/Resources/wallpaper.png"
+# Patched DXMT (see Assets/DXMT/VERSION.txt). Ships in the bundle so a fresh install can fix the
+# 26 s geometry-shader stall without the user building anything.
+if [ -d "$ROOT/Assets/DXMT" ]; then
+  mkdir -p "$APP/Contents/Resources/DXMT"
+  cp "$ROOT/Assets/DXMT/"* "$APP/Contents/Resources/DXMT/"
+fi
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

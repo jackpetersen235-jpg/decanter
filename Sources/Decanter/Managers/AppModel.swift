@@ -60,6 +60,24 @@ final class AppModel: ObservableObject {
         if CommandLine.arguments.contains("--run-setup") {
             Task { await runGuidedSetup() }
         }
+        // Headless per-game graphics install, so the payload path can be verified without the GUI:
+        //   Decanter.app/Contents/MacOS/Decanter --install-gfx
+        if CommandLine.arguments.contains("--install-gfx") {
+            Task {
+                for bottle in bottles {
+                    let games = detectedSteamGames(in: bottle)
+                    FileHandle.standardError.write(
+                        "bottle \(bottle.name): \(games.count) game(s) detected\n".data(using: .utf8)!)
+                    for g in games {
+                        FileHandle.standardError.write(
+                            "  \(g.folder.lastPathComponent) -> \(g.exe)\n".data(using: .utf8)!)
+                    }
+                    let n = await installGraphicsDriver(in: bottle)
+                    FileHandle.standardError.write("  installed into \(n)\n".data(using: .utf8)!)
+                }
+                exit(0)
+            }
+        }
     }
 
     /// The complete first-run automation, factored out of the wizard view so it (a) survives any
@@ -277,6 +295,80 @@ final class AppModel: ObservableObject {
         markInitialized(bottle.id)
         await applyRegistry(bottleID: bottle.id, console: hidden, finish: false)
         return bottle.id
+    }
+
+    // MARK: Per-game graphics driver (DXMT)
+
+    /// Games found under this bottle's Steam library, as (folder, main .exe name).
+    ///
+    /// Steam lays every title out as `steamapps/common/<Title>/`. The main executable is picked as
+    /// the largest top-level `.exe`, which beats guessing from the folder name: launchers and
+    /// crash handlers ship alongside the game and are invariably much smaller.
+    func detectedSteamGames(in bottle: Bottle) -> [(folder: URL, exe: String)] {
+        let common = bottle.driveC
+            .appendingPathComponent("Program Files (x86)/Steam/steamapps/common", isDirectory: true)
+        let fm = FileManager.default
+        guard let dirs = try? fm.contentsOfDirectory(at: common, includingPropertiesForKeys: nil) else { return [] }
+        var found: [(folder: URL, exe: String)] = []
+        let dirKey: Set<URLResourceKey> = [.isDirectoryKey]
+        for dir in dirs where (try? dir.resourceValues(forKeys: dirKey))?.isDirectory == true {
+            let sizeKeys: Set<URLResourceKey> = [.fileSizeKey]
+            guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: Array(sizeKeys))
+            else { continue }
+            func bytes(_ u: URL) -> Int { (try? u.resourceValues(forKeys: sizeKeys).fileSize) ?? 0 }
+            let exes = files.filter { $0.pathExtension.lowercased() == "exe" }
+            guard let biggest = exes.max(by: { bytes($0) < bytes($1) }) else { continue }
+            found.append((dir, biggest.lastPathComponent))
+        }
+        return found
+    }
+
+    /// Copy the bundled DXMT DLLs into each detected game and register the per-game DLL overrides.
+    ///
+    /// PER-GAME, NEVER PREFIX-WIDE. A prefix-wide d3d11/dxgi override routes Steam's own CEF UI
+    /// through DXMT and black-screens the client (GAMING-STACK.md section 6), so the override is
+    /// scoped to `AppDefaults\<exe>` and the DLLs are dropped beside the game rather than into
+    /// system32.
+    @discardableResult
+    func installGraphicsDriver(in bottle: Bottle, console: TaskConsole? = nil) async -> Int {
+        guard let src = Paths.bundledDXMT else {
+            console?.append("This build of Decanter ships no DXMT payload.")
+            return 0
+        }
+        guard let installation = installation(for: bottle) else {
+            console?.append("No Wine installation available for this bottle.")
+            return 0
+        }
+        let games = detectedSteamGames(in: bottle)
+        if games.isEmpty { console?.append("No games found in this bottle's Steam library yet.") }
+
+        let fm = FileManager.default
+        let env = Wine.environment(for: bottle, using: installation)
+        var done = 0
+        for game in games {
+            var copied = true
+            for dll in Paths.dxmtDLLs {
+                let dst = game.folder.appendingPathComponent(dll)
+                // Keep one backup of whatever was there first, so this is reversible by hand.
+                let backup = game.folder.appendingPathComponent(dll + ".decanter-orig")
+                if fm.fileExists(atPath: dst.path), !fm.fileExists(atPath: backup.path) {
+                    try? fm.copyItem(at: dst, to: backup)
+                }
+                try? fm.removeItem(at: dst)
+                do { try fm.copyItem(at: src.appendingPathComponent(dll), to: dst) }
+                catch { console?.append("Could not write \(dll) into \(game.folder.lastPathComponent): \(error.localizedDescription)"); copied = false }
+            }
+            guard copied else { continue }
+
+            let key = #"HKCU\Software\Wine\AppDefaults\"# + game.exe + #"\DllOverrides"#
+            for dll in ["d3d11", "dxgi", "d3d10core"] {
+                let args = ["reg", "add", key, "/v", dll, "/t", "REG_SZ", "/d", "native,builtin", "/f"]
+                _ = try? await Shell.run(installation.loader, arguments: args, environment: env)
+            }
+            console?.append("Graphics driver installed for \(game.folder.lastPathComponent) (\(game.exe)).")
+            done += 1
+        }
+        return done
     }
 
     func deleteBottle(_ bottle: Bottle, removeFiles: Bool) {

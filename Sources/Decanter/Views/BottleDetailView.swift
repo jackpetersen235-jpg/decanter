@@ -11,6 +11,8 @@ struct BottleDetailView: View {
         var id: String { rawValue }
     }
     @State private var tab: Tab = .overview
+    @State private var installingGFX = false
+    @State private var gfxResult: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -99,6 +101,23 @@ struct BottleDetailView: View {
                             .disabled(launching)
 
                             Button("Reinstall") { model.installSteam(in: bottle) }
+
+                            // Re-runnable on purpose: the wizard installs this after Steam, but a
+                            // fresh library has no games yet, so it must be reachable afterwards.
+                            Button(installingGFX ? "Installing…" : "Install Graphics Driver") {
+                                installingGFX = true
+                                Task {
+                                    let n = await model.installGraphicsDriver(in: bottle)
+                                    gfxResult = n == 0
+                                        ? "No games found in this bottle yet — install one in Steam, then run this again."
+                                        : "Patched graphics driver installed for \(n) game\(n == 1 ? "" : "s")."
+                                    installingGFX = false
+                                }
+                            }
+                            .disabled(installingGFX)
+                        }
+                        if let gfxResult {
+                            Text(gfxResult).font(.caption).foregroundStyle(.secondary)
                         }
                         if launching {
                             Text("Steam is opening — this can take a few seconds the first time.")

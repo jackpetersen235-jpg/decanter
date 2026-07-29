@@ -33,6 +33,22 @@ enum Paths {
         shaderCacheRoot.appendingPathComponent(bottle.url.lastPathComponent, isDirectory: true)
     }
 
+    /// Patched DXMT DLLs shipped inside the app bundle (Resources/DXMT).
+    ///
+    /// Upstream DXMT 0.80 freezes for ~26 s whenever its geometry-shader argument-marshal shader
+    /// gets a multi-task batch, because the shader never advances its task index. These rebuilt
+    /// DLLs fix that. Only the three game-folder DLLs need replacing - verified against a
+    /// completely stock engine - so nothing in the Wine tree is touched.
+    static var bundledDXMT: URL? {
+        guard let dir = Bundle.main.resourceURL?.appendingPathComponent("DXMT", isDirectory: true),
+              FileManager.default.fileExists(atPath: dir.appendingPathComponent("d3d11.dll").path)
+        else { return nil }
+        return dir
+    }
+
+    /// The DLLs that make up the per-game graphics override.
+    static let dxmtDLLs = ["d3d11.dll", "dxgi.dll", "d3d10core.dll"]
+
     /// Create the directory skeleton if it does not yet exist.
     static func ensureDirectories() {
         for dir in [appSupport, bottlesRoot, downloads] {

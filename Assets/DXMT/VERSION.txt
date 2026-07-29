@@ -1,0 +1,13 @@
+DXMT 0.80 + local marshal fixes (labelled "DXMT 0.81" on the in-game HUD)
+Built 2026-07-29 from github.com/3Shain/DXMT @ v0.80 with four changes to
+gs_/ts_draw_arguments_marshal in src/dxmt/dxmt_command.metal:
+
+  index++                 walk the task list; without it any multi-task batch
+                          spins until the GPU shader timeout (~26 s freeze)
+  underflow guard         draw_arguments.x == 0 no longer yields 0xFFFFFFFF
+  64-bit dispatch compare x * y no longer wraps past max_object_threadgroups
+  divisor zero-checks     vertex_count_per_warp / patch_per_group / control_point_count
+
+Fixes the ~26 s stalls measured on Sekiro (M5, macOS 26). Verified to work with a
+completely stock engine - only these three DLLs need to be patched.
+There is no upstream DXMT 0.81; report bugs as "0.80 + local patches".

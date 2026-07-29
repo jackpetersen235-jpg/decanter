@@ -224,5 +224,12 @@ struct SetupWizard: View {
             _ = await model.performSteamInstall(in: bottle, console: nil)
             steamInstalling = false
         }
+
+        // 5. Patched graphics driver for anything already installed. Harmless when the library is
+        // empty (a fresh Steam install has no games yet) - the Configuration tab has a button to
+        // run it again after the user installs one.
+        if let bottle = model.bottles.first(where: { model.installation(for: $0)?.isSteamCapable == true }) {
+            await model.installGraphicsDriver(in: bottle)
+        }
     }
 }
