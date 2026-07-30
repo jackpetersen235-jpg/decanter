@@ -101,6 +101,29 @@ A newcomer with **no Wine and no Rosetta** can press one button and end up at St
 Global DXMT overrides can't be used (they black-screen Steam's CEF — see GAMING-STACK.md §6).
 Per-game auto-DXMT is the obvious next feature.
 
+## Online play: the engine toggle
+
+**Configuration → Engine → Play mode** switches a bottle between two independent engines:
+
+- **Offline** — `Wine/`, the tuned single-player engine (DXMT fixes, msync, MetalFX)
+- **Online** — `WineOnline/`, a separate copy so online experimentation cannot touch the above
+
+Same bottle either way: same prefix, saves, Steam login and games. Only the engine differs.
+Created with `cp -Rc` (APFS clone) — measured 1.0 s and 2 MB consumed for a 719 MB tree, so
+isolation is effectively free. **Reset Online Engine** re-clones it from the offline one in about
+a second, which is the point: break it freely, restore instantly, never re-download 480 MB.
+
+Switching is refused while Steam or a game is running (Wine holds the engine tree open).
+Headless: `--engine offline|online`, `--reset-online`.
+
+**⚠️ Anti-cheat is the limit, and no engine work changes it.** Per
+[Epic's own announcement](https://onlineservices.epicgames.com/news/epic-online-services-launches-anti-cheat-support-for-linux-mac-and-steam-deck),
+EOS anti-cheat supports compatibility layers on **Linux only**; macOS support exists solely for
+**native Mac builds**. A Windows game under Wine on macOS has no anti-cheat path at all. Confirmed
+against JJBA All-Star Battle R: it reaches its online service over HTTPS, never opens a single UDP
+socket, and reports "transmission error" — rejected before a peer session exists. Games without
+kernel anti-cheat (VAC-only, or none) are unaffected and work normally.
+
 ## Sharing with someone else
 
 `Scripts/package-for-friend.sh` → `~/Desktop/Decanter-for-friend.zip` (~2 MB; engine self-downloads).

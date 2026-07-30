@@ -51,7 +51,11 @@ while find_game >/dev/null 2>&1; do
     case "$seen" in *"|$ep|"*) continue ;; esac
     seen="$seen|$ep|"
     printf '%s  %s\n' "$(date +%H:%M:%S)" "$ep" | tee -a "$OUT"
-  done < <(lsof -nP -p "$PID" -i 2>/dev/null | tail -n +2)
+  # -a is LOAD-BEARING: lsof ORs its selection criteria, so `-p PID -i` means "this process OR
+  # every internet file on the machine". Without it this logged Dropbox, AirPlay and Claude's own
+  # sockets as though they were the game's, and reported "it DID reach the network" for a game
+  # that had not started. -a ANDs them: this process AND internet files only.
+  done < <(lsof -nP -a -p "$PID" -i 2>/dev/null | tail -n +2)
   sleep 1
 done
 
