@@ -64,6 +64,22 @@ final class AppModel: ObservableObject {
         // GUI:  Decanter.app/Contents/MacOS/Decanter --engine offline|online
         // Headless reset, to verify the restore path without the GUI:
         //   Decanter.app/Contents/MacOS/Decanter --reset-online
+        // Headless bottle creation, for testing that a FAILED create cleans up after itself:
+        //   Decanter.app/Contents/MacOS/Decanter --create-bottle "name"
+        if let i = CommandLine.arguments.firstIndex(of: "--create-bottle"),
+           i + 1 < CommandLine.arguments.count {
+            let wanted = CommandLine.arguments[i + 1]
+            Task {
+                let before = bottles.count
+                let id = await createBottleForSetup(name: wanted)
+                FileHandle.standardError.write("""
+                    created: \(id != nil ? "yes" : "NO")
+                    bottles: \(before) -> \(bottles.count)\(id == nil && bottles.count == before ? "  (cleaned up correctly)" : "")
+
+                    """.data(using: .utf8)!)
+                exit(id == nil ? 1 : 0)
+            }
+        }
         if CommandLine.arguments.contains("--reset-online") {
             Task {
                 let console = TaskConsole(title: "reset")
@@ -320,6 +336,16 @@ final class AppModel: ObservableObject {
                 self.markInitialized(bottle.id)
                 Task { await self.applyRegistry(bottleID: bottle.id, console: console, finish: true) }
             } else {
+                // Remove the failed bottle rather than leaving it in the sidebar. It was appended
+                // and saved before wineboot ran, so a failure otherwise leaves an entry that looks
+                // real, can never launch anything, and gives the user no clue why — the state the
+                // missing-wine.inf bug produced, which had to be cleaned up by editing
+                // bottles.json by hand.
+                console.append("")
+                console.append("Setup failed, so this bottle was removed. Nothing else was changed.")
+                console.append("If this keeps happening, run Scripts/doctor.sh — a missing engine "
+                               + "file is the usual cause.")
+                self.deleteBottle(bottle, removeFiles: true)
                 console.finish(code)
             }
         }
@@ -371,7 +397,18 @@ final class AppModel: ObservableObject {
             }
             if handle == nil { continuation.resume(returning: -1) }   // never started
         }
-        guard code == 0 else { return nil }
+        guard code == 0 else {
+            // CLEAN UP THE CORPSE. The bottle was appended and saved before booting, so a failed
+            // wineboot used to leave a permanently broken entry in the list: it appears in the
+            // sidebar, can never launch anything, and the user has no way to tell why. That is
+            // exactly what the missing-wine.inf bug produced on 2026-07-30 — the dead bottle had
+            // to be removed by hand-editing bottles.json.
+            //
+            // Remove the entry and the half-made prefix. `deleteBottle` already refuses to touch
+            // anything outside Decanter's own bottles root or still referenced by another bottle.
+            deleteBottle(bottle, removeFiles: true)
+            return nil
+        }
         markInitialized(bottle.id)
         await applyRegistry(bottleID: bottle.id, console: hidden, finish: false)
         return bottle.id
@@ -571,9 +608,20 @@ final class AppModel: ObservableObject {
         saveBottles()
     }
 
+    /// Turn a user-supplied bottle name into something safe to use as a folder name.
+    ///
+    /// Replaces anything outside `[A-Za-z0-9-_ ]`, which also neutralises path traversal:
+    /// `../../etc/passwd` becomes `------etc-passwd`, and `.`/`..` become `-`/`--`.
+    ///
+    /// TRUNCATED to 120 characters. macOS caps a filename at 255 bytes, and without a limit a long
+    /// name produced a folder name the filesystem refused outright — `mkdir` failed with "File name
+    /// too long", wineboot then failed, and the user was left with a bottle that could never work.
+    /// 120 leaves room for the " 2", " 3" suffixes `uniqueBottleFolder` appends, and for multi-byte
+    /// characters that occupy more than one byte each.
     private func diskSafe(_ name: String) -> String {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_ "))
-        return String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" })
+        let mapped = String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" })
+        return String(mapped.prefix(120))
     }
 
     // MARK: CrossOver import
