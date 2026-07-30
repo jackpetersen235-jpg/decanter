@@ -129,7 +129,11 @@ fi
 if [ "${STEAM_OK:-0}" != "1" ] && [ -x "$ENGINE_BIN" ]; then
   NEXT+=("Open Decanter and press \"Set everything up for me\" (creates a game bottle + installs Steam)")
 fi
-RUN=$(pgrep -f 'steam\.exe' 2>/dev/null | grep -v "$$" | wc -l | tr -d ' ')
+# `pgrep -x` matches the executable NAME, so no self-exclusion hack is needed. The old form was
+# `pgrep -f 'steam\.exe' | grep -v "$$"`, which filtered any PID whose digits merely CONTAINED
+# this shell's PID (a Steam pid of 51234 dropped when the shell is 234), while the -f match itself
+# could pick up unrelated processes whose arguments mention steam.exe.
+RUN=$(pgrep -x 'steam.exe' 2>/dev/null | wc -l | tr -d ' ')
 [ "${RUN:-0}" -gt 0 ] && info "Steam is currently running" || true
 echo
 
