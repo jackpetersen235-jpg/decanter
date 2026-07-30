@@ -21,7 +21,7 @@
 #   bash dxmt-build.sh capped     # the above + d3d11.maxPassesPerCommandBuffer
 set -uo pipefail
 
-SRC="$HOME/src/dxmt"
+SRC="$HOME/coding/dxmt"
 # Xcode 16.1's GUI will NOT launch on macOS 26 -- Apple blocks old Xcode app bundles on newer
 # systems. That does not matter: only `xcrun metal` is needed here and it is an ordinary
 # command-line binary that runs regardless. So the bundle does not have to be installed, renamed,

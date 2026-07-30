@@ -52,7 +52,7 @@ case "${1:-run}" in
     HITS=$(strings -n 6 "$DLL" 2>/dev/null | grep -c maxPassesPerCommandBuffer || true)
     if [ "${HITS:-0}" -eq 0 ]; then
       echo "The installed DXMT has no maxPassesPerCommandBuffer option." >&2
-      echo "  bash $HERE/dxmt-swap.sh install ~/src/dxmt/install-capped" >&2
+      echo "  bash $HERE/dxmt-swap.sh install ~/coding/dxmt/install-capped" >&2
       exit 1
     fi
     N=1; [ -f "$EXP/arm1.count" ] && N=2

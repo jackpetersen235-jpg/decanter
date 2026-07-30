@@ -14,7 +14,7 @@
 # started but never loaded d3d11.
 #
 # Usage:
-#   bash dxmt-swap.sh install <dxmt-install-prefix>   # e.g. ~/src/dxmt/install
+#   bash dxmt-swap.sh install <dxmt-install-prefix>   # e.g. ~/coding/dxmt/install
 #   bash dxmt-swap.sh restore                         # back to the shipped official 0.80
 #   bash dxmt-swap.sh status
 set -uo pipefail
