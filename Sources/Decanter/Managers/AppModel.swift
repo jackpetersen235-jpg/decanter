@@ -917,10 +917,27 @@ final class AppModel: ObservableObject {
             _ = try? await Shell.run(server, arguments: ["-k"], environment: env)
             try? await Task.sleep(nanoseconds: 3_000_000_000)
         }
-        for pattern in ["steam\\.exe", "steamwebhelper", "explorer\\.exe",
-                        "services\\.exe", "winedevice", "rpcss\\.exe", "plugplay"] {
-            _ = try? await Shell.run(URL(fileURLWithPath: "/usr/bin/pkill"),
-                                     arguments: ["-f", pattern])
+        // SCOPED to this prefix. This used to be `pkill -f steam\.exe` (plus six more patterns),
+        // which had two problems:
+        //   1. NOT per-bottle. It killed Steam and Wine helpers in EVERY prefix, so shutting one
+        //      bottle down would take out a game running in another — or in the separate online
+        //      engine — despite the function being named `shutdownPrefix(for:)`.
+        //   2. It matched COMMAND LINES, so any shell or script whose arguments merely mentioned
+        //      one of those names was a kill target. Same class as the pgrep self-matches, but
+        //      destructive instead of merely wrong.
+        // `wineserver -k` above is the real mechanism and handles Wine's own services; this only
+        // needs to catch stragglers, and now only ones demonstrably belonging to THIS prefix.
+        let prefixPath = bottle.url.standardizedFileURL.path
+        if let ps = try? await Shell.run(URL(fileURLWithPath: "/bin/ps"),
+                                         arguments: ["-Ao", "pid=,command="]) {
+            let pids = ps.stdout.split(separator: "\n").compactMap { line -> String? in
+                guard line.contains(prefixPath) else { return nil }
+                return line.trimmingCharacters(in: .whitespaces)
+                    .split(separator: " ", maxSplits: 1).first.map(String.init)
+            }
+            if !pids.isEmpty {
+                _ = try? await Shell.run(URL(fileURLWithPath: "/bin/kill"), arguments: ["-9"] + pids)
+            }
         }
         try? await Task.sleep(nanoseconds: 2_000_000_000)
     }
@@ -1075,12 +1092,47 @@ final class AppModel: ObservableObject {
 
     // MARK: Persistence
 
+    /// Load the bottle index, surviving a single corrupt or out-of-date entry.
+    ///
+    /// The naive version — decode `[Bottle]` and silently give up — turns a recoverable problem
+    /// into permanent data loss. Decoding is all-or-nothing, so ONE bottle carrying an unknown
+    /// shape drops the whole list; `bottles` stays empty; the app shows first-run setup as though
+    /// nothing were installed; and then the next `saveBottles()` (creating a bottle, or changing
+    /// any setting) writes that empty array straight over the file. The user's bottles are gone.
+    ///
+    /// That very nearly happened on 2026-07-27, when adding a non-optional property made every
+    /// previously-saved bottle undecodable.
+    ///
+    /// So: try the whole array, and on failure fall back to decoding entry by entry, keeping
+    /// whatever survives — and back the original file up untouched before anything can overwrite
+    /// it.
     private func loadBottles() {
         guard let data = try? Data(contentsOf: Paths.bottlesIndex) else { return }
-        if let decoded = try? JSONDecoder().decode([Bottle].self, from: data) {
+        let decoder = JSONDecoder()
+
+        if let decoded = try? decoder.decode([Bottle].self, from: data) {
             bottles = decoded
             selectedBottleID = bottles.first?.id
+            return
         }
+
+        // Preserve the file BEFORE any save can clobber it. This is the only copy of the user's
+        // bottle list, and it is still intact on disk at this point.
+        let backup = Paths.appSupport
+            .appendingPathComponent("bottles.corrupt-\(Int(Date().timeIntervalSince1970)).json")
+        try? data.write(to: backup)
+
+        // Per-entry salvage: re-encode each element on its own and decode it in isolation.
+        guard let raw = try? JSONSerialization.jsonObject(with: data) as? [Any] else { return }
+        var salvaged: [Bottle] = []
+        for element in raw {
+            guard let itemData = try? JSONSerialization.data(withJSONObject: element),
+                  let bottle = try? decoder.decode(Bottle.self, from: itemData) else { continue }
+            salvaged.append(bottle)
+        }
+        bottles = salvaged
+        selectedBottleID = bottles.first?.id
+        NSLog("Decanter: bottles.json partially unreadable — salvaged \(salvaged.count) of \(raw.count). Original saved to \(backup.lastPathComponent)")
     }
 
     private func saveBottles() {
