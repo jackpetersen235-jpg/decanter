@@ -2,7 +2,7 @@
 
 > hello, I am sending this report as a person who does not know how to code but I'm decent at using
 > claude code so take this whole report with a grain of salt because I don't know what I'm doing.
-> With that said there was a problem with these stall and the ai was able to track it down.
+> With that said there was a problem with the stalls and the ai was able to track it down.
 >
 > -I hope this helps
 
