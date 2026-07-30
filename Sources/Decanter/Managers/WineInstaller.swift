@@ -191,6 +191,23 @@ final class WineInstaller: ObservableObject {
         try? fm.removeItem(at: stash)
         try fm.copyItem(at: winemetalSO, to: stash)
 
+        // AND stash share/wine/wine.inf, for the same reason.
+        //
+        // The loop below deletes `share` wholesale before copying the overlay's version, and the
+        // msync overlay does not ship a wine.inf. Without it `wineboot --init` cannot populate a
+        // prefix at all:
+        //     wine: failed to update ... with ...share\wine\wine.inf: No such file or directory
+        //     wine: could not load kernel32.dll, status c0000135
+        // Existing prefixes keep working, which is why this went unnoticed: it only breaks the
+        // creation of NEW bottles, and the wizard was last verified end-to-end the day before this
+        // overlay was introduced. Found 2026-07-30 while building the online-play feature.
+        let infStash = work.appendingPathComponent("wine.inf")
+        let baseInf = wineRoot.appendingPathComponent("share/wine/wine.inf")
+        if fm.fileExists(atPath: baseInf.path) {
+            try? fm.removeItem(at: infStash)
+            try? fm.copyItem(at: baseInf, to: infStash)
+        }
+
         for part in ["bin", "share", "lib/wine"] {
             let dst = wineRoot.appendingPathComponent(part)
             let src = bundle.appendingPathComponent(part)
@@ -199,6 +216,15 @@ final class WineInstaller: ObservableObject {
             try fm.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
             try fm.copyItem(at: src, to: dst)
         }
+        // Put wine.inf back if the overlay did not supply one. Without this, every new bottle fails
+        // to initialise — see the stash comment above.
+        let newInf = wineRoot.appendingPathComponent("share/wine/wine.inf")
+        if !fm.fileExists(atPath: newInf.path), fm.fileExists(atPath: infStash.path) {
+            try? fm.createDirectory(at: newInf.deletingLastPathComponent(),
+                                    withIntermediateDirectories: true)
+            try? fm.copyItem(at: infStash, to: newInf)
+        }
+
         try? fm.createDirectory(at: unixDir, withIntermediateDirectories: true)
         try? fm.removeItem(at: winemetalSO)
         try fm.copyItem(at: stash, to: winemetalSO)

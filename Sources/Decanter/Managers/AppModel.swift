@@ -60,6 +60,22 @@ final class AppModel: ObservableObject {
         if CommandLine.arguments.contains("--run-setup") {
             Task { await runGuidedSetup() }
         }
+        // Headless online-play setup, so the isolation can be verified without the GUI:
+        //   Decanter.app/Contents/MacOS/Decanter --setup-online
+        if CommandLine.arguments.contains("--setup-online") {
+            Task {
+                let console = TaskConsole(title: "online")
+                let id = await setUpOnlinePlay(console: console)
+                let bottle = bottles.first { $0.id == id }
+                FileHandle.standardError.write("""
+                    online bottle: \(bottle?.name ?? "FAILED")
+                    prefix:        \(bottle?.url.path ?? "-")
+                    engine:        \(bottle?.wineBinDirectory?.path ?? "-")
+
+                    """.data(using: .utf8)!)
+                exit(id == nil ? 1 : 0)
+            }
+        }
         // Headless per-game graphics install, so the payload path can be verified without the GUI:
         //   Decanter.app/Contents/MacOS/Decanter --install-gfx
         if CommandLine.arguments.contains("--install-gfx") {
@@ -294,6 +310,90 @@ final class AppModel: ObservableObject {
         guard code == 0 else { return nil }
         markInitialized(bottle.id)
         await applyRegistry(bottleID: bottle.id, console: hidden, finish: false)
+        return bottle.id
+    }
+
+    // MARK: Online play (isolated from the single-player setup)
+
+    /// True once the separate online engine exists on disk.
+    var isOnlineEngineInstalled: Bool {
+        FileManager.default.fileExists(atPath: Paths.onlineEngineBin.appendingPathComponent("wine").path)
+    }
+
+    /// Clone the installed engine into an independent copy for online bottles.
+    ///
+    /// `cp -Rc` is an APFS clone: blocks are shared until a file is written, so this is effectively
+    /// free (measured: 1.0 s, 2 MB consumed for a 719 MB tree) while still giving the online setup
+    /// its own engine files, DLL overrides and `winemetal`. A plain `cp -R` would cost 719 MB and a
+    /// symlink would defeat the entire point by re-sharing the tree.
+    @discardableResult
+    func cloneEngineForOnline(console: TaskConsole? = nil) async -> Bool {
+        if isOnlineEngineInstalled { console?.append("Online engine already present."); return true }
+        guard FileManager.default.fileExists(atPath: Paths.wineEngineBin.appendingPathComponent("wine").path) else {
+            console?.append("The main engine is not installed yet — run Setup Assistant first.")
+            return false
+        }
+        console?.append("Cloning the engine (APFS clone — instant, uses almost no disk)…")
+        try? FileManager.default.removeItem(at: Paths.onlineEngineRoot)
+        let result = try? await Shell.run(
+            URL(fileURLWithPath: "/bin/cp"),
+            arguments: ["-Rc", Paths.wineEngineRoot.path, Paths.onlineEngineRoot.path],
+            environment: ProcessInfo.processInfo.environment)
+        guard result?.exitCode == 0, isOnlineEngineInstalled else {
+            console?.append("Clone failed: \(result?.stderr ?? "unknown error")")
+            return false
+        }
+        rescanInstallations()
+        console?.append("Online engine ready at \(Paths.onlineEngineRoot.lastPathComponent).")
+        return true
+    }
+
+    /// The discovered installation backing the online engine, if it exists.
+    var onlineInstallation: WineInstallation? {
+        installations.first {
+            $0.binDirectory.standardizedFileURL == Paths.onlineEngineBin.standardizedFileURL
+        }
+    }
+
+    /// Any bottle already running on the online engine.
+    var onlineBottles: [Bottle] {
+        bottles.filter {
+            $0.wineBinDirectory?.standardizedFileURL == Paths.onlineEngineBin.standardizedFileURL
+        }
+    }
+
+    /// Build the whole isolated online setup: cloned engine, fresh prefix, Steam.
+    ///
+    /// Deliberately does NOT reuse `createBottleForSetup`, which binds to `defaultInstallation` —
+    /// that would silently attach the online bottle to the single-player engine and defeat the
+    /// isolation this whole feature exists for.
+    @discardableResult
+    func setUpOnlinePlay(name: String = "Online", console: TaskConsole? = nil) async -> Bottle.ID? {
+        guard await cloneEngineForOnline(console: console) else { return nil }
+        guard let installation = onlineInstallation else {
+            console?.append("Online engine did not appear in discovery — cannot continue.")
+            return nil
+        }
+        if let existing = onlineBottles.first {
+            console?.append("Online bottle already exists: \(existing.name)")
+            return existing.id
+        }
+
+        console?.append("Creating an isolated prefix…")
+        let (bottle, _) = makeBottle(name: name, installation: installation)
+        bottles.append(bottle)
+        selectedBottleID = bottle.id
+        saveBottles()
+
+        let boot = console ?? TaskConsole(title: "online setup")
+        let code: Int32 = await withCheckedContinuation { continuation in
+            let handle = Wine.bootPrefix(bottle, using: installation, console: boot) { continuation.resume(returning: $0) }
+            if handle == nil { continuation.resume(returning: -1) }
+        }
+        guard code == 0 else { console?.append("Prefix creation failed."); return nil }
+        markInitialized(bottle.id)
+        await applyRegistry(bottleID: bottle.id, console: boot, finish: false)
+        console?.append("Prefix ready: \(bottle.url.lastPathComponent)")
         return bottle.id
     }
 

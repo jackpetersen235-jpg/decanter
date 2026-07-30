@@ -25,6 +25,19 @@ enum Paths {
     static var wineEngineLibraries: URL { wineEngineRoot.appendingPathComponent("Libraries", isDirectory: true) }
     static var wineEngineBin: URL { wineEngineLibraries.appendingPathComponent("Wine/bin", isDirectory: true) }
 
+    /// A SECOND, fully independent copy of the engine, used only by online-play bottles.
+    ///
+    /// The point is blast radius. The single-player setup is hand-tuned and was expensive to get
+    /// right, so online work must not be able to touch its engine files, DLL overrides or registry.
+    /// A separate prefix alone would not achieve that - graphics DLLs and `winemetal` live in the
+    /// ENGINE tree, so a change there is felt by every bottle pointing at it.
+    ///
+    /// This is nearly free: it is created with `cp -Rc` (APFS clone), which shares blocks until a
+    /// file is modified. Measured 2026-07-30: 1.0 s, 2 MB actually consumed for a 719 MB tree.
+    static var onlineEngineRoot: URL { appSupport.appendingPathComponent("WineOnline", isDirectory: true) }
+    static var onlineEngineLibraries: URL { onlineEngineRoot.appendingPathComponent("Libraries", isDirectory: true) }
+    static var onlineEngineBin: URL { onlineEngineLibraries.appendingPathComponent("Wine/bin", isDirectory: true) }
+
     /// Persistent shader caches (DXMT), one per bottle. Survives launches so repeat
     /// shader-compilation stutter fades the more a game is played.
     static var shaderCacheRoot: URL { appSupport.appendingPathComponent("ShaderCache", isDirectory: true) }

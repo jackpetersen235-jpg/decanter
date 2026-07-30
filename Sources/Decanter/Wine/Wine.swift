@@ -18,6 +18,9 @@ enum Wine {
         return [
             // Decanter's own engine (installed by the setup wizard) — always preferred.
             ("Decanter Engine", Paths.wineEngineBin.path),
+            // The isolated online-play engine. Listed AFTER the main one so it never becomes the
+            // default for ordinary new bottles - online bottles select it explicitly.
+            ("Decanter Engine (Online)", Paths.onlineEngineBin.path),
             // Non-sandboxed WhiskyWine (manual install of Libraries.tar.gz) — the working build.
             ("Whisky", "\(home)/Library/Application Support/com.isaacmarovitz.Whisky/Libraries/Wine/bin"),
             // Whisky.app is sandboxed: its Wine lives inside the app container.
