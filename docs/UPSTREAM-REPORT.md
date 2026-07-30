@@ -1,5 +1,11 @@
 # Three bugs in `gs_/ts_draw_arguments_marshal` (v0.80) — one causes multi-second GPU stalls
 
+> hello, I am sending this report as a person who does not know how to code but I'm decent at using
+> claude code so take this whole report with a grain of salt because I don't know what I'm doing.
+> With that said there was a problem with these stall and the ai was able to track it down.
+>
+> -I hope this helps
+
 **Suggested route: a GitHub issue on `3Shain/DXMT`, not email.** It contains a patch and code
 references, which are far easier to act on in an issue thread. The text below works either way —
 if emailing, the subject line is the heading above.
