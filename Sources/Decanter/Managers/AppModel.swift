@@ -346,6 +346,19 @@ final class AppModel: ObservableObject {
         let env = Wine.environment(for: bottle, using: installation)
         var done = 0
         for game in games {
+            // Skip games that already have exactly these DLLs. This is what makes the call cheap
+            // enough to run on every Steam launch, which in turn means a newly-installed game gets
+            // the driver with no user action. Size comparison is sufficient: the patched DLLs are a
+            // different size from both stock DXMT and whatever the game itself shipped.
+            let already = Paths.dxmtDLLs.allSatisfy { dll in
+                let a = (try? game.folder.appendingPathComponent(dll)
+                    .resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+                let b = (try? src.appendingPathComponent(dll)
+                    .resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -2
+                return a == b
+            }
+            if already { continue }
+
             var copied = true
             for dll in Paths.dxmtDLLs {
                 let dst = game.folder.appendingPathComponent(dll)
@@ -669,6 +682,13 @@ final class AppModel: ObservableObject {
                 await shutdownPrefix(for: bottle)
             }
             launchingBottleIDs.insert(bottle.id)
+
+            // Make sure anything newly installed has the patched graphics driver BEFORE it runs.
+            // Doing it here rather than only in the wizard is what removes the last manual step: a
+            // fresh Steam library has no games at setup time, so a game installed later would
+            // otherwise fall back to the slow WineD3D renderer until someone pressed a button. The
+            // call returns immediately for games already carrying these DLLs.
+            await installGraphicsDriver(in: bottle)
 
             // DIRECT-EXE bottles: run the game binary itself rather than `steam.exe -applaunch`.
             // Needed for titles whose Steam entry point is an anti-cheat shim (EAC does not work

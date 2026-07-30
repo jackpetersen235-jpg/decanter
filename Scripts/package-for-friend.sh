@@ -73,28 +73,63 @@ cat > "$STAGE/READ ME FIRST.txt" <<'TXT'
 DECANTER — play Windows games on your Mac
 ==========================================
 
-WHAT TO DO (3 steps, ~10 minutes)
----------------------------------
+Everything is built in. You do not need to download anything separately,
+use the Terminal, or install Homebrew. Follow steps 1-4 in order.
 
-1. Drag "Decanter" into your Applications folder.
 
-2. RIGHT-CLICK Decanter and choose "Open".
-   (Do NOT double-click the first time.)
-   A warning appears saying the app is from an unidentified developer.
-   Click "Open".
+STEP 1 — Put the app where it belongs
+-------------------------------------
+Open a new Finder window. In the sidebar on the left, click "Applications".
+Drag the file called "Decanter" from THIS folder into that Applications window.
 
-   Why: this app wasn't bought from Apple's App Store, so macOS asks once.
-   You only have to do this the very first time.
 
-3. Click the big button: "Set everything up for me".
+STEP 2 — Open it the first time (this part is fussy, once)
+----------------------------------------------------------
+In your Applications folder, find "Decanter".
 
-   Decanter downloads and configures everything itself:
-     • Apple's translation layer  (macOS may ask for your password — that's normal)
-     • The Windows engine         (about 480 MB — takes a few minutes)
-     • A private space for games
-     • Steam
+Hold CONTROL on your keyboard and click it. A small menu appears.
+Choose "Open" from that menu.
 
-   Then sign in to Steam and install your games. That's it.
+A warning says Decanter is from an unidentified developer.
+Click the "Open" button in that warning.
+
+  WHY: this app did not come from Apple's App Store, so macOS checks with
+  you once. After this, you can open it normally forever.
+
+  IF YOU SEE "Decanter is damaged and can't be opened" — you double-clicked
+  instead of Control-clicking. Drag it to the Trash, re-copy it from this
+  folder, and do the Control-click properly. Nothing is broken.
+
+
+STEP 3 — Press the one button
+-----------------------------
+A window appears with a button reading "Set everything up for me".
+Click it, then leave it alone for about ten minutes.
+
+It does all of this by itself, in order:
+  • Apple's translation layer — macOS WILL ask for your Mac password. That
+    is normal and it is Apple asking, not this app. Type it and continue.
+  • The Windows engine — about 480 MB. This is the slow part.
+  • A private folder for your games
+  • Steam
+
+You will see each line get a checkmark as it finishes.
+
+  IF IT STOPS OR SHOWS AN ERROR: click the same button again. It skips
+  whatever already finished, so pressing it twice is safe and is usually
+  all that is needed.
+
+
+STEP 4 — Play
+-------------
+Steam opens on its own. Sign in with your Steam account and install a game
+like you would on a PC.
+
+When you launch a game through Decanter, it automatically applies the
+graphics fixes for that game — you do not have to do anything. The first
+launch after installing a game may take a few extra seconds because of this.
+
+That's it. You're done.
 
 
 WHAT YOU NEED
@@ -140,27 +175,36 @@ IF SOMETHING GOES WRONG
 
 KNOWN ISSUES (honest heads-up)
 
-These were seen on the Mac this was built and tested on — an M5 MacBook Air running
-macOS 26.5. Your Mac may be completely unaffected. Both are BELOW Decanter: they are
-in Apple's GPU driver / firmware, not in this app or in Wine, so there is nothing in
-Decanter to switch off to avoid them.
+Tested on an M5 MacBook Air running macOS 26.5. Your Mac may differ.
 
-  • Long freezes in-game (~26 seconds), game only, Mac stays usable.
-      Traced to the GPU command-submission system call blocking inside Apple's driver.
-      Cause NOT identified, despite a lot of investigation. Not reliably fixable today.
-      It did not stop the game being played and finished — it is an interruption, not
-      a crash. Nothing is lost; the game resumes on its own.
+  • FIXED — long freezes in-game (~26 seconds).
+      Earlier versions of this package froze for about 26 seconds at a time,
+      usually when loading an area or after dying. That is fixed in this
+      version. The cause was a bug in the graphics translation layer: one of
+      its internal shaders never advanced through its work list, so the GPU
+      span in place until the driver gave up. This build carries the fix, and
+      Decanter applies it to your games automatically.
+
+      If you somehow still get a long freeze, that is worth reporting back —
+      it would mean something different is going on.
 
   • Short freezes (~7 seconds) where the WHOLE Mac locks up.
-      A GPU firmware fault: the chip fails to wake from its deepest sleep state and
-      gets reset. Also Apple-side.
+      Not fixed and not fixable here. This is a fault in Apple's GPU
+      firmware: the chip fails to wake from its deepest sleep state and gets
+      reset. Decanter runs a small helper that keeps the GPU busy enough to
+      avoid it most of the time. Nothing you did wrong, and reinstalling
+      will not help.
 
-If you hit either, it is not something you did wrong and not worth reinstalling over.
-If you DON'T hit them, great — that is useful information in itself, and worth telling
-whoever gave you this.
+  • Games with kernel anti-cheat (Valorant, most competitive shooters) do
+      not work. No Mac tool can run them — this is not a Decanter limitation.
 
-Everything else in this README is unaffected: setup, Steam, and installing games all
-work normally.
+  • KEEP YOUR MAC PLUGGED IN while gaming. On battery, macOS throttles
+      performance deliberately, and it makes a bigger difference than any
+      setting in this app.
+
+  • If a game feels slow, turn its in-game graphics settings DOWN first.
+      Running everything on maximum is the most common cause of poor
+      performance, and it is easy to mistake for something being broken.
 
 Enjoy.
 TXT
