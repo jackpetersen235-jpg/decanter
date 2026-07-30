@@ -24,13 +24,14 @@ OUT="$D/netwatch-$(date +%Y%m%d-%H%M%S).log"
 # VALIDATE the match. A bare `pgrep -f` picked up an unrelated process on the first run and
 # logged 590 Dropbox/AirPlay endpoints as though they were the game's — worse than no data,
 # because it looked like a result. Confirm the command line really is the game before trusting it.
+# Match on the EXECUTABLE NAME, never the command line. Two runs already attached to the wrong
+# process: first an unrelated daemon, then the very shell that had just launched the game - its
+# argv contains the ASBR path, so even a "*ASBR.exe*" cmdline check matched it. `ps -o comm=`
+# reports the running binary, which a shell can never fake.
 find_game() {
-  for p in $(pgrep -f 'ASBR' 2>/dev/null); do
-    case "$(ps -o command= -p "$p" 2>/dev/null)" in
-      *ASBR.exe*) echo "$p"; return 0 ;;
-    esac
-  done
-  return 1
+  # -x matches the executable NAME exactly, so a shell whose argv merely mentions the game
+  # cannot match. No basename/xargs: the wine path contains spaces and quotes.
+  pgrep -x 'ASBR.exe' 2>/dev/null | head -1 | grep . 
 }
 echo "waiting for the game…"
 PID=""

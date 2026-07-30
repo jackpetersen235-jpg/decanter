@@ -811,8 +811,14 @@ final class AppModel: ObservableObject {
                     let steamArgs = [bottle.steamExecutable.path]
                         + Steam.launchArguments(from: "-silent -no-cef-sandbox -skipinitialbootstrap")
                     launchQuietly(bottle: bottle, arguments: steamArgs)
-                    // Let the client come up and log on before the game asks it anything.
-                    try? await Task.sleep(nanoseconds: 25_000_000_000)
+                    // WAIT FOR THE ACTUAL LOGON, don't guess at a duration.
+                    //
+                    // This used to sleep a flat 25 s. A cold Steam login regularly takes longer,
+                    // and when it does the game starts before steam_api64 can talk to the client
+                    // and simply dies — presenting as "the game won't launch" with nothing in any
+                    // log. The bundled Sekiro launcher already polls connection_log.txt for this
+                    // reason; this brings the app in line with it.
+                    await waitForSteamLogon(in: bottle, timeout: 150)
                 }
                 launchQuietly(bottle: bottle, arguments: [direct], extraEnvironment: steamAppEnvironment(for: bottle))
                 suppressWineSystray(isGameLauncher: true)
@@ -920,6 +926,32 @@ final class AppModel: ObservableObject {
     /// `SteamAppId`/`SteamGameId` for a direct-exe launch. Steam is not spawning the process, so
     /// `steam_api64.dll` has no other way to know which app it belongs to. Falls back to parsing
     /// `-applaunch <id>` out of the Steam arguments if the field is blank.
+    /// Block until Steam reports a completed logon, or `timeout` seconds pass.
+    ///
+    /// Counts NEW "Logged On," lines rather than checking for any, because the log is cumulative:
+    /// a client that logged on yesterday would otherwise look ready the instant it is launched.
+    /// Returns true if a logon landed; a timeout still lets the caller proceed, since a slow login
+    /// beats refusing to start.
+    @discardableResult
+    private func waitForSteamLogon(in bottle: Bottle, timeout: Int) async -> Bool {
+        let log = bottle.driveC
+            .appendingPathComponent("Program Files (x86)/Steam/logs/connection_log.txt")
+        func logons() -> Int {
+            guard let text = try? String(contentsOf: log, encoding: .utf8) else { return 0 }
+            return text.components(separatedBy: "Logged On,").count - 1
+        }
+        let baseline = logons()
+        for _ in 0..<(timeout / 2) {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if logons() > baseline {
+                // The client logs on slightly before it is ready to answer the game.
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                return true
+            }
+        }
+        return false
+    }
+
     private func steamAppEnvironment(for bottle: Bottle) -> [String: String] {
         var id = (bottle.settings.steamAppID ?? "").trimmingCharacters(in: .whitespaces)
         if id.isEmpty, let r = bottle.settings.steamArguments.range(of: "-applaunch ") {
