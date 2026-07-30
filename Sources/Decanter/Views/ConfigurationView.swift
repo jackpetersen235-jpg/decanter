@@ -42,6 +42,24 @@ struct ConfigurationView: View {
                 Text("Both modes share this bottle — same games, same saves, same Steam login. "
                      + "Only the engine differs, so online changes can't affect your offline setup.")
                     .font(.caption).foregroundStyle(.secondary)
+
+                if (bottle.settings.engineProfile ?? .offline) == .online {
+                    Divider()
+                    Button(switchingEngine ? "Working…" : "Reset Online Engine") {
+                        switchingEngine = true
+                        engineError = nil
+                        Task {
+                            let ok = await model.resetOnlineEngine()
+                            engineError = ok ? nil : "Quit Steam and any running game first."
+                            switchingEngine = false
+                        }
+                    }
+                    .disabled(switchingEngine)
+                    Text("Restores a fresh copy from the offline engine. Use this if online play "
+                         + "stops working after changing something — it takes about a second and "
+                         + "never touches your offline setup.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
 
             Section("Windows") {

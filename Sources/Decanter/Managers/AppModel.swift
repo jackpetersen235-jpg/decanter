@@ -62,6 +62,16 @@ final class AppModel: ObservableObject {
         }
         // Headless engine-toggle check, so the offline/online switch can be verified without the
         // GUI:  Decanter.app/Contents/MacOS/Decanter --engine offline|online
+        // Headless reset, to verify the restore path without the GUI:
+        //   Decanter.app/Contents/MacOS/Decanter --reset-online
+        if CommandLine.arguments.contains("--reset-online") {
+            Task {
+                let console = TaskConsole(title: "reset")
+                let ok = await resetOnlineEngine(console: console)
+                FileHandle.standardError.write("reset online engine: \(ok ? "OK" : "FAILED")\n".data(using: .utf8)!)
+                exit(ok ? 0 : 1)
+            }
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--engine"),
            i + 1 < CommandLine.arguments.count,
            let profile = EngineProfile(rawValue: CommandLine.arguments[i + 1]) {
@@ -400,6 +410,25 @@ final class AppModel: ObservableObject {
         rescanInstallations()
         console?.append("Online engine ready at \(Paths.onlineEngineRoot.lastPathComponent).")
         return true
+    }
+
+    /// Throw away the online engine and re-clone it from the offline one.
+    ///
+    /// This is what makes the isolation worth having: experiment freely on the online engine, and
+    /// if it ends up broken, restore a known-good copy in about a second instead of re-downloading
+    /// 480 MB. The offline engine is only ever read from, never written to.
+    @discardableResult
+    func resetOnlineEngine(console: TaskConsole? = nil) async -> Bool {
+        let steamUp = await isSteamRunning()
+        let gameUp = await isAnyGameRunning()
+        if steamUp || gameUp {
+            console?.append("Quit Steam and any running game first.")
+            return false
+        }
+        console?.append("Removing the online engine…")
+        try? FileManager.default.removeItem(at: Paths.onlineEngineRoot)
+        rescanInstallations()
+        return await cloneEngineForOnline(console: console)
     }
 
     /// The discovered installation backing the online engine, if it exists.
@@ -993,14 +1022,25 @@ final class AppModel: ObservableObject {
     }
 
     /// True if any Windows game process is running in a bottle (not Steam itself).
+    /// Is a Windows game (as opposed to Wine's own helpers) currently running?
+    ///
+    /// USES `comm=`, NOT `command=`. `command=` is the full argument list, so ANY process that
+    /// merely mentions a .exe path — a shell running a script, a grep, an installer — was counted
+    /// as a running game. That made the app refuse perfectly safe operations with "quit the game
+    /// first" when nothing was running. `comm=` is the executable itself, which a shell cannot
+    /// spoof: it reads `/bin/zsh`, never `something.exe`.
+    ///
+    /// Wine's own service processes are excluded by name; they run constantly in any live prefix
+    /// and are not games.
     private func isAnyGameRunning() async -> Bool {
         guard let result = try? await Shell.run(URL(fileURLWithPath: "/bin/ps"),
-                                                arguments: ["-Ao", "command="]) else { return false }
+                                                arguments: ["-Ao", "comm="]) else { return false }
+        let helpers: Set<String> = ["steam.exe", "explorer.exe", "services.exe", "winedevice.exe",
+                                    "svchost.exe", "rpcss.exe", "plugplay.exe", "steamwebhelper.exe",
+                                    "conhost.exe", "wineboot.exe", "start.exe", "tabtip.exe"]
         return result.stdout.split(separator: "\n").contains { line in
-            line.contains(".exe") && !line.contains("steam.exe") && !line.contains("explorer.exe")
-                && !line.contains("services.exe") && !line.contains("winedevice.exe")
-                && !line.contains("svchost.exe") && !line.contains("rpcss.exe")
-                && !line.contains("plugplay.exe") && !line.contains("steamwebhelper.exe")
+            let name = String(line.split(separator: "/").last ?? "").lowercased()
+            return name.hasSuffix(".exe") && !helpers.contains(name)
         }
     }
 
