@@ -514,10 +514,23 @@ final class AppModel: ObservableObject {
             }
             guard copied else { continue }
 
+            // CHECK the registry writes. Copying the DLLs is only half the job — without the
+            // override Wine ignores them entirely and the game falls back to WineD3D, which is
+            // precisely the slow path this feature exists to avoid. Discarding the result meant a
+            // silent failure would still be reported as "installed", and the user would be left
+            // wondering why a game that Decanter said was patched still ran badly.
             let key = #"HKCU\Software\Wine\AppDefaults\"# + game.exe + #"\DllOverrides"#
+            var overridesOK = true
             for dll in ["d3d11", "dxgi", "d3d10core"] {
                 let args = ["reg", "add", key, "/v", dll, "/t", "REG_SZ", "/d", "native,builtin", "/f"]
-                _ = try? await Shell.run(installation.loader, arguments: args, environment: env)
+                let result = try? await Shell.run(installation.loader, arguments: args, environment: env)
+                if result?.succeeded != true { overridesOK = false }
+            }
+            guard overridesOK else {
+                console?.append("Copied the graphics DLLs for \(game.folder.lastPathComponent), "
+                                + "but could not set the Wine override — the game will still use "
+                                + "the slow renderer. Try again once nothing is running.")
+                continue
             }
             console?.append("Graphics driver installed for \(game.folder.lastPathComponent) (\(game.exe)).")
             done += 1
@@ -1135,11 +1148,23 @@ final class AppModel: ObservableObject {
         NSLog("Decanter: bottles.json partially unreadable — salvaged \(salvaged.count) of \(raw.count). Original saved to \(backup.lastPathComponent)")
     }
 
+    /// Persist the bottle index atomically.
+    ///
+    /// `.atomic` writes to a temporary file and renames it into place, so the index is either the
+    /// old contents or the new ones and never a half-written mixture. The plain `write(to:)` this
+    /// replaced could leave a truncated file if the app was force-quit, crashed, or hit a full
+    /// disk mid-write — producing exactly the corruption `loadBottles` now has to salvage.
+    ///
+    /// Failures are logged rather than swallowed: silently not saving looks identical to saving,
+    /// and the user only discovers it after losing work.
     private func saveBottles() {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(bottles) {
-            try? data.write(to: Paths.bottlesIndex)
+        do {
+            let data = try encoder.encode(bottles)
+            try data.write(to: Paths.bottlesIndex, options: .atomic)
+        } catch {
+            NSLog("Decanter: FAILED to save bottles.json — \(error.localizedDescription)")
         }
     }
 
