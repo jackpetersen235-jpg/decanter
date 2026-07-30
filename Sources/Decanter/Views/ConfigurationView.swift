@@ -6,8 +6,44 @@ struct ConfigurationView: View {
     @EnvironmentObject private var model: AppModel
     @Binding var bottle: Bottle
 
+    @State private var switchingEngine = false
+    @State private var engineError: String?
+
     var body: some View {
         Form {
+            Section("Engine") {
+                Picker("Play mode", selection: Binding(
+                    get: { bottle.settings.engineProfile ?? .offline },
+                    set: { profile in
+                        // Routed through the model rather than written straight to the binding:
+                        // choosing Online may need to create that engine first, and the switch has
+                        // to be refused while the game is running.
+                        switchingEngine = true
+                        engineError = nil
+                        Task {
+                            engineError = await model.setEngineProfile(profile, for: bottle)
+                            switchingEngine = false
+                        }
+                    })) {
+                    ForEach(EngineProfile.allCases) { Text($0.label).tag($0) }
+                }
+                .disabled(switchingEngine)
+
+                Text((bottle.settings.engineProfile ?? .offline).detail)
+                    .font(.caption).foregroundStyle(.secondary)
+
+                if switchingEngine {
+                    Text("Setting up…").font(.caption).foregroundStyle(.secondary)
+                }
+                if let engineError {
+                    Label(engineError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                Text("Both modes share this bottle — same games, same saves, same Steam login. "
+                     + "Only the engine differs, so online changes can't affect your offline setup.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Windows") {
                 Picker("Windows version", selection: $bottle.settings.windowsVersion) {
                     ForEach(WindowsVersion.allCases) { Text($0.label).tag($0) }

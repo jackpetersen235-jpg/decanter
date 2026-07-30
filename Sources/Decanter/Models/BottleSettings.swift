@@ -28,6 +28,46 @@ enum WindowsVersion: String, Codable, CaseIterable, Identifiable {
 
 /// Wine's thread-synchronization primitive. `msync` is the macOS-native path shipped
 /// with CrossOver / Game Porting Toolkit builds and is fastest for games.
+/// Which engine build a bottle runs on.
+///
+/// Both engines are independent copies of the same Wine tree, so a bottle can be switched between
+/// them freely — the prefix, saves, Steam install and games are untouched by the choice. Isolation
+/// is the point: the offline engine is heavily tuned for single-player performance and was
+/// expensive to get right, so online experimentation must not be able to modify its files.
+///
+/// Created with `cp -Rc` (APFS clone), which shares disk blocks until a file is written: the second
+/// engine cost 2 MB and one second, measured on a 719 MB tree.
+enum EngineProfile: String, Codable, CaseIterable, Identifiable {
+    /// The tuned single-player engine: DXMT graphics fixes, msync, MetalFX.
+    case offline
+    /// A separate copy used for online play, so networking changes cannot affect the above.
+    case online
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .offline: return "Offline (tuned for single-player)"
+        case .online:  return "Online (multiplayer)"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .offline: return "The engine your games are tuned on. Best framerate, no online changes."
+        case .online:  return "A separate copy for playing with friends. Changes here can't affect offline."
+        }
+    }
+
+    /// The `bin` directory this profile resolves to.
+    var binDirectory: URL {
+        switch self {
+        case .offline: return Paths.wineEngineBin
+        case .online:  return Paths.onlineEngineBin
+        }
+    }
+}
+
 enum SyncMode: String, Codable, CaseIterable, Identifiable {
     case msync, esync, none
 
@@ -132,6 +172,11 @@ struct BottleSettings: Codable, Equatable {
     /// the whole array fails, and Decanter shows the first-run setup screen with no bottles.
     /// That happened on 2026-07-27. Optional makes the decoder use decodeIfPresent instead.
     var directExecutable: String? = nil
+
+    /// Which engine build this bottle runs on. OPTIONAL for exactly the reason above: every bottle
+    /// saved before this property existed has no such key, and a non-optional would make the whole
+    /// array fail to decode. `nil` means "offline", so existing bottles keep their behaviour.
+    var engineProfile: EngineProfile? = nil
 
     /// Steam AppID, used to set SteamAppId/SteamGameId when `directExecutable` is used.
     var steamAppID: String? = nil

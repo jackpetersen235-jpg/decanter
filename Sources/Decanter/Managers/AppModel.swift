@@ -60,20 +60,24 @@ final class AppModel: ObservableObject {
         if CommandLine.arguments.contains("--run-setup") {
             Task { await runGuidedSetup() }
         }
-        // Headless online-play setup, so the isolation can be verified without the GUI:
-        //   Decanter.app/Contents/MacOS/Decanter --setup-online
-        if CommandLine.arguments.contains("--setup-online") {
+        // Headless engine-toggle check, so the offline/online switch can be verified without the
+        // GUI:  Decanter.app/Contents/MacOS/Decanter --engine offline|online
+        if let i = CommandLine.arguments.firstIndex(of: "--engine"),
+           i + 1 < CommandLine.arguments.count,
+           let profile = EngineProfile(rawValue: CommandLine.arguments[i + 1]) {
             Task {
-                let console = TaskConsole(title: "online")
-                let id = await setUpOnlinePlay(console: console)
-                let bottle = bottles.first { $0.id == id }
-                FileHandle.standardError.write("""
-                    online bottle: \(bottle?.name ?? "FAILED")
-                    prefix:        \(bottle?.url.path ?? "-")
-                    engine:        \(bottle?.wineBinDirectory?.path ?? "-")
-
-                    """.data(using: .utf8)!)
-                exit(id == nil ? 1 : 0)
+                var out = ""
+                for bottle in bottles {
+                    let err = await setEngineProfile(profile, for: bottle)
+                    let now = bottles.first { $0.id == bottle.id }
+                    let engine = installation(for: now ?? bottle)?.binDirectory
+                        .deletingLastPathComponent().deletingLastPathComponent()
+                        .deletingLastPathComponent().lastPathComponent ?? "?"
+                    out += "  \(bottle.name.prefix(34)) -> \(now?.settings.engineProfile?.rawValue ?? "offline")"
+                        + "  engine=\(engine)\(err.map { "  ERROR: \($0)" } ?? "")\n"
+                }
+                FileHandle.standardError.write(out.data(using: .utf8)!)
+                exit(0)
             }
         }
         // Headless per-game graphics install, so the payload path can be verified without the GUI:
@@ -173,12 +177,62 @@ final class AppModel: ObservableObject {
     }
 
     /// The Wine build associated with a specific bottle (falls back to the default).
+    ///
+    /// `engineProfile` wins when set, because it is the user's explicit offline/online choice and
+    /// must override the `wineBinDirectory` recorded when the bottle was first created — otherwise
+    /// flipping the toggle would change the label and nothing else.
     func installation(for bottle: Bottle) -> WineInstallation? {
+        if let profile = bottle.settings.engineProfile,
+           let match = installations.first(where: {
+               $0.binDirectory.standardizedFileURL == profile.binDirectory.standardizedFileURL
+           }) {
+            return match
+        }
         if let dir = bottle.wineBinDirectory,
            let match = installations.first(where: { $0.binDirectory == dir }) {
             return match
         }
         return defaultInstallation
+    }
+
+    /// Switch a bottle between the offline and online engines.
+    ///
+    /// Safe with the game running? No — Wine holds the engine open, so this refuses while anything
+    /// is up. Both engines are clones of the same Wine version, so the prefix, saves, Steam install
+    /// and games are unaffected by the switch itself.
+    @discardableResult
+    func setEngineProfile(_ profile: EngineProfile, for bottle: Bottle) async -> String? {
+        if (bottle.settings.engineProfile ?? .offline) == profile { return nil }   // nothing to do
+        // Wine holds the engine tree open; swapping underneath a live process is asking for a
+        // half-loaded DLL set. Refuse rather than produce a confusing crash later.
+        // Both are async, so evaluate them separately — `||` takes an autoclosure and cannot await.
+        let steamUp = await isSteamRunning()
+        let gameUp = await isAnyGameRunning()
+        if steamUp || gameUp {
+            return "Quit Steam and any running game first, then switch."
+        }
+        if profile == .online, !isOnlineEngineInstalled {
+            guard await cloneEngineForOnline() else { return "Could not create the online engine." }
+        }
+        guard installations.contains(where: {
+            $0.binDirectory.standardizedFileURL == profile.binDirectory.standardizedFileURL
+        }) else {
+            rescanInstallations()
+            guard installations.contains(where: {
+                $0.binDirectory.standardizedFileURL == profile.binDirectory.standardizedFileURL
+            }) else { return "That engine isn't available." }
+            return applyProfile(profile, to: bottle)
+        }
+        return applyProfile(profile, to: bottle)
+    }
+
+    private func applyProfile(_ profile: EngineProfile, to bottle: Bottle) -> String? {
+        guard var updated = bottles.first(where: { $0.id == bottle.id }) else { return "Bottle not found." }
+        updated.settings.engineProfile = profile
+        // Keep wineBinDirectory in step so anything reading it directly agrees with the profile.
+        updated.wineBinDirectory = profile.binDirectory
+        update(updated)
+        return nil
     }
 
     /// A two-way binding into the stored bottle so config views can edit it live.
@@ -353,48 +407,6 @@ final class AppModel: ObservableObject {
         installations.first {
             $0.binDirectory.standardizedFileURL == Paths.onlineEngineBin.standardizedFileURL
         }
-    }
-
-    /// Any bottle already running on the online engine.
-    var onlineBottles: [Bottle] {
-        bottles.filter {
-            $0.wineBinDirectory?.standardizedFileURL == Paths.onlineEngineBin.standardizedFileURL
-        }
-    }
-
-    /// Build the whole isolated online setup: cloned engine, fresh prefix, Steam.
-    ///
-    /// Deliberately does NOT reuse `createBottleForSetup`, which binds to `defaultInstallation` —
-    /// that would silently attach the online bottle to the single-player engine and defeat the
-    /// isolation this whole feature exists for.
-    @discardableResult
-    func setUpOnlinePlay(name: String = "Online", console: TaskConsole? = nil) async -> Bottle.ID? {
-        guard await cloneEngineForOnline(console: console) else { return nil }
-        guard let installation = onlineInstallation else {
-            console?.append("Online engine did not appear in discovery — cannot continue.")
-            return nil
-        }
-        if let existing = onlineBottles.first {
-            console?.append("Online bottle already exists: \(existing.name)")
-            return existing.id
-        }
-
-        console?.append("Creating an isolated prefix…")
-        let (bottle, _) = makeBottle(name: name, installation: installation)
-        bottles.append(bottle)
-        selectedBottleID = bottle.id
-        saveBottles()
-
-        let boot = console ?? TaskConsole(title: "online setup")
-        let code: Int32 = await withCheckedContinuation { continuation in
-            let handle = Wine.bootPrefix(bottle, using: installation, console: boot) { continuation.resume(returning: $0) }
-            if handle == nil { continuation.resume(returning: -1) }
-        }
-        guard code == 0 else { console?.append("Prefix creation failed."); return nil }
-        markInitialized(bottle.id)
-        await applyRegistry(bottleID: bottle.id, console: boot, finish: false)
-        console?.append("Prefix ready: \(bottle.url.lastPathComponent)")
-        return bottle.id
     }
 
     // MARK: Per-game graphics driver (DXMT)
