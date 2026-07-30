@@ -26,12 +26,26 @@ SRC="$HOME/coding/dxmt"
 # systems. That does not matter: only `xcrun metal` is needed here and it is an ordinary
 # command-line binary that runs regardless. So the bundle does not have to be installed, renamed,
 # or moved into /Applications; it is used wherever it happens to sit.
+# Xcode 16.1 is PREFERRED but NOT REQUIRED.
+#
+# CI pins 16.1, whose metal compiler emits `air64`; Xcode 26 emits `air64_v26`. That difference was
+# originally suspected of breaking local builds, which is why 16.1 was fetched at all. It was not:
+# the real cause was `wine_builtin_dll` (see the meson comment below). Verified 2026-07-29 by
+# building this same branch with the system Xcode 26 - `air64_v26` initialises and renders fine.
+#
+# So if 16.1 is not installed, fall back to whatever Xcode is current. Deleting the 11.7 GB
+# Xcode 16.1 does not break this script.
 XC161=""
 for c in "/Applications/Xcode_16.1.app" "$HOME/Downloads/Xcode.app" "$HOME/Downloads/Xcode_16.1.app"; do
   [ -d "$c" ] || continue
   v=$(defaults read "$c/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null)
   case "$v" in 16.1*) XC161="$c"; break ;; esac
 done
+if [ -z "$XC161" ] && [ -d /Applications/Xcode.app ]; then
+  XC161="/Applications/Xcode.app"
+  echo "note: Xcode 16.1 not found; using $(defaults read /Applications/Xcode.app/Contents/Info.plist CFBundleShortVersionString 2>/dev/null)."
+  echo "      Shaders will be air64_v26 rather than air64. Verified working."
+fi
 BRANCH="${1:?usage: dxmt-build.sh stock|capped}"
 
 case "$BRANCH" in
@@ -51,7 +65,7 @@ if [ ! -x "$GCC" ]; then
   exit 1
 fi
 if [ -z "$XC161" ]; then
-  echo "MISSING: an Xcode 16.1 bundle (looked in /Applications and ~/Downloads)." >&2
+  echo "MISSING: any Xcode (need its metal compiler)." >&2
   echo "  developer.apple.com/download/all -> 'Xcode 16.1' -> expand the .xip" >&2
   echo "  It does NOT need to launch or be installed - only its metal compiler is used." >&2
   exit 1
