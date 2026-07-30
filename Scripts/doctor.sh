@@ -73,6 +73,16 @@ if [ -x "$ENGINE_BIN" ]; then
   if [ -n "$V" ]; then ok "Decanter engine works: $V"
   else bad "Engine present but won't run — Rosetta likely missing (see System above)"; fi
   [ -f "$APPSUP/Wine/Libraries/DXMT/x64/d3d11.dll" ] && ok "DXMT (fast DirectX→Metal) available" || warn "DXMT DLLs missing from the engine"
+  # wine.inf decides whether a NEW bottle can be created at all. Its absence is invisible until
+  # someone tries: existing prefixes keep working, and wineboot fails with an unhelpful
+  # "could not load kernel32.dll". Builds between 2026-07-18 and 2026-07-30 shipped without it,
+  # because the msync overlay replaces share/ wholesale and carries no wine.inf of its own.
+  if [ -f "$APPSUP/Wine/Libraries/Wine/share/wine/wine.inf" ]; then
+    ok "Engine can create new game spaces (wine.inf present)"
+  else
+    bad "Engine CANNOT create new game spaces - share/wine/wine.inf is missing"
+    NEXT+=("Reinstall the engine: delete \"$APPSUP/Wine\" then press \"Set everything up for me\" again")
+  fi
 else
   warn "Decanter's own engine isn't installed yet"
   NEXT+=("Open Decanter and press \"Set everything up for me\" — it downloads the engine (~317 MB)")
