@@ -1,5 +1,9 @@
 # Three bugs in `gs_/ts_draw_arguments_marshal` (v0.80) — one causes multi-second GPU stalls
 
+> **FILED 2026-07-30 as https://github.com/3Shain/dxmt/issues/200** (author: jackpetersen235-jpg).
+> This file is the source text. If the maintainer replies asking for the `draw_arguments` values,
+> that measurement is the known gap — see "What I have not confirmed" below.
+
 > hello, I am sending this report as a person who does not know how to code but I'm decent at using
 > claude code so take this whole report with a grain of salt because I don't know what I'm doing.
 > With that said there was a problem with the stalls and the ai was able to track it down.
