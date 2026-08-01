@@ -33,6 +33,21 @@ struct Bottle: Codable, Identifiable, Equatable, Hashable {
         FileManager.default.fileExists(atPath: steamExecutable.path)
     }
 
+    /// Has Steam downloaded its own client yet?
+    ///
+    /// `SteamSetup.exe` only drops `steam.exe` (~5 MB). The real client — `steamui.dll` (~18 MB),
+    /// `steamclient64.dll` (~25 MB) and the rest — is fetched by Steam itself on FIRST LAUNCH.
+    /// Until that has happened, `isSteamInstalled` is true while Steam cannot actually start:
+    /// it dies with "Failed to load steamui.dll".
+    ///
+    /// This distinction matters because `-skipinitialbootstrap` (see `BottleSettings`) skips
+    /// exactly that first-launch download.
+    var isSteamBootstrapped: Bool {
+        FileManager.default.fileExists(
+            atPath: steamExecutable.deletingLastPathComponent()
+                .appendingPathComponent("steamui.dll").path)
+    }
+
     // MARK: Hashable / Equatable by identity
 
     static func == (lhs: Bottle, rhs: Bottle) -> Bool { lhs.id == rhs.id }

@@ -170,8 +170,16 @@ Strips quarantine + AppleDouble clutter, re-signs ad-hoc, writes a plain-languag
 - **Steam `-silent` hides the window.** On a launcher bottle it makes "Launch Steam" look broken
   (user must click twice). Only use it on a per-game bottle that also passes `-applaunch`.
 - **Steam re-execs itself** for a startup update check and both processes stay resident → **two
-  Dock tiles for one Steam**. `-skipinitialbootstrap` avoids it (verified: still logs in, still
-  self-updates). Don't also add `-nobootstrapperupdate` — that blocks bootstrapper updates.
+  Dock tiles for one Steam**. `-skipinitialbootstrap` avoids it. Don't also add
+  `-nobootstrapperupdate` — that blocks bootstrapper updates.
+  ⚠️ **BUT NEVER PASS IT TO A STEAM THAT HAS NOT BOOTSTRAPPED YET.** `SteamSetup.exe` only drops
+  `steam.exe` (~5 MB); the client itself — `steamui.dll` (18 MB), `steamclient64.dll` (25 MB) —
+  is downloaded by Steam on FIRST LAUNCH, and that download *is* the "initial bootstrap" this flag
+  skips. On a fresh install the flag therefore guarantees **"Failed to load steamui.dll"**, which
+  is identical to the too-old-engine symptom and sent us chasing the wrong cause. The original
+  "verified: still logs in" note was only ever tested against an already-bootstrapped Steam — the
+  one state where the flag cannot do harm. `Bottle.isSteamBootstrapped` now gates it, and
+  `isSteamInstalled` (steam.exe exists) must not be mistaken for "Steam can run".
 - **`pkill -f 'steam.exe'` does not kill a Wine prefix.** `explorer.exe`, `services.exe`,
   `winedevice.exe` etc. survive for hours and leave stale Dock registrations. Use
   `wineserver -k` **per prefix**, then pkill the stragglers.

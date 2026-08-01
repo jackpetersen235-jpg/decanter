@@ -898,8 +898,14 @@ final class AppModel: ObservableObject {
             let direct = (bottle.settings.directExecutable ?? "").trimmingCharacters(in: .whitespaces)
             if !direct.isEmpty {
                 if await !isSteamRunning() {
-                    let steamArgs = [bottle.steamExecutable.path]
-                        + Steam.launchArguments(from: "-silent -no-cef-sandbox -skipinitialbootstrap")
+                    // Same bootstrap rule as the plain-Steam path below: skipping the initial
+                    // bootstrap on a Steam that has never downloaded its client leaves it unable
+                    // to start at all. `-silent` is also dropped in that case — the first-run
+                    // download takes minutes and a hidden window looks like nothing happening.
+                    let flags = bottle.isSteamBootstrapped
+                        ? "-silent -no-cef-sandbox -skipinitialbootstrap"
+                        : "-no-cef-sandbox"
+                    let steamArgs = [bottle.steamExecutable.path] + Steam.launchArguments(from: flags)
                     launchQuietly(bottle: bottle, arguments: steamArgs)
                     // WAIT FOR THE ACTUAL LOGON, don't guess at a duration.
                     //
@@ -919,7 +925,23 @@ final class AppModel: ObservableObject {
                 return
             }
 
-            let args = [bottle.steamExecutable.path] + Steam.launchArguments(from: bottle.settings.steamArguments)
+            // DROP -skipinitialbootstrap UNTIL STEAM HAS ACTUALLY BOOTSTRAPPED.
+            //
+            // That flag exists to stop Steam re-exec'ing itself and leaving two Dock tiles, and it
+            // is harmless on an installation whose client files are already present. On a FRESH
+            // install it is fatal: the "initial bootstrap" it skips is the first-launch download
+            // that fetches steamui.dll, so Steam starts, cannot find its own UI, and dies with
+            // "Failed to load steamui.dll" — indistinguishable from the too-old-engine failure and
+            // reported by the first person to install this from scratch (2026-07-31).
+            //
+            // The original note recorded it as "verified: still logs in, still self-updates" — but
+            // that verification only ever ran against an already-bootstrapped Steam, which is the
+            // one state where the flag cannot hurt.
+            var steamArgs = Steam.launchArguments(from: bottle.settings.steamArguments)
+            if !bottle.isSteamBootstrapped {
+                steamArgs.removeAll { $0 == "-skipinitialbootstrap" }
+            }
+            let args = [bottle.steamExecutable.path] + steamArgs
             // Quiet: no console sheet pops over Decanter (which made the first click look like a
             // no-op). Steam just opens on its own.
             launchQuietly(bottle: bottle, arguments: args)

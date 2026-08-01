@@ -86,7 +86,20 @@ struct BottleDetailView: View {
 
                     if bottle.isSteamInstalled {
                         let launching = model.launchingBottleIDs.contains(bottle.id)
-                        Text("Steam is installed in this bottle.").foregroundStyle(.secondary)
+                        // Distinguish "steam.exe exists" from "Steam can actually run". Until the
+                        // first launch downloads the client, Steam dies with "Failed to load
+                        // steamui.dll", and saying only "Steam is installed" makes that look like
+                        // a broken install rather than an unfinished one.
+                        if bottle.isSteamBootstrapped {
+                            Text("Steam is installed in this bottle.").foregroundStyle(.secondary)
+                        } else {
+                            Text("Steam is installed but hasn't finished setting itself up yet.")
+                                .foregroundStyle(.secondary)
+                            Text("The first launch downloads the Steam client (a few hundred MB). "
+                                 + "Leave it running until the login window appears — it can take "
+                                 + "several minutes and may look stuck.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         HStack {
                             Button {
                                 model.launchSteam(in: bottle)
