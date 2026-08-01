@@ -9,10 +9,16 @@ CONFIG="${1:-release}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-echo "▸ Building ($CONFIG)…"
-swift build -c "$CONFIG"
+# Build for BOTH architectures. This is NOT the fix for the "bounces in the Dock" report — that
+# was a stuck first-launch Gatekeeper check, cleared by restarting. But an arm64-only binary
+# genuinely cannot launch on an Intel Mac, and this app gets passed around, so universal removes a
+# whole failure mode for about 1.5 MB.
+ARCHS=(--arch arm64 --arch x86_64)
 
-BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
+echo "▸ Building ($CONFIG, universal)…"
+swift build -c "$CONFIG" "${ARCHS[@]}"
+
+BIN_DIR="$(swift build -c "$CONFIG" "${ARCHS[@]}" --show-bin-path)"
 BIN="$BIN_DIR/Decanter"
 APP="$ROOT/build/Decanter.app"
 

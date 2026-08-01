@@ -166,6 +166,15 @@ IF SOMETHING GOES WRONG
       -> You double-clicked instead of right-click -> Open. See step 2.
       -> Or open Terminal and run:  xattr -cr /Applications/Decanter.app
 
+  • The icon bounces in the Dock and then nothing happens
+      -> RESTART YOUR MAC, then open it again. This is the usual fix.
+
+      Why: the first time you open an app that didn't come from the App Store,
+      macOS runs a one-time security check on it. That check occasionally gets
+      stuck, and when it does the app bounces and quits with no message. A
+      restart clears it. Nothing is wrong with the app or your Mac, and you
+      won't have to do this again.
+
   • Setup fails partway
       -> Just press the button again. It skips whatever already finished.
 
