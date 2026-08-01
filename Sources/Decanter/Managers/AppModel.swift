@@ -124,6 +124,33 @@ final class AppModel: ObservableObject {
                 exit(0)
             }
         }
+        // Support hook. "Failed to load steamui.dll" has two completely different causes — an
+        // engine too old to run Steam, and a Steam that never finished downloading itself — and
+        // the error text is identical for both. This prints which one a machine is actually in,
+        // so a remote user can paste one block instead of describing symptoms.
+        //   Decanter.app/Contents/MacOS/Decanter --diagnose
+        if CommandLine.arguments.contains("--diagnose") {
+            var out = "\n=== Decanter diagnosis ===\n"
+            out += "engine usable: \(hasUsableEngine)\n"
+            for bottle in bottles {
+                let inst = installation(for: bottle)
+                out += "\nbottle: \(bottle.name)\n"
+                out += "  engine:       \(inst?.name ?? "NONE") \(inst?.version ?? "?")\n"
+                out += "  steam-capable engine: \(inst?.isSteamCapable.description ?? "n/a")\n"
+                out += "  initialized:  \(bottle.isInitialized)\n"
+                out += "  steam.exe:    \(bottle.isSteamInstalled)\n"
+                out += "  bootstrapped: \(bottle.isSteamBootstrapped)\n"
+                if bottle.isSteamInstalled && !bottle.isSteamBootstrapped {
+                    out += "  >> Steam has not downloaded its client yet. Launch Steam and LEAVE IT\n"
+                    out += "     RUNNING until the login window appears (several minutes).\n"
+                }
+                if let inst, !inst.isSteamCapable {
+                    out += "  >> This engine cannot run Steam. Run the Setup Assistant.\n"
+                }
+            }
+            FileHandle.standardError.write(out.data(using: .utf8)!)
+            exit(0)
+        }
     }
 
     /// The complete first-run automation, factored out of the wizard view so it (a) survives any

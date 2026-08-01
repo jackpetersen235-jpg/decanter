@@ -181,6 +181,22 @@ IF SOMETHING GOES WRONG
   • Steam window is black
       -> Quit Steam and open it again from Decanter.
 
+  • "Steam - Fatal Error: Failed to load steamui.dll"
+      -> Make sure you have THIS version of Decanter (older ones caused it),
+         then press "Launch Steam" and WAIT. Leave it alone.
+
+      Why: installing Steam only puts a small 5 MB launcher on your Mac. The
+      actual Steam program is a few hundred MB that Steam downloads by itself
+      the very first time it opens. Until that finishes there is no window and
+      no progress bar, so it looks frozen. Give it several minutes on a slow
+      connection. Decanter's Steam panel will tell you when it's still setting
+      itself up.
+
+      If it still fails, open Terminal and paste this, then send the output to
+      whoever gave you this app:
+
+        /Applications/Decanter.app/Contents/MacOS/Decanter --diagnose
+
 
 KNOWN ISSUES (honest heads-up)
 

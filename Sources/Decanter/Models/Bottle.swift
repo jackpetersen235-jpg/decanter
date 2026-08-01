@@ -42,10 +42,21 @@ struct Bottle: Codable, Identifiable, Equatable, Hashable {
     ///
     /// This distinction matters because `-skipinitialbootstrap` (see `BottleSettings`) skips
     /// exactly that first-launch download.
+    /// The real filename on disk is `SteamUI.dll` — mixed case. A literal `"steamui.dll"` path
+    /// probe passes anyway on a default (case-INsensitive) APFS volume, which is exactly why it
+    /// would have shipped unnoticed; on a case-sensitive volume it would report "never
+    /// bootstrapped" forever. So match case-insensitively rather than guessing Valve's casing.
+    ///
+    /// The size floor rejects a half-finished download: a truncated DLL loads no better than a
+    /// missing one, and treating it as done would re-arm the very bug this guards against.
     var isSteamBootstrapped: Bool {
-        FileManager.default.fileExists(
-            atPath: steamExecutable.deletingLastPathComponent()
-                .appendingPathComponent("steamui.dll").path)
+        let dir = steamExecutable.deletingLastPathComponent()
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path)
+        else { return false }
+        guard let match = names.first(where: { $0.lowercased() == "steamui.dll" }) else { return false }
+        let size = (try? FileManager.default.attributesOfItem(
+            atPath: dir.appendingPathComponent(match).path)[.size] as? Int) ?? 0
+        return (size ?? 0) > 1_000_000
     }
 
     // MARK: Hashable / Equatable by identity
