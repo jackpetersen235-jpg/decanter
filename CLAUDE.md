@@ -179,6 +179,21 @@ Strips quarantine + AppleDouble clutter, re-signs ad-hoc, writes a plain-languag
   unreachable for a game bottle because `isGameLauncher` skips that branch. Fixed by adding
   `quitSteam(in:)` + a **Quit Steam** button + `--quit-steam`. When debugging "Steam won't quit",
   check `ps -Ao pid,lstart` for steam.exe FIRST: if the PID is unchanged, it was never quit.
+- **Steam auto-starts itself from the prefix's `Run` key — windowless.** Steam writes
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` → `"Steam"="steam.exe -silent"` (its
+  "run Steam when my computer starts" setting, ON by default). A prefix has no boot, so this fires
+  whenever *anything* brings the prefix up: a bare `wine wineboot` starts Steam with no other
+  prompting — verified twice, before and after the fix. This is the other half of "Steam reopens
+  every time I quit it", and it makes quitting Steam pointless on its own. `quitSteam` now deletes
+  the value first (Steam rewrites it whenever it runs, so it must be re-applied every quit).
+- **`isAnyGameRunning` must split `comm` on BOTH `/` and `\`.** Wine reports `comm` as a Windows
+  path (`C:\windows\system32\services.exe`), so splitting on `/` alone leaves the string intact,
+  the helper allowlist never matches, and **every Wine helper counts as a running game** — 6 of 7
+  misclassified in a live check. It then returned true for hours after any Wine use, silently
+  disabling everything gated on it (the stale menu-bar sweep, and the engine switch, which always
+  refused with "Quit Steam and any running game first"). Test it with helpers ONLY: `wine cmd /c …`
+  also runs `cmd.exe` and `ping.exe`, which are NOT helpers, so it returns true legitimately and
+  looks like the bug. Use `wine wineboot`.
 - **`shutdownPrefix`'s straggler sweep cannot see steamwebhelper.** It matches the macOS prefix
   path in argv; the webhelpers carry only Windows paths (`C:\Program Files (x86)\Steam\...`), so
   0 of 6 matched in a live check. `wineserver -k` is what actually reaps them — do not "optimize"

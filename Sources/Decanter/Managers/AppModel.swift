@@ -146,8 +146,11 @@ final class AppModel: ObservableObject {
         // so a remote user can paste one block instead of describing symptoms.
         //   Decanter.app/Contents/MacOS/Decanter --diagnose
         if CommandLine.arguments.contains("--diagnose") {
+            Task {
             var out = "\n=== Decanter diagnosis ===\n"
             out += "engine usable: \(hasUsableEngine)\n"
+            out += "steam running: \(await isSteamRunning())\n"
+            out += "game running (any bottle): \(await isAnyGameRunning())\n"
             for bottle in bottles {
                 let inst = installation(for: bottle)
                 out += "\nbottle: \(bottle.name)\n"
@@ -166,6 +169,7 @@ final class AppModel: ObservableObject {
             }
             FileHandle.standardError.write(out.data(using: .utf8)!)
             exit(0)
+            }
         }
     }
 
@@ -940,7 +944,11 @@ final class AppModel: ObservableObject {
             // under Wine on macOS). Steam must still be up first for steam_api64 to connect.
             let direct = (bottle.settings.directExecutable ?? "").trimmingCharacters(in: .whitespaces)
             if !direct.isEmpty {
+                // Did WE start Steam for this session? Only then may we shut it down afterwards —
+                // a Steam the user already had open is theirs, not ours to close.
+                var weStartedSteam = false
                 if await !isSteamRunning() {
+                    weStartedSteam = true
                     // Same bootstrap rule as the plain-Steam path below: skipping the initial
                     // bootstrap on a Steam that has never downloaded its client leaves it unable
                     // to start at all. `-silent` is also dropped in that case — the first-run
@@ -961,6 +969,7 @@ final class AppModel: ObservableObject {
                 }
                 launchQuietly(bottle: bottle, arguments: [direct], extraEnvironment: steamAppEnvironment(for: bottle))
                 suppressWineSystray(isGameLauncher: true)
+                reapSteamAfterGame(in: bottle, weStartedSteam: weStartedSteam)
                 Task {
                     try? await Task.sleep(nanoseconds: 30_000_000_000)
                     launchingBottleIDs.remove(bottle.id)
@@ -1068,6 +1077,71 @@ final class AppModel: ObservableObject {
         try? await Task.sleep(nanoseconds: 2_000_000_000)
     }
 
+    /// Bottles whose post-game Steam reaper is already running, so a second Launch can't start two.
+    private var reapingBottleIDs: Set<UUID> = []
+
+    /// Shut down the Steam we started for a direct-exe game once that game exits.
+    ///
+    /// The direct-exe path starts Steam only as a DRM host for `steam_api64.dll`, with `-silent`
+    /// so its window never steals focus from the game. Nothing then stopped it: after the game
+    /// quit, a windowless Steam stayed resident indefinitely (measured 7h37m), and because
+    /// `-silent` means "in the tray", the user could not quit it from Steam's own UI either.
+    ///
+    /// Deliberately does NOT trust a process-exit callback. Under Wine the loader can return while
+    /// the title is still up, so this watches for the game to actually appear and actually go away.
+    /// If the game never appears at all, Steam is still reaped — a headless Steam left over from a
+    /// game that failed to start is the exact problem being fixed.
+    private func reapSteamAfterGame(in bottle: Bottle, weStartedSteam: Bool) {
+        guard weStartedSteam, !reapingBottleIDs.contains(bottle.id) else { return }
+        reapingBottleIDs.insert(bottle.id)
+        Task {
+            defer { reapingBottleIDs.remove(bottle.id) }
+
+            // Phase 1 — wait for the game to show up (cold starts behind a shader cache are slow).
+            var appeared = false
+            for _ in 0..<60 {                                  // up to 5 min
+                if await isAnyGameRunning() { appeared = true; break }
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+            }
+
+            // Phase 2 — wait for it to be gone, and stay gone. `isAnyGameRunning` is global, not
+            // per-prefix, so a game launched in ANY bottle keeps this waiting: conservative on
+            // purpose, since the failure mode of reaping too early is killing someone's session.
+            if appeared {
+                var clearStreak = 0
+                while clearStreak < 3 {                        // ~15 s of quiet before believing it
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    clearStreak = await isAnyGameRunning() ? 0 : clearStreak + 1
+                }
+            }
+
+            // Phase 3 — if the user has meanwhile started using Steam directly, leave it alone.
+            guard launchingBottleIDs.isEmpty else { return }
+            await quitSteam(in: bottle)
+        }
+    }
+
+    /// Remove Steam's auto-start entry from the prefix's `Run` key.
+    ///
+    /// Steam writes itself into `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` — as
+    /// `steam.exe -silent`, its "run Steam when my computer starts" setting, which is on by
+    /// default. In a Wine prefix that setting is actively harmful: there is no boot, so it fires
+    /// whenever *anything* brings the prefix up, and it brings Steam back **windowless**. Found by
+    /// accident here — a bare `wine wineboot` started Steam with no other prompting.
+    ///
+    /// Without this, quitting Steam is temporary: the next launch of any program in the bottle
+    /// silently resurrects it, which is the other half of "Steam reopens every time I quit it".
+    /// Run BEFORE the shutdown, while the prefix is already up, so this doesn't have to start one.
+    /// Steam rewrites the value whenever it runs, so this is re-applied on every quit by design.
+    private func disableSteamAutoStart(in bottle: Bottle) async {
+        guard let installation = installation(for: bottle) else { return }
+        _ = try? await Shell.run(
+            installation.loader,
+            arguments: ["reg", "delete", #"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"#,
+                        "/v", "Steam", "/f"],
+            environment: Wine.environment(for: bottle, using: installation))
+    }
+
     /// Stop Steam and everything else running in this bottle.
     ///
     /// Decanter could start Steam but never stop it, and on a direct-exe bottle it starts Steam
@@ -1083,6 +1157,7 @@ final class AppModel: ObservableObject {
     /// process has gone. Reports whether Steam is actually gone rather than assuming.
     @discardableResult
     func quitSteam(in bottle: Bottle) async -> Bool {
+        await disableSteamAutoStart(in: bottle)
         await shutdownPrefix(for: bottle)
         if await isSteamRunning() { await shutdownPrefix(for: bottle) }
         let stopped = await !isSteamRunning()
@@ -1203,9 +1278,20 @@ final class AppModel: ObservableObject {
                                                 arguments: ["-Ao", "comm="]) else { return false }
         let helpers: Set<String> = ["steam.exe", "explorer.exe", "services.exe", "winedevice.exe",
                                     "svchost.exe", "rpcss.exe", "plugplay.exe", "steamwebhelper.exe",
-                                    "conhost.exe", "wineboot.exe", "start.exe", "tabtip.exe"]
+                                    "conhost.exe", "wineboot.exe", "start.exe", "tabtip.exe",
+                                    "steamsysinfo.exe", "steamerrorreporter64.exe"]
+        // SPLIT ON BOTH SEPARATORS. Wine reports `comm` as a WINDOWS path —
+        // `C:\windows\system32\services.exe` — so splitting on "/" alone leaves the whole string,
+        // the allowlist above never matches, and every Wine helper counts as a running game.
+        // Verified live: 6 of 7 helpers misclassified, only the bare `start.exe` matched.
+        //
+        // That made this return true for hours after any Wine use (services/winedevice/plugplay
+        // outlive their prefix), which silently disabled everything gated on it: the stale
+        // menu-bar sweep never ran, and the engine switch always refused with "Quit Steam and any
+        // running game first".
         return result.stdout.split(separator: "\n").contains { line in
-            let name = String(line.split(separator: "/").last ?? "").lowercased()
+            let name = String(line.split(whereSeparator: { $0 == "/" || $0 == "\\" })
+                .last ?? "").lowercased()
             return name.hasSuffix(".exe") && !helpers.contains(name)
         }
     }
