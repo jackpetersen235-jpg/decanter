@@ -169,6 +169,20 @@ Strips quarantine + AppleDouble clutter, re-signs ad-hoc, writes a plain-languag
   Steam.downloadInstaller hit this; comments there record it.
 - **Steam `-silent` hides the window.** On a launcher bottle it makes "Launch Steam" look broken
   (user must click twice). Only use it on a per-game bottle that also passes `-applaunch`.
+  ⚠️ **`-silent` also makes Steam unquittable, and the app used to have no cure.** `-silent` starts
+  Steam *in the tray*, so closing its window re-hides it instead of exiting; the client stays up and
+  respawns its webhelper UI, which reads as "Steam reopens every time I quit it". Measured
+  2026-08-02: a steam.exe started by the DIRECT-EXE path (which hardcodes `-silent` with **no**
+  `-applaunch`, violating the rule above) had been resident **7h37m** across four quit attempts —
+  the same PID throughout, only the webhelpers restarted. Nothing reaps Steam after a direct-exe
+  game exits, and the only shutdown path in the app (`shutdownPrefix` via `launchSteam`) is
+  unreachable for a game bottle because `isGameLauncher` skips that branch. Fixed by adding
+  `quitSteam(in:)` + a **Quit Steam** button + `--quit-steam`. When debugging "Steam won't quit",
+  check `ps -Ao pid,lstart` for steam.exe FIRST: if the PID is unchanged, it was never quit.
+- **`shutdownPrefix`'s straggler sweep cannot see steamwebhelper.** It matches the macOS prefix
+  path in argv; the webhelpers carry only Windows paths (`C:\Program Files (x86)\Steam\...`), so
+  0 of 6 matched in a live check. `wineserver -k` is what actually reaps them — do not "optimize"
+  it away or reorder it after the sweep.
 - **Steam re-execs itself** for a startup update check and both processes stay resident → **two
   Dock tiles for one Steam**. `-skipinitialbootstrap` avoids it. Don't also add
   `-nobootstrapperupdate` — that blocks bootstrapper updates.

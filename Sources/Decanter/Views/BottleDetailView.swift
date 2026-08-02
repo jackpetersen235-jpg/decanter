@@ -13,6 +13,9 @@ struct BottleDetailView: View {
     @State private var tab: Tab = .overview
     @State private var installingGFX = false
     @State private var gfxResult: String?
+    @State private var confirmQuit = false
+    @State private var quitting = false
+    @State private var quitResult: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -34,6 +37,25 @@ struct BottleDetailView: View {
             }
         }
         .navigationTitle(bottle.name)
+        // Confirmed, not immediate: this is `wineserver -k` on the whole prefix, so a game that is
+        // still running dies with it and unsaved progress goes with it.
+        .confirmationDialog("Quit Steam in “\(bottle.name)”?",
+                            isPresented: $confirmQuit, titleVisibility: .visible) {
+            Button("Quit Steam", role: .destructive) {
+                quitting = true
+                quitResult = nil
+                Task {
+                    let ok = await model.quitSteam(in: bottle)
+                    quitResult = ok
+                        ? "Steam has been shut down."
+                        : "Steam did not shut down — try again, or restart your Mac."
+                    quitting = false
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This also closes any game running in this bottle. Unsaved progress will be lost.")
+        }
     }
 
     // MARK: Header
@@ -113,6 +135,13 @@ struct BottleDetailView: View {
                             .buttonStyle(.borderedProminent)
                             .disabled(launching)
 
+                            // Decanter starts Steam; it must also be able to stop it. Without this
+                            // a `-silent` Steam sits in the tray with no window and survives every
+                            // attempt to quit it from Steam's own UI (closing the window just
+                            // re-hides it), with no control anywhere in the app to end it.
+                            Button(quitting ? "Quitting…" : "Quit Steam") { confirmQuit = true }
+                                .disabled(quitting)
+
                             Button("Reinstall") { model.installSteam(in: bottle) }
 
                             // Re-runnable on purpose: the wizard installs this after Steam, but a
@@ -131,6 +160,9 @@ struct BottleDetailView: View {
                         }
                         if let gfxResult {
                             Text(gfxResult).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let quitResult {
+                            Text(quitResult).font(.caption).foregroundStyle(.secondary)
                         }
                         if launching {
                             Text("Steam is opening — this can take a few seconds the first time.")

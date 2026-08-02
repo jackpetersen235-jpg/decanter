@@ -124,6 +124,22 @@ final class AppModel: ObservableObject {
                 exit(0)
             }
         }
+        // Escape hatch for a Steam that will not stay quit, and the headless test for quitSteam.
+        //   Decanter.app/Contents/MacOS/Decanter --quit-steam
+        if CommandLine.arguments.contains("--quit-steam") {
+            Task {
+                var any = false
+                for bottle in bottles where bottle.isSteamInstalled {
+                    let ok = await quitSteam(in: bottle)
+                    FileHandle.standardError.write(
+                        "  \(bottle.name.prefix(40)): \(ok ? "stopped" : "STILL RUNNING")\n"
+                            .data(using: .utf8)!)
+                    any = true
+                }
+                if !any { FileHandle.standardError.write("no Steam bottles\n".data(using: .utf8)!) }
+                exit(0)
+            }
+        }
         // Support hook. "Failed to load steamui.dll" has two completely different causes — an
         // engine too old to run Steam, and a Steam that never finished downloading itself — and
         // the error text is identical for both. This prints which one a machine is actually in,
@@ -1050,6 +1066,29 @@ final class AppModel: ObservableObject {
             }
         }
         try? await Task.sleep(nanoseconds: 2_000_000_000)
+    }
+
+    /// Stop Steam and everything else running in this bottle.
+    ///
+    /// Decanter could start Steam but never stop it, and on a direct-exe bottle it starts Steam
+    /// with `-silent` — straight to the tray, no window — then leaves it running after the game
+    /// exits. Measured on 2026-08-02: one such steam.exe had been resident for 7h37m across four
+    /// attempts to quit it. From tray mode, closing Steam's window returns it to the tray instead
+    /// of exiting, so the client stays up and respawns its webhelper UI; the user sees "Steam
+    /// reopens every time I quit it" and has no way to win, because the app's only shutdown path
+    /// was a side effect of pressing Launch on a *plain* Steam bottle — which a game bottle never
+    /// reaches (`isGameLauncher` skips that branch).
+    ///
+    /// Retries once: `wineserver -k` is asynchronous and the straggler sweep can run before every
+    /// process has gone. Reports whether Steam is actually gone rather than assuming.
+    @discardableResult
+    func quitSteam(in bottle: Bottle) async -> Bool {
+        await shutdownPrefix(for: bottle)
+        if await isSteamRunning() { await shutdownPrefix(for: bottle) }
+        let stopped = await !isSteamRunning()
+        // The menu-bar icon outlives Steam; clear it now that nothing is running.
+        if stopped { reapOrphanedSystray() }
+        return stopped
     }
 
     /// Launch a long-lived program without popping a console sheet. Used for games/Steam, where
