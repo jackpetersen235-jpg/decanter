@@ -124,6 +124,29 @@ final class AppModel: ObservableObject {
                 exit(0)
             }
         }
+        // Install Steam into ONE named bottle. `--run-setup` only ever targets the setup bottle,
+        // so there was no way to provision a second one without the GUI.
+        //   Decanter.app/Contents/MacOS/Decanter --install-steam "Half Sword"
+        if let i = CommandLine.arguments.firstIndex(of: "--install-steam"),
+           i + 1 < CommandLine.arguments.count {
+            let wanted = CommandLine.arguments[i + 1]
+            Task {
+                guard let bottle = bottles.first(where: { $0.name == wanted }) else {
+                    FileHandle.standardError.write(
+                        "no bottle named \"\(wanted)\"\n".data(using: .utf8)!)
+                    exit(1)
+                }
+                let ok = await performSteamInstall(in: bottle, console: nil)
+                let now = bottles.first { $0.id == bottle.id } ?? bottle
+                FileHandle.standardError.write("""
+                    install: \(ok ? "OK" : "FAILED")
+                    steam.exe present: \(now.isSteamInstalled)
+                    bootstrapped:      \(now.isSteamBootstrapped)
+
+                    """.data(using: .utf8)!)
+                exit(ok ? 0 : 1)
+            }
+        }
         // Escape hatch for a Steam that will not stay quit, and the headless test for quitSteam.
         //   Decanter.app/Contents/MacOS/Decanter --quit-steam
         if CommandLine.arguments.contains("--quit-steam") {
