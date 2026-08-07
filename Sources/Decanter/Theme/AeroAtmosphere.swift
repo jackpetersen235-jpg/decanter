@@ -78,7 +78,7 @@ struct ThemedBackground: ViewModifier {
         case .frutigerAero:
             if restrained {
                 content
-                    .foregroundStyle(AeroTokens.ink)
+                    .aeroLightChrome()
                     .background(AeroTokens.restrainedSurface)
             } else {
                 // Atmosphere directly behind content — no opaque plate over it.
@@ -89,7 +89,7 @@ struct ThemedBackground: ViewModifier {
                 // was the text still being coloured for DARK chrome. Setting the ink here is the
                 // real fix, and it keeps the atmosphere at full strength.
                 content
-                    .foregroundStyle(AeroTokens.ink)
+                    .aeroLightChrome()
                     .background { AeroAtmosphere() }
             }
         }
@@ -100,5 +100,22 @@ extension View {
     /// - Parameter restrained: pass `true` for dense screens (see `ThemedBackground`).
     func themedBackground(restrained: Bool = false) -> some View {
         modifier(ThemedBackground(restrained: restrained))
+    }
+
+    /// Force system-drawn chrome into its light appearance and set the Aero ink.
+    ///
+    /// Setting `foregroundStyle` alone was not enough and produced an unreadable Configuration
+    /// tab: `Form(.grouped)`, pickers and toggles draw their own backgrounds from the SYSTEM
+    /// appearance, which on this Mac is dark. Dark Aero ink then landed on dark system rows.
+    ///
+    /// Aero is inherently a light aesthetic — sky, chrome, white gloss — so the fix is one lever
+    /// rather than a per-control fight: tell the whole subtree it is in light mode, and every
+    /// system-drawn surface comes back light, which is what the ink was chosen against.
+    /// `scrollContentBackground(.hidden)` then lets the theme's own surface show through the form.
+    func aeroLightChrome() -> some View {
+        self
+            .environment(\.colorScheme, .light)
+            .foregroundStyle(AeroTokens.ink)
+            .scrollContentBackground(.hidden)
     }
 }

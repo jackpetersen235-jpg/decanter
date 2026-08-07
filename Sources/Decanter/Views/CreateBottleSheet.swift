@@ -59,6 +59,8 @@ struct CreateBottleSheet: View {
         }
         .padding(20)
         .frame(width: 540)
+        // The scan list plus the form is a dense screen, and a sheet has no room for atmosphere.
+        .themedBackground(restrained: true)
         .task {
             // Read the prefixes on the main actor, then walk the filesystem OFF it. Passing the
             // model into a detached task would not help: AppModel is @MainActor, so calling one of

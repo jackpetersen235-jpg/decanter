@@ -146,5 +146,8 @@ struct ConfigurationView: View {
         }
         .formStyle(.grouped)
         .padding(.horizontal, 4)
+        // Dense screen: engine, window, graphics and sync sections run well past eight rows, so
+        // this takes the restrained variant — solid fill, no atmosphere behind the text.
+        .themedBackground(restrained: true)
     }
 }
