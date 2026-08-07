@@ -204,8 +204,17 @@ struct BottleDetailView: View {
                                     }
                                 }
                                 .disabled(buildingApp)
-                                if model.hasGameApp(for: bottle) {
-                                    Button("Show in Finder") {
+                                // Shown unconditionally, and builds first if the bundle is not
+                                // there yet. Gating on `hasGameApp` looked right but was a
+                                // filesystem check with nothing observable behind it: after
+                                // creating a bottle the launcher is written asynchronously, and
+                                // SwiftUI had no reason to re-render when it appeared — so the
+                                // button stayed hidden for a launcher that existed.
+                                Button("Show in Finder") {
+                                    Task {
+                                        if !model.hasGameApp(for: bottle) {
+                                            _ = await model.buildGameApp(for: bottle)
+                                        }
                                         NSWorkspace.shared.activateFileViewerSelecting(
                                             [GameAppBuilder.destination(for: bottle)])
                                     }

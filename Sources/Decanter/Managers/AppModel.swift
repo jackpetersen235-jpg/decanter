@@ -128,7 +128,7 @@ final class AppModel: ObservableObject {
         //   Decanter.app/Contents/MacOS/Decanter --scan-games
         if CommandLine.arguments.contains("--scan-games") {
             let started = Date()
-            let games = scanForGames()
+            let games = AppModel.scanForGames(in: scannablePrefixes)
             var out = "\nfound \(games.count) game(s) in \(String(format: "%.1f", -started.timeIntervalSinceNow))s\n"
             for g in games {
                 out += "  \(g.name)\n"
@@ -687,19 +687,58 @@ final class AppModel: ObservableObject {
     // Executable selection lives in `GameScanner.largestExecutable`, shared with the new-bottle
     // picker so the list a user chooses from and the binary the launcher runs can never disagree.
 
+    /// The distinct prefixes to scan.
+    ///
+    /// Distinct, not per-bottle: three of this project's bottles share `Steam-Wine11`, so scanning
+    /// per bottle listed every game three times.
+    var scannablePrefixes: [URL] {
+        var seen = Set<String>()
+        return bottles.compactMap { bottle in
+            let prefix = bottle.url.standardizedFileURL
+            return seen.insert(prefix.path).inserted ? prefix : nil
+        }
+    }
+
     /// Every game found across the prefixes Decanter knows about.
     ///
-    /// Scans distinct prefixes, not bottles: three of this project's bottles share `Steam-Wine11`,
-    /// and scanning it three times would list every game three times.
-    func scanForGames() -> [GameScanner.FoundGame] {
-        var seen = Set<String>()
-        var out: [GameScanner.FoundGame] = []
-        for bottle in bottles {
-            let prefix = bottle.url.standardizedFileURL
-            guard seen.insert(prefix.path).inserted else { continue }
-            out += GameScanner.scan(prefix: prefix)
+    /// `nonisolated` and taking the prefixes as a parameter ON PURPOSE. `AppModel` is `@MainActor`,
+    /// so a main-actor method called from `Task.detached` simply hops back and does the work on the
+    /// main actor anyway — the first version of this claimed to scan off the main thread and did
+    /// not. Keeping the file walk out of the actor is what actually stops the sheet freezing.
+    nonisolated static func scanForGames(in prefixes: [URL]) -> [GameScanner.FoundGame] {
+        prefixes.flatMap { GameScanner.scan(prefix: $0) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// A bottle name not already taken, since the generated launcher's path is derived from it.
+    ///
+    /// Two bottles sharing a name means two bottles resolving to the SAME `~/Applications/x.app`,
+    /// and `GameAppBuilder.build` deletes before it writes — so the second silently replaces the
+    /// first's launcher. Numbering keeps the filename readable, which a bottle-id suffix would not.
+    func uniqueBottleName(_ wanted: String) -> String {
+        let base = wanted.trimmingCharacters(in: .whitespaces)
+        guard !base.isEmpty else { return uniqueBottleName("Bottle") }
+        let taken = Set(bottles.map { $0.name })
+        guard taken.contains(base) else { return base }
+        var n = 2
+        while taken.contains("\(base) \(n)") { n += 1 }
+        return "\(base) \(n)"
+    }
+
+    /// Does a bottle already exist for this game? Used to mark it in the picker rather than
+    /// silently creating a near-duplicate.
+    ///
+    /// Delegates to `resolvedGame` rather than re-deriving the answer from `steamAppID` /
+    /// `directExecutable`. The first version did re-derive it and was wrong: a bottle created
+    /// straight from "New Bottle" has NEITHER field set and resolves its game through the
+    /// single-manifest fallback, so the Half Sword bottle went unmarked while genuinely owning
+    /// that game. Comparing resolved executables makes the badge mean exactly what the Play button
+    /// will do, and keeps the two from drifting apart again.
+    func existingBottle(for game: GameScanner.FoundGame) -> Bottle? {
+        bottles.first { bottle in
+            guard bottle.url.standardizedFileURL.path == game.prefix.path else { return false }
+            return resolvedGame(for: bottle)?.executable.path == game.executable.path
         }
-        return out.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     /// Create a bottle already configured to play `game`.
@@ -710,7 +749,7 @@ final class AppModel: ObservableObject {
     @discardableResult
     func createBottle(named name: String, for game: GameScanner.FoundGame) -> Bottle.ID? {
         guard let installation = defaultInstallation else { return nil }
-        var bottle = Bottle(name: name.isEmpty ? game.name : name, url: game.prefix)
+        var bottle = Bottle(name: uniqueBottleName(name.isEmpty ? game.name : name), url: game.prefix)
         bottle.wineBinDirectory = installation.binDirectory
         bottle.isInitialized = true          // the prefix already exists and is booted
         if let id = game.appID {

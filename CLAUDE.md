@@ -268,6 +268,24 @@ creates a bottle already configured for it (app id or direct exe) and generates 
   the main actor in `.task` for the same reason.
 - `GameScanner.largestExecutable` is shared with `AppModel.resolvedGame` so the binary shown in
   the picker is always the one the launcher will run.
+- **`Task.detached { await model.someMethod() }` does NOT get you off the main actor.** `AppModel`
+  is `@MainActor`, so the detached task hops straight back and the work runs on the main actor
+  anyway. The first version of the scan claimed to be off-thread and was not. The fix is a
+  `nonisolated static` that takes plain values (`AppModel.scanForGames(in: [URL])`) — read the
+  actor state first, then hand the pure data to the detached task.
+- **A bottle NAME is a filesystem path.** `GameAppBuilder.destination` derives
+  `~/Applications/<name>.app` from it, and `build` deletes before it writes — so two bottles
+  sharing a name means the second silently replaces the first's launcher. `uniqueBottleName`
+  numbers duplicates ("Half Sword 2"). Verified by creating a second JJBA bottle: the original
+  launcher's hash was unchanged afterwards.
+- **Ask `resolvedGame` what a bottle plays; never re-derive it.** The "Added" badge originally
+  checked `steamAppID`/`directExecutable` directly and missed the Half Sword bottle entirely,
+  because a bottle made from "New Bottle" has NEITHER field and resolves via the single-manifest
+  fallback. Any second opinion about "which game is this" will drift from the Play button.
+- **Do not gate a control on a bare filesystem check.** "Show in Finder" was hidden behind
+  `hasGameApp(for:)`, which touches disk and has nothing observable behind it: the launcher is
+  written asynchronously after a bottle is created, so SwiftUI never re-rendered and the button
+  stayed hidden for a launcher that existed. It now always shows and builds on demand.
 
 ## Verification habits that mattered
 

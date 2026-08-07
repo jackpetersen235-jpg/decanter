@@ -60,12 +60,13 @@ struct CreateBottleSheet: View {
         .padding(20)
         .frame(width: 540)
         .task {
-            // Off the main actor: this walks thousands of files and would otherwise freeze the
-            // sheet as it opens.
-            let games = await Task.detached(priority: .userInitiated) { [model] in
-                await model.scanForGames()
+            // Read the prefixes on the main actor, then walk the filesystem OFF it. Passing the
+            // model into a detached task would not help: AppModel is @MainActor, so calling one of
+            // its methods there hops straight back and the sheet freezes anyway.
+            let prefixes = model.scannablePrefixes
+            found = await Task.detached(priority: .userInitiated) {
+                AppModel.scanForGames(in: prefixes)
             }.value
-            found = games
         }
     }
 
@@ -120,6 +121,14 @@ struct CreateBottleSheet: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
+            // Flag games that already have a bottle. Picking one is still allowed — a second
+            // bottle with different settings is legitimate — but it should be a decision, not a
+            // surprise, and the new bottle's name gets numbered rather than colliding.
+            if model.existingBottle(for: game) != nil {
+                Text("Added").font(.caption2)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Color.accentColor.opacity(0.22), in: Capsule())
+            }
             if game.appID != nil {
                 Text("Steam").font(.caption2)
                     .padding(.horizontal, 5).padding(.vertical, 1)
