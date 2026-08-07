@@ -244,6 +244,31 @@ Steam** and **Launch Game App**. Regenerate headlessly with `--build-game-apps`.
   `sampleNaNToZero`/`defuseFma`, and a per-game shader cache). The bottle is the source of truth
   now; port anything worth keeping into the bottle's settings.
 
+## New-bottle game picker (`GameScanner`)
+
+**New Bottle** scans every known prefix's `drive_c` and lists what it finds; clicking a game
+creates a bottle already configured for it (app id or direct exe) and generates its launcher.
+**Choose a Program…** is the deliberate bypass for anything the scan misses. Headless:
+`--scan-games`.
+
+- **It scans PREFIXES, not bottles.** Three bottles here share `Steam-Wine11`; scanning per-bottle
+  listed every game three times.
+- **It reuses the game's existing prefix** rather than booting a new one — a fresh prefix would
+  mean reinstalling Steam and re-downloading the game for nothing.
+- **228980 must be filtered here too.** "Steamworks Common Redistributables" has its own folder
+  and a 187 MB `VC_redist.x64.exe`, so the >64 MB size filter does NOT catch it — it listed as a
+  game, twice, until excluded. The list now lives in `GameScanner.nonGameAppIDs` and `AppModel`
+  refers to it, because the picker and the launcher resolver disagreeing about what counts as a
+  game is exactly how this bug got in twice.
+- **The same game can legitimately appear twice** (Half Sword is in both `Steam-Wine11` and its
+  own prefix, sharing APFS blocks). Rows therefore name the prefix; without it the picker showed
+  two identical entries.
+- **Every walk is bounded** (`fileLimit`, >64 MB folder threshold, fixed roots two deep). An
+  unbounded walk of a 24 GB Steam library per candidate would hang the sheet. The scan runs off
+  the main actor in `.task` for the same reason.
+- `GameScanner.largestExecutable` is shared with `AppModel.resolvedGame` so the binary shown in
+  the picker is always the one the launcher will run.
+
 ## Verification habits that mattered
 
 - **Screenshots beat logs.** `screencapture -x` + Read. Logs said "0 errors" while the screen was
