@@ -58,7 +58,13 @@ struct ContentView: View {
             // Wizard wallpaper removed. In Aero the atmosphere is the backdrop, and two competing
             // background images read as clutter; in Liquid Glass the detail pane is cleaner
             // without it. `Wallpaper` itself is kept — the app icon still uses the artwork.
+            //
+            // Hiding the title bar removes the STRIP but SwiftUI still reserves its height as a
+            // top safe-area inset, which left an empty band above the header panel. Ignoring that
+            // inset is what actually reclaims the space. Only the detail column does this — the
+            // sidebar keeps its inset, because the traffic lights float there.
             detail
+                .ignoresSafeArea(.container, edges: .top)
         }
     }
 
@@ -101,6 +107,7 @@ struct ContentView: View {
             wineStatusFooter
         }
         .frame(minWidth: 240)
+        .glassSidebar()
     }
 
     @ViewBuilder
