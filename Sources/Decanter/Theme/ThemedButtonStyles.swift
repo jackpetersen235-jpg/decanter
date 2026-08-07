@@ -187,18 +187,4 @@ extension View {
     func glassButton(prominent: Bool = false) -> some View {
         modifier(SecondaryThemedButton(prominent: prominent))
     }
-
-    /// A focus ring that is visible in both themes.
-    ///
-    /// The Aero gloss is decoration and is present whether or not a control has focus, so it can
-    /// never serve as the focus indicator. This ring appears only on focus.
-    func themedFocusRing(_ focused: Bool, cornerRadius: CGFloat = 6) -> some View {
-        overlay {
-            if focused {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(AeroTokens.focusRing, lineWidth: AeroTokens.focusRingWidth)
-                    .padding(-AeroTokens.focusRingOffset)
-            }
-        }
-    }
 }

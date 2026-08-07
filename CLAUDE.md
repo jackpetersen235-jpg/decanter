@@ -383,6 +383,24 @@ backdrop goes with it, and the clear window shows through. Also use `.listStyle(
 Cost: the system sidebar behaviour. The collapse animation and its toggle button are gone, and the
 column width is now set explicitly (264pt) rather than managed.
 
+### Custom ButtonStyles have NO focus ring — an open accessibility gap
+
+`ButtonStyleConfiguration` exposes `isPressed`, not focus, so a custom `ButtonStyle` cannot draw a
+focus ring from inside itself. macOS draws one automatically for SYSTEM styles, so every button
+using `.glass`, `.glassProminent` or `.bordered` is fine.
+
+`AeroButtonStyle` is custom, so **Play and Launch Steam in the Aero theme show no focus ring** under
+Full Keyboard Access. A `themedFocusRing` helper and `focusRing`/`focusRingWidth`/`focusRingOffset`
+tokens existed for this and were never applied to anything; both were deleted rather than left as
+dead code implying the problem was handled.
+
+The intended spec, if it is implemented later: **2pt `#FFF9C4` at 2pt offset**, driven by
+`@FocusState` on the button rather than from inside the style. The theme's own gloss is present
+whether or not a control has focus and can never serve as the indicator.
+
+The simplest fix is to stop using a custom style for those two buttons — which is exactly what
+switching Aero fully to glass would do, and was reverted by choice.
+
 ### Accessibility cannot be verified by injecting the environment
 
 `\.accessibilityReduceTransparency` and `\.accessibilityReduceMotion` are **read-only**

@@ -18,8 +18,6 @@ enum AeroTokens {
     /// Period "web 2.0" blue, darkened 12% for the same reason as `lime`.
     /// `#1C82C9` measures 4.12:1 against white — large-text-only. This is `#1972B1` at 5.12:1.
     static let aqua = Color(red: 0.097, green: 0.449, blue: 0.695)       // #1972B1
-    /// Warning / destructive.
-    static let amber = Color(red: 0.85, green: 0.52, blue: 0.06)         // #D98510
 
     // MARK: Surfaces
 
@@ -27,21 +25,12 @@ enum AeroTokens {
     static let chromeBottom = Color(red: 0.80, green: 0.87, blue: 0.94)
     /// Dense screens use a SOLID fill — no gloss, no atmosphere. See `restrainedSurface`.
     static let restrainedSurface = Color(red: 0.96, green: 0.97, blue: 0.98)
-    static let rowSeparator = Color(red: 0.72, green: 0.78, blue: 0.84)
 
     // MARK: Type
 
     /// Dark ink for light fills. Chosen for contrast, not for period accuracy.
     static let ink = Color(red: 0.09, green: 0.13, blue: 0.17)
     static let inkSecondary = Color(red: 0.32, green: 0.38, blue: 0.44)
-
-    // MARK: Focus
-
-    /// Focus ring: 2pt at 2pt offset. The theme's own gloss is decoration and does NOT count as a
-    /// focus indicator — keyboard users need a ring that appears only on focus.
-    static let focusRing = Color(red: 1.0, green: 0.976, blue: 0.769)    // #FFF9C4
-    static let focusRingWidth: CGFloat = 2
-    static let focusRingOffset: CGFloat = 2
 
     // MARK: Shadows
 
