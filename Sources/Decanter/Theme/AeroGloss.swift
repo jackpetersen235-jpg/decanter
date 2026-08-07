@@ -60,8 +60,8 @@ struct ThemedPanel: ViewModifier {
 
     func body(content: Content) -> some View {
         switch theme {
-        case .liquidGlass:  content
-        case .frutigerAero: content.modifier(AeroPanel(cornerRadius: cornerRadius, tint: tint))
+        case .liquidGlass, .system: content
+        case .frutigerAero:         content.modifier(AeroPanel(cornerRadius: cornerRadius, tint: tint))
         }
     }
 }

@@ -8,6 +8,11 @@ import SwiftUI
 enum AppTheme: String, CaseIterable, Identifiable, Codable {
     case liquidGlass
     case frutigerAero
+    /// Plain system appearance: no atmosphere, no glass panes, no clear window, stock controls.
+    /// Every themed modifier is a deliberate no-op here — this is the escape hatch for anyone who
+    /// wants the app to look like an ordinary Mac app, and for debugging whether a problem belongs
+    /// to a theme or to the app underneath it.
+    case system
 
     var id: String { rawValue }
 
@@ -16,6 +21,7 @@ enum AppTheme: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .liquidGlass:  return "Liquid glass"
         case .frutigerAero: return "Frutiger aero"
+        case .system:       return "Standard"
         }
     }
 
@@ -23,6 +29,7 @@ enum AppTheme: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .liquidGlass:  return "Clear, refractive controls that pick up what is behind them."
         case .frutigerAero: return "Glossy 2006-era buttons, sky and bubbles."
+        case .system:       return "The plain macOS look, with no theming at all."
         }
     }
 }

@@ -87,6 +87,21 @@ struct NativeGlassButton: ViewModifier {
     }
 }
 
+/// Stock system controls, for the Standard theme.
+///
+/// Separate from the glass and Aero styles rather than "no modifier at all", because a button with
+/// no style takes whatever the surrounding container gives it — which varies by context. Naming the
+/// style keeps Standard genuinely uniform.
+struct PlainThemedButton: ViewModifier {
+    var prominent: Bool = false
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if prominent { content.buttonStyle(.borderedProminent) }
+        else { content.buttonStyle(.bordered) }
+    }
+}
+
 // MARK: Theme-aware application
 
 /// Applies whichever button style the active theme calls for.
@@ -104,6 +119,9 @@ struct ThemedButton: ViewModifier {
             content.buttonStyle(AeroButtonStyle(accent: accent, prominent: prominent))
         case .liquidGlass:
             content.modifier(NativeGlassButton(prominent: prominent))
+        case .system:
+            // Stock controls, chosen at the call site's role.
+            content.modifier(PlainThemedButton(prominent: prominent))
         }
     }
 }
@@ -118,6 +136,25 @@ struct ThemedButton: ViewModifier {
 /// Applies in BOTH themes. It used to be gated to Liquid Glass on the reasoning that Aero's gloss
 /// is painted and needs no sampling — but Aero screens now carry glass secondary buttons too, and
 /// those need the shared sampling region just as much.
+/// Secondary controls: glass in both themed appearances, stock in Standard.
+///
+/// Standard has to be honoured here too. Leaving this as unconditional glass would have left the
+/// "no theming at all" option with glass buttons throughout, which is the one thing it promises not
+/// to have.
+struct SecondaryThemedButton: ViewModifier {
+    var prominent: Bool = false
+    @Environment(\.appTheme) private var theme
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if theme == .system {
+            content.modifier(PlainThemedButton(prominent: prominent))
+        } else {
+            content.modifier(NativeGlassButton(prominent: prominent))
+        }
+    }
+}
+
 struct GlassGroup: ViewModifier {
     var spacing: CGFloat = 10
 
@@ -148,7 +185,7 @@ extension View {
     /// them first. Everything else is secondary and recedes into glass, which is what keeps a row
     /// of eight controls from competing with the two that matter.
     func glassButton(prominent: Bool = false) -> some View {
-        modifier(NativeGlassButton(prominent: prominent))
+        modifier(SecondaryThemedButton(prominent: prominent))
     }
 
     /// A focus ring that is visible in both themes.

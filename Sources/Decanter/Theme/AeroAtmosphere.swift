@@ -93,7 +93,7 @@ struct ThemedBackground: ViewModifier {
 
     func body(content: Content) -> some View {
         switch theme {
-        case .liquidGlass:
+        case .liquidGlass, .system:
             content
         case .frutigerAero:
             if restrained {
@@ -127,8 +127,8 @@ struct ThemedAtmosphere: ViewModifier {
 
     func body(content: Content) -> some View {
         switch theme {
-        case .liquidGlass:  content
-        case .frutigerAero: content.background { AeroAtmosphere() }
+        case .liquidGlass, .system: content
+        case .frutigerAero:         content.background { AeroAtmosphere() }
         }
     }
 }
@@ -143,8 +143,8 @@ struct AeroInk: ViewModifier {
 
     func body(content: Content) -> some View {
         switch theme {
-        case .liquidGlass:  content
-        case .frutigerAero: content.aeroLightChrome()
+        case .liquidGlass, .system: content
+        case .frutigerAero:         content.aeroLightChrome()
         }
     }
 }
