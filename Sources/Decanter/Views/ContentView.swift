@@ -20,6 +20,9 @@ struct ContentView: View {
                 splitView
             }
         }
+        // The atmosphere sits behind the whole window, under the split view's own chrome. Nothing
+        // decorative is ever composited over a control or a label.
+        .themedBackground()
         .sheet(isPresented: $showingCreate) { CreateBottleSheet() }
         .sheet(isPresented: $showingSetup) { SetupSheet() }
         .sheet(item: $model.activeConsole) { console in
@@ -52,7 +55,10 @@ struct ContentView: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            detail.wallpaper()
+            // Wizard wallpaper removed. In Aero the atmosphere is the backdrop, and two competing
+            // background images read as clutter; in Liquid Glass the detail pane is cleaner
+            // without it. `Wallpaper` itself is kept — the app icon still uses the artwork.
+            detail
         }
     }
 

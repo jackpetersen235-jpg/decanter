@@ -2,9 +2,19 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var themeController: ThemeController
 
     var body: some View {
         Form {
+            Section("Appearance") {
+                Picker("Theme", selection: $themeController.theme) {
+                    ForEach(AppTheme.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.inline)
+                Text(themeController.theme.detail)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Wine build for new bottles") {
                 if model.installations.isEmpty {
                     Text("No Wine builds detected.").foregroundStyle(.secondary)
@@ -52,5 +62,8 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        // Restrained: settings is well past eight rows, so it gets a solid fill — no atmosphere
+        // behind the text and no gloss on rows.
+        .themedBackground(restrained: true)
     }
 }

@@ -138,7 +138,10 @@ struct BottleDetailView: View {
                                     Label(buildingApp ? "Building…" : "Play",
                                           systemImage: "gamecontroller.fill")
                                 }
-                                .buttonStyle(.borderedProminent)
+                                // Lime in Aero — the theme's signature accent — and its shadow
+                                // takes that hue rather than neutral gray. Liquid glass ignores
+                                // the accent and refracts instead.
+                                .themedButton(prominent: true, accent: AeroTokens.lime)
                                 .disabled(buildingApp)
                             }
 
@@ -147,11 +150,11 @@ struct BottleDetailView: View {
                             // better here than a custom AnyButtonStyle would.
                             if game == nil {
                                 Button { model.launchSteam(in: bottle) } label: { steamLabel(launching) }
-                                    .buttonStyle(.borderedProminent)
+                                    .themedButton(prominent: true)
                                     .disabled(launching)
                             } else {
                                 Button { model.launchSteam(in: bottle) } label: { steamLabel(launching) }
-                                    .buttonStyle(.bordered)
+                                    .themedButton()
                                     .disabled(launching)
                             }
 
