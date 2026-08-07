@@ -186,9 +186,11 @@ struct BottleDetailView: View {
                             // attempt to quit it from Steam's own UI (closing the window just
                             // re-hides it), with no control anywhere in the app to end it.
                             Button(quitting ? "Quitting…" : "Quit Steam") { confirmQuit = true }
+                                .glassButton()
                                 .disabled(quitting)
 
                             Button("Reinstall") { model.installSteam(in: bottle) }
+                                .glassButton()
 
                             // Re-runnable on purpose: the wizard installs this after Steam, but a
                             // fresh library has no games yet, so it must be reachable afterwards.
@@ -202,6 +204,7 @@ struct BottleDetailView: View {
                                     installingGFX = false
                                 }
                             }
+                            .glassButton()
                             .disabled(installingGFX)
                         }
                         // One shared sampling region for the whole row. Without it each glass
@@ -232,6 +235,7 @@ struct BottleDetailView: View {
                                         buildingApp = false
                                     }
                                 }
+                                .glassButton()
                                 .disabled(buildingApp)
                                 // Shown unconditionally, and builds first if the bundle is not
                                 // there yet. Gating on `hasGameApp` looked right but was a
@@ -248,7 +252,9 @@ struct BottleDetailView: View {
                                             [GameAppBuilder.destination(for: bottle)])
                                     }
                                 }
+                                .glassButton()
                             }
+                            .glassGroup()
                             // Name what Play will actually start. The resolver picks the biggest
                             // executable, and on UE titles that is a deep Shipping.exe rather than
                             // the obvious top-level one — worth showing so a wrong pick is visible
@@ -286,9 +292,11 @@ struct BottleDetailView: View {
                     infoRow("Sync", bottle.settings.syncMode.label)
                     infoRow("Prefix", bottle.url.path, mono: true)
                     HStack {
-                        Button("Open C: Drive") { model.openCDrive(bottle) }
-                        Button("Apply Settings") { model.applySettings(bottle) }
-                        Button("Wine Config") { model.runTool(.winecfg, in: bottle) }
+                        // Glass, like every secondary control. Only Play and Launch Steam keep the
+                        // active theme's own treatment, so the eye still lands on them first.
+                        Button("Open C: Drive") { model.openCDrive(bottle) }.glassButton()
+                        Button("Apply Settings") { model.applySettings(bottle) }.glassButton()
+                        Button("Wine Config") { model.runTool(.winecfg, in: bottle) }.glassButton()
                     }
                     .padding(.top, 4)
                 }

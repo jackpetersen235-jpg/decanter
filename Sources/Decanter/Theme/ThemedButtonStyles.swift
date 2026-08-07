@@ -126,13 +126,14 @@ struct ThemedButton: ViewModifier {
 /// the button row read as flat capsules rather than as one set of glass controls. The container
 /// gives them a shared region and lets nearby shapes blend.
 ///
-/// A no-op in Aero, whose gloss is painted and needs no sampling at all.
+/// Applies in BOTH themes. It used to be gated to Liquid Glass on the reasoning that Aero's gloss
+/// is painted and needs no sampling — but Aero screens now carry glass secondary buttons too, and
+/// those need the shared sampling region just as much.
 struct GlassGroup: ViewModifier {
     var spacing: CGFloat = 10
-    @Environment(\.appTheme) private var theme
 
     func body(content: Content) -> some View {
-        if theme == .liquidGlass, #available(macOS 26.0, *) {
+        if #available(macOS 26.0, *) {
             GlassEffectContainer(spacing: spacing) { content }
         } else {
             content
@@ -149,6 +150,16 @@ extension View {
     /// render consistently, not an optimisation.
     func glassGroup(spacing: CGFloat = 10) -> some View {
         modifier(GlassGroup(spacing: spacing))
+    }
+
+    /// Always Liquid Glass, in both themes.
+    ///
+    /// Used for every button EXCEPT Play and Launch Steam. Those two are the primary actions and
+    /// keep the active theme's own treatment — in Aero, painted gloss — so the eye still lands on
+    /// them first. Everything else is secondary and recedes into glass, which is what keeps a row
+    /// of eight controls from competing with the two that matter.
+    func glassButton(prominent: Bool = false) -> some View {
+        buttonStyle(LiquidGlassButtonStyle(prominent: prominent))
     }
 
     /// A focus ring that is visible in both themes.
