@@ -124,6 +124,28 @@ final class AppModel: ObservableObject {
                 exit(0)
             }
         }
+        // Generate the .app launchers for every bottle that resolves to a game.
+        //   Decanter.app/Contents/MacOS/Decanter --build-game-apps
+        if CommandLine.arguments.contains("--build-game-apps") {
+            Task {
+                var out = "\n"
+                for bottle in bottles {
+                    guard let game = resolvedGame(for: bottle) else {
+                        out += "  \(bottle.name.prefix(36)): no game (launcher bottle)\n"
+                        continue
+                    }
+                    switch await buildGameApp(for: bottle) {
+                    case .success(let url):
+                        out += "  \(bottle.name.prefix(36)): \(url.lastPathComponent)\n"
+                        out += "      game -> \(game.executable.lastPathComponent) (appid \(game.appID ?? "-"))\n"
+                    case .failure(let e):
+                        out += "  \(bottle.name.prefix(36)): FAILED — \(e.localizedDescription)\n"
+                    }
+                }
+                FileHandle.standardError.write(out.data(using: .utf8)!)
+                exit(0)
+            }
+        }
         // Install Steam into ONE named bottle. `--run-setup` only ever targets the setup bottle,
         // so there was no way to provision a second one without the GUI.
         //   Decanter.app/Contents/MacOS/Decanter --install-steam "Half Sword"
@@ -569,6 +591,170 @@ final class AppModel: ObservableObject {
             found.append((dir, biggest.lastPathComponent))
         }
         return found
+    }
+
+    // MARK: Generated game launchers
+
+    /// Steam app ids that appear in `steamapps` but are not games.
+    ///
+    /// 228980 is "Steamworks Common Redistributables" and Steam installs it beside almost
+    /// everything, so a prefix holding one game reports two manifests. Counting it made a
+    /// single-game bottle look ambiguous and produced no launcher at all. The rest are the Linux
+    /// runtimes — they cannot appear in a Wine prefix, but cost nothing to exclude.
+    private static let nonGameAppIDs: Set<String> = [
+        "228980",                                    // Steamworks Common Redistributables
+        "1070560", "1391110", "1628350",             // Steam Linux Runtime
+        "858280", "961940",                          // Proton
+    ]
+
+    /// Which single game does this bottle represent?
+    ///
+    /// Resolution order matters. `directExecutable` is an explicit choice by the user (it exists
+    /// because some titles' Steam entry point is an anti-cheat shim that cannot work under Wine),
+    /// so it wins outright. Otherwise the Steam app id is resolved through the appmanifest, which
+    /// names the install folder exactly — far better than guessing at the biggest folder, because
+    /// one prefix here holds Sekiro, JJBA and Half Sword at once.
+    ///
+    /// Returns nil for a plain Steam launcher bottle, which correctly has no game app.
+    func resolvedGame(for bottle: Bottle) -> GameAppBuilder.Game? {
+        let fm = FileManager.default
+        let steamRoot = bottle.driveC.appendingPathComponent("Program Files (x86)/Steam", isDirectory: true)
+        let appID = steamAppID(for: bottle)
+
+        let direct = (bottle.settings.directExecutable ?? "").trimmingCharacters(in: .whitespaces)
+        if !direct.isEmpty {
+            let exe = direct.hasPrefix("/")
+                ? URL(fileURLWithPath: direct)
+                : bottle.driveC.appendingPathComponent(direct)
+            if fm.fileExists(atPath: exe.path) {
+                return GameAppBuilder.Game(name: bottle.name,
+                                           folder: exe.deletingLastPathComponent(),
+                                           executable: exe,
+                                           appID: appID)
+            }
+        }
+
+        // No app id configured? Fall back to what is actually installed in the prefix.
+        //
+        // A bottle created straight from "New Bottle" has no `-applaunch` and no steamAppID, so
+        // requiring one meant a prefix containing exactly one game produced no launcher at all —
+        // which is precisely the case a user expects to just work (hit on the Half Sword bottle).
+        //
+        // Only when there is EXACTLY ONE manifest. A prefix holding several games (this project's
+        // Steam-Wine11 holds three) is a launcher bottle, and guessing which of them it "means"
+        // would produce a launcher for the wrong title.
+        let resolvedID: String
+        if let appID, !appID.isEmpty {
+            resolvedID = appID
+        } else {
+            let steamapps = steamRoot.appendingPathComponent("steamapps", isDirectory: true)
+            let ids = ((try? fm.contentsOfDirectory(atPath: steamapps.path)) ?? [])
+                .filter { $0.hasPrefix("appmanifest_") && $0.hasSuffix(".acf") }
+                .map { $0.replacingOccurrences(of: "appmanifest_", with: "")
+                         .replacingOccurrences(of: ".acf", with: "") }
+                .filter { !Self.nonGameAppIDs.contains($0) }
+            guard ids.count == 1, let only = ids.first else { return nil }
+            resolvedID = only
+        }
+
+        let manifest = steamRoot.appendingPathComponent("steamapps/appmanifest_\(resolvedID).acf")
+        guard let text = try? String(contentsOf: manifest, encoding: .utf8),
+              let installDir = acfValue("installdir", in: text)
+        else { return nil }
+
+        let folder = steamRoot.appendingPathComponent("steamapps/common/\(installDir)", isDirectory: true)
+        guard let exe = largestExecutable(in: folder) else { return nil }
+        return GameAppBuilder.Game(name: acfValue("name", in: text) ?? bottle.name,
+                                   folder: folder, executable: exe, appID: appID)
+    }
+
+    /// The bottle's Steam app id, from the explicit setting or parsed out of `-applaunch <id>`.
+    private func steamAppID(for bottle: Bottle) -> String? {
+        let explicit = (bottle.settings.steamAppID ?? "").trimmingCharacters(in: .whitespaces)
+        if !explicit.isEmpty { return explicit }
+        guard let r = bottle.settings.steamArguments.range(of: "-applaunch ") else { return nil }
+        let id = bottle.settings.steamArguments[r.upperBound...].prefix(while: { $0.isNumber })
+        return id.isEmpty ? nil : String(id)
+    }
+
+    /// The biggest `.exe` in a game folder, searched one level deep as well.
+    ///
+    /// Shipping binaries frequently sit in `Binaries/Win64/` with only a small shim at the top
+    /// level — Half Sword's real binary is `HalfSwordUE5/Binaries/Win64/…-Shipping.exe` at 300 MB
+    /// beside a 0.3 MB launcher — so a top-level-only search picks the wrong one.
+    private func largestExecutable(in folder: URL) -> URL? {
+        let fm = FileManager.default
+        let keys: Set<URLResourceKey> = [.fileSizeKey, .isDirectoryKey]
+        func size(_ u: URL) -> Int { (try? u.resourceValues(forKeys: keys).fileSize) ?? 0 }
+
+        var candidates: [URL] = []
+        guard let top = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: Array(keys))
+        else { return nil }
+        candidates += top.filter { $0.pathExtension.lowercased() == "exe" }
+
+        if let e = fm.enumerator(at: folder, includingPropertiesForKeys: Array(keys),
+                                 options: [.skipsHiddenFiles]) {
+            var scanned = 0
+            for case let u as URL in e {
+                scanned += 1
+                if scanned > 4000 { break }        // bound the walk; UE trees are enormous
+                if u.pathExtension.lowercased() == "exe" { candidates.append(u) }
+            }
+        }
+        // Redistributables ship beside the game and are pure noise.
+        let noise = ["uecommandline", "prereq", "redist", "vcredist", "directx", "dotnet",
+                     "crashreport", "unins", "setup"]
+        let filtered = candidates.filter { u in
+            let n = u.lastPathComponent.lowercased()
+            return !noise.contains { n.contains($0) }
+        }
+        return (filtered.isEmpty ? candidates : filtered).max(by: { size($0) < size($1) })
+    }
+
+    /// Build (or rebuild) the bottle's launcher bundle in ~/Applications.
+    @discardableResult
+    func buildGameApp(for bottle: Bottle) async -> Result<URL, Error> {
+        guard let installation = installation(for: bottle) else {
+            return .failure(GameAppBuilder.BuildError.writeFailed("no Wine engine for this bottle"))
+        }
+        guard let game = resolvedGame(for: bottle) else {
+            return .failure(GameAppBuilder.BuildError.noGame)
+        }
+        // Reuse the exact environment a Decanter-launched game gets, so the bundle and the app's
+        // own Launch button cannot drift apart in behaviour.
+        var env = Wine.environment(for: bottle, using: installation)
+        for key in ProcessInfo.processInfo.environment.keys where env[key] == ProcessInfo.processInfo.environment[key] {
+            env.removeValue(forKey: key)      // keep only what Decanter actually set
+        }
+        do {
+            let url = try GameAppBuilder.build(
+                game: game, bottle: bottle,
+                wineBin: installation.binDirectory,
+                wineLib: FileManager.default.fileExists(atPath: installation.libDirectory.path)
+                    ? installation.libDirectory : nil,
+                environment: env,
+                steamExecutable: bottle.steamExecutable,
+                skipInitialBootstrap: bottle.isSteamBootstrapped)
+            return .success(url)
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    /// Open the generated launcher, building it first if it is missing.
+    func launchGameApp(in bottle: Bottle) {
+        Task {
+            let app = GameAppBuilder.destination(for: bottle)
+            if !FileManager.default.fileExists(atPath: app.path) {
+                if case .failure = await buildGameApp(for: bottle) { return }
+            }
+            NSWorkspace.shared.open(app)
+        }
+    }
+
+    /// True when this bottle has a game to make a launcher for.
+    func hasGameApp(for bottle: Bottle) -> Bool {
+        FileManager.default.fileExists(atPath: GameAppBuilder.destination(for: bottle).path)
     }
 
     /// Copy the bundled DXMT DLLs into each detected game and register the per-game DLL overrides.

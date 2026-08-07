@@ -215,6 +215,35 @@ Strips quarantine + AppleDouble clutter, re-signs ad-hoc, writes a plain-languag
 - **`homeDirectoryForCurrentUser` ignores `$HOME`** (reads the passwd entry), so you cannot fake a
   fresh-Mac test by overriding HOME. Use `--install-engine` / Setup Assistant instead.
 
+## Generated game launchers (`GameAppBuilder`)
+
+Decanter writes a `.app` per game into `~/Applications`, and each game bottle shows **Launch
+Steam** and **Launch Game App**. Regenerate headlessly with `--build-game-apps`.
+
+- **They reference the shared engine, they do not embed Wine.** The hand-made `Sekiro.app` /
+  JJBA bundles embed one at ~696 MB each; generated ones are **8 KB**. The cost is that they only
+  work on this Mac — as does the prefix they point at, so nothing is lost.
+- **Shell-quote every path.** One of the two games is `JoJo's Bizarre Adventure…`. A raw
+  `"\(path)"` closes the quote at the apostrophe and the launcher runs the wrong thing.
+  `GameAppBuilder.shellQuote` emits `'JoJo'\''s …'`; verified in the generated output.
+- **`pgrep -x`, never `-f`, for the already-running check.** Same recurring bug class as
+  everywhere else in this file — `-f` matches the script's own argv.
+- **Do not try to raise a running Wine game from the script.** Its window belongs to
+  `winemac.drv`, no bundle `open -a` can name it, and driving it needs Accessibility. The first
+  draft shipped an `open -a <game folder>` that could only ever fail. It now exits quietly.
+- **Resolution order:** `directExecutable` → `steamAppID`/`-applaunch` → *exactly one* game
+  manifest in the prefix. That last fallback is what makes a plain new bottle work.
+- **Filter 228980 out of the manifest count.** "Steamworks Common Redistributables" is installed
+  beside almost every game, so a one-game prefix reports two manifests and looked ambiguous —
+  Half Sword produced no launcher until this was excluded (`AppModel.nonGameAppIDs`).
+- **Search one level deep for the exe.** UE titles ship a small top-level shim next to the real
+  binary: Half Sword's is `HalfSwordUE5/Binaries/Win64/…-Shipping.exe` (300 MB) beside a 0.3 MB
+  stub, so a top-level-only "biggest .exe" picks the stub.
+- Generated launchers take their DXMT settings from the BOTTLE, so they will not match the
+  hand-tuned bundles byte for byte (those used `metalSpatialUpscaleFactor=1.5` plus
+  `sampleNaNToZero`/`defuseFma`, and a per-game shader cache). The bottle is the source of truth
+  now; port anything worth keeping into the bottle's settings.
+
 ## Verification habits that mattered
 
 - **Screenshots beat logs.** `screencapture -x` + Read. Logs said "0 errors" while the screen was

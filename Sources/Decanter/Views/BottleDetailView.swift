@@ -16,6 +16,8 @@ struct BottleDetailView: View {
     @State private var confirmQuit = false
     @State private var quitting = false
     @State private var quitResult: String?
+    @State private var buildingApp = false
+    @State private var appResult: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -135,6 +137,21 @@ struct BottleDetailView: View {
                             .buttonStyle(.borderedProminent)
                             .disabled(launching)
 
+                            // Second launch path: a standalone .app for the game itself, so it can
+                            // be started from Finder, the Dock or Spotlight without opening
+                            // Decanter at all. Only appears when this bottle actually resolves to
+                            // a game — a plain Steam launcher bottle correctly has none.
+                            if model.resolvedGame(for: bottle) != nil {
+                                Button {
+                                    model.launchGameApp(in: bottle)
+                                } label: {
+                                    Label(buildingApp ? "Building…" : "Launch Game App",
+                                          systemImage: "gamecontroller.fill")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(buildingApp)
+                            }
+
                             // Decanter starts Steam; it must also be able to stop it. Without this
                             // a `-silent` Steam sits in the tray with no window and survives every
                             // attempt to quit it from Steam's own UI (closing the window just
@@ -163,6 +180,39 @@ struct BottleDetailView: View {
                         }
                         if let quitResult {
                             Text(quitResult).font(.caption).foregroundStyle(.secondary)
+                        }
+                        // The generated launcher bakes in the bottle's settings at build time, so
+                        // it goes stale when those change. Rebuilding is explicit rather than
+                        // automatic — silently rewriting a bundle the user may have moved or
+                        // renamed in Finder would be worse than an out-of-date one.
+                        if let game = model.resolvedGame(for: bottle) {
+                            HStack(spacing: 8) {
+                                Button(buildingApp ? "Rebuilding…" : "Rebuild Game App") {
+                                    buildingApp = true
+                                    appResult = nil
+                                    Task {
+                                        switch await model.buildGameApp(for: bottle) {
+                                        case .success(let url):
+                                            appResult = "Built \(url.lastPathComponent) in ~/Applications."
+                                        case .failure(let e):
+                                            appResult = e.localizedDescription
+                                        }
+                                        buildingApp = false
+                                    }
+                                }
+                                .disabled(buildingApp)
+                                if model.hasGameApp(for: bottle) {
+                                    Button("Show in Finder") {
+                                        NSWorkspace.shared.activateFileViewerSelecting(
+                                            [GameAppBuilder.destination(for: bottle)])
+                                    }
+                                }
+                            }
+                            Text("Game: \(game.executable.lastPathComponent)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let appResult {
+                            Text(appResult).font(.caption).foregroundStyle(.secondary)
                         }
                         if launching {
                             Text("Steam is opening — this can take a few seconds the first time.")
