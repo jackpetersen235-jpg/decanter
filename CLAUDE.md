@@ -383,23 +383,25 @@ backdrop goes with it, and the clear window shows through. Also use `.listStyle(
 Cost: the system sidebar behaviour. The collapse animation and its toggle button are gone, and the
 column width is now set explicitly (264pt) rather than managed.
 
-### Custom ButtonStyles have NO focus ring — an open accessibility gap
+### Custom ButtonStyles get no focus ring — FIXED, and the shape of the fix matters
 
-`ButtonStyleConfiguration` exposes `isPressed`, not focus, so a custom `ButtonStyle` cannot draw a
-focus ring from inside itself. macOS draws one automatically for SYSTEM styles, so every button
-using `.glass`, `.glassProminent` or `.bordered` is fine.
+`ButtonStyleConfiguration` exposes `isPressed`, **not focus**, so a custom `ButtonStyle` cannot draw
+a focus ring from inside itself. macOS draws one automatically for SYSTEM styles, so every button on
+`.glass`, `.glassProminent` or `.bordered` was always fine. `AeroButtonStyle` is custom, so Play and
+Launch Steam in Aero had none under Full Keyboard Access.
 
-`AeroButtonStyle` is custom, so **Play and Launch Steam in the Aero theme show no focus ring** under
-Full Keyboard Access. A `themedFocusRing` helper and `focusRing`/`focusRingWidth`/`focusRingOffset`
-tokens existed for this and were never applied to anything; both were deleted rather than left as
-dead code implying the problem was handled.
+The fix has to live **outside** the style: `@FocusState` on the view, `.focused(_:equals:)` on each
+button, and `aeroFocusRing(_:)` reading that. 2pt `#FFF9C4` at 2pt offset.
 
-The intended spec, if it is implemented later: **2pt `#FFF9C4` at 2pt offset**, driven by
-`@FocusState` on the button rather than from inside the style. The theme's own gloss is present
-whether or not a control has focus and can never serve as the indicator.
+Two things to keep right:
 
-The simplest fix is to stop using a custom style for those two buttons — which is exactly what
-switching Aero fully to glass would do, and was reverted by choice.
+- **It draws in Aero only.** System styles already have a ring; a second one over it is wrong.
+  `AeroFocusRing` checks the theme itself so a call site cannot get this wrong.
+- **The gloss is not a focus indicator.** It is present whether or not a control has focus.
+
+A first pass deleted the helper as "dead code" — it was dead because it had never been *applied*,
+which is the bug rather than evidence there wasn't one. When a helper exists and has zero call
+sites, check which of the two it is before removing it. `grep -c` on the call sites is the check.
 
 ### Accessibility cannot be verified by injecting the environment
 

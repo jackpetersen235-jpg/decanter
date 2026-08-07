@@ -20,6 +20,12 @@ struct BottleDetailView: View {
     @State private var appResult: String?
     @Environment(\.appTheme) private var appTheme
 
+    /// The two buttons that use a CUSTOM style in Aero, and so lose the focus ring macOS draws for
+    /// system styles. Everything else in the app is on `.glass`/`.glassProminent`/`.bordered` and
+    /// gets its ring for free.
+    private enum CustomStyledControl: Hashable { case play, launchSteam }
+    @FocusState private var focusedControl: CustomStyledControl?
+
     /// Header type is coloured for the Aero panel it sits on. In Liquid Glass there is no panel and
     /// the system chrome is dark, so the ink must not be forced there.
     private var isAero: Bool { appTheme == .frutigerAero }
@@ -165,6 +171,8 @@ struct BottleDetailView: View {
                                 // takes that hue rather than neutral gray. Liquid glass ignores
                                 // the accent and refracts instead.
                                 .themedButton(prominent: true, accent: AeroTokens.lime)
+                                .focused($focusedControl, equals: .play)
+                                .aeroFocusRing(focusedControl == .play)
                                 .disabled(buildingApp)
                             }
 
@@ -174,10 +182,14 @@ struct BottleDetailView: View {
                             if game == nil {
                                 Button { model.launchSteam(in: bottle) } label: { steamLabel(launching) }
                                     .themedButton(prominent: true)
+                                    .focused($focusedControl, equals: .launchSteam)
+                                    .aeroFocusRing(focusedControl == .launchSteam)
                                     .disabled(launching)
                             } else {
                                 Button { model.launchSteam(in: bottle) } label: { steamLabel(launching) }
                                     .themedButton()
+                                    .focused($focusedControl, equals: .launchSteam)
+                                    .aeroFocusRing(focusedControl == .launchSteam)
                                     .disabled(launching)
                             }
 

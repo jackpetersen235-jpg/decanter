@@ -155,6 +155,27 @@ struct SecondaryThemedButton: ViewModifier {
     }
 }
 
+/// Draws the focus ring only in Aero, and only when focused.
+///
+/// System styles (`.glass`, `.glassProminent`, `.bordered`) already get a focus ring from macOS,
+/// and drawing a second over it would be wrong. Only `AeroButtonStyle` — a CUSTOM style — suppresses
+/// the system ring, so only Aero needs this.
+struct AeroFocusRing: ViewModifier {
+    var focused: Bool
+    var cornerRadius: CGFloat = 6
+    @Environment(\.appTheme) private var theme
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if focused && theme == .frutigerAero {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(AeroTokens.focusRing, lineWidth: AeroTokens.focusRingWidth)
+                    .padding(-AeroTokens.focusRingOffset)
+            }
+        }
+    }
+}
+
 struct GlassGroup: ViewModifier {
     var spacing: CGFloat = 10
 
@@ -184,6 +205,11 @@ extension View {
     /// keep the active theme's own treatment — in Aero, painted gloss — so the eye still lands on
     /// them first. Everything else is secondary and recedes into glass, which is what keeps a row
     /// of eight controls from competing with the two that matter.
+    /// Focus ring for a control wearing a custom style. See `AeroFocusRing`.
+    func aeroFocusRing(_ focused: Bool, cornerRadius: CGFloat = 6) -> some View {
+        modifier(AeroFocusRing(focused: focused, cornerRadius: cornerRadius))
+    }
+
     func glassButton(prominent: Bool = false) -> some View {
         modifier(SecondaryThemedButton(prominent: prominent))
     }

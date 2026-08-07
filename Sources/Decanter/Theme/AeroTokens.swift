@@ -32,6 +32,18 @@ enum AeroTokens {
     static let ink = Color(red: 0.09, green: 0.13, blue: 0.17)
     static let inkSecondary = Color(red: 0.32, green: 0.38, blue: 0.44)
 
+    // MARK: Focus
+
+    /// Focus ring: 2pt at 2pt offset.
+    ///
+    /// Needed ONLY where a custom `ButtonStyle` is in play. `ButtonStyleConfiguration` exposes
+    /// `isPressed` but not focus, so a custom style suppresses the ring macOS would otherwise draw
+    /// for a system style. The theme's gloss is present whether or not a control has focus and can
+    /// never serve as the indicator.
+    static let focusRing = Color(red: 1.0, green: 0.976, blue: 0.769)    // #FFF9C4
+    static let focusRingWidth: CGFloat = 2
+    static let focusRingOffset: CGFloat = 2
+
     // MARK: Shadows
 
     /// Shadows take the HUE OF THEIR OBJECT, never neutral gray.
