@@ -112,11 +112,9 @@ struct ContentView: View {
             wineStatusFooter
         }
         .frame(minWidth: 240)
-        // NO glass here. Apple's guidance is that Liquid Glass belongs to the navigation layer
-        // that floats ABOVE content, and names content layers, full-screen backgrounds and
-        // scrollable content as things it must not be applied to. A sidebar holding a scrollable
-        // list is all three — which is why every attempt to glass it read as a tinted translucent
-        // panel rather than as glass. The standard sidebar material is the correct treatment.
+        // Floated and inset so the material has four visible edges to refract along. Full-bleed,
+        // the rim — where the whole effect lives — is clipped off and only a flat tint remains.
+        .glassPane(cornerRadius: 18, inset: 10)
     }
 
     @ViewBuilder
