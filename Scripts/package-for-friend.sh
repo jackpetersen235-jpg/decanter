@@ -69,6 +69,13 @@ MD
 
 # Keep the diagnostic runnable when double-clicked from Finder as well as `bash doctor.command`.
 
+# The updater. Replacing an app in place is a two-click job for someone who knows the trick and a
+# delete-and-reinstall for everyone else — and reinstalling re-triggers the Gatekeeper dance every
+# time. This does the swap, clears the download quarantine and re-signs, so the updated app opens
+# normally afterwards. It never touches Application Support, where the bottles and saves live.
+cp "$ROOT/Scripts/updater-template.command" "$STAGE/UPDATE Decanter.command"
+chmod +x "$STAGE/UPDATE Decanter.command"
+
 # Ship the debugging guide alongside the app. If the friend asks an AI for help, that assistant
 # lands in a machine it has never seen; the guide is written for exactly that situation.
 [ -f "$ROOT/docs/DEBUGGING-GUIDE.md" ] && \

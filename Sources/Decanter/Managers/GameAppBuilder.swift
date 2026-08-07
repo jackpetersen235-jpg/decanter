@@ -181,7 +181,19 @@ enum GameAppBuilder {
         ]
         _ = path
 
-        if game.appID != nil {
+        // START STEAM FOR ANY GAME LIVING IN A STEAM LIBRARY, not only ones whose app id we know.
+        //
+        // This was gated on `game.appID != nil`, which conflated two different needs. The app id is
+        // required for the `SteamAppId` ENV VAR; it has nothing to do with whether the client must
+        // be running. Steam-DRM'd titles ship their own `Steam.dll` beside the executable and that
+        // DLL fails without a live client — Peggle Deluxe died with "Unable to load Steam.dll" on a
+        // launcher that, verified, contained zero references to steam.exe.
+        //
+        // Keyed on the path rather than the id: anything under `steamapps` came from Steam and may
+        // carry its DRM, whether or not the manifest resolved. A game chosen by hand from outside a
+        // Steam library still skips this, which is right — it has no reason to want Steam at all.
+        let livesInSteamLibrary = game.executable.path.contains("/steamapps/")
+        if game.appID != nil || livesInSteamLibrary {
             let steamDir = steamExecutable.deletingLastPathComponent()
             let connLog = steamDir.appendingPathComponent("logs/connection_log.txt")
             // -silent is right HERE and nowhere else: Steam is only a DRM host for this launch, so
