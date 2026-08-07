@@ -125,31 +125,34 @@ struct BottleDetailView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         HStack {
-                            Button {
-                                model.launchSteam(in: bottle)
-                            } label: {
-                                if launching {
-                                    Label("Opening…", systemImage: "hourglass")
-                                } else {
-                                    Label("Launch Steam", systemImage: "play.fill")
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(launching)
-
-                            // Second launch path: a standalone .app for the game itself, so it can
-                            // be started from Finder, the Dock or Spotlight without opening
-                            // Decanter at all. Only appears when this bottle actually resolves to
-                            // a game — a plain Steam launcher bottle correctly has none.
-                            if model.resolvedGame(for: bottle) != nil {
+                            // PLAY COMES FIRST. On a game bottle this is what the user came here
+                            // to do — Steam is only the delivery mechanism — so it leads, and the
+                            // Steam button steps down to secondary styling beside it. Absent on a
+                            // plain launcher bottle, where "Launch Steam" is the primary action
+                            // and keeps its prominence.
+                            let game = model.resolvedGame(for: bottle)
+                            if game != nil {
                                 Button {
                                     model.launchGameApp(in: bottle)
                                 } label: {
-                                    Label(buildingApp ? "Building…" : "Launch Game App",
+                                    Label(buildingApp ? "Building…" : "Play",
                                           systemImage: "gamecontroller.fill")
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .disabled(buildingApp)
+                            }
+
+                            // Two spellings of the same button because SwiftUI's ButtonStyle is not
+                            // type-erasable without a wrapper, and one small duplication reads
+                            // better here than a custom AnyButtonStyle would.
+                            if game == nil {
+                                Button { model.launchSteam(in: bottle) } label: { steamLabel(launching) }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(launching)
+                            } else {
+                                Button { model.launchSteam(in: bottle) } label: { steamLabel(launching) }
+                                    .buttonStyle(.bordered)
+                                    .disabled(launching)
                             }
 
                             // Decanter starts Steam; it must also be able to stop it. Without this
@@ -187,7 +190,7 @@ struct BottleDetailView: View {
                         // renamed in Finder would be worse than an out-of-date one.
                         if let game = model.resolvedGame(for: bottle) {
                             HStack(spacing: 8) {
-                                Button(buildingApp ? "Rebuilding…" : "Rebuild Game App") {
+                                Button(buildingApp ? "Rebuilding…" : "Rebuild Launcher") {
                                     buildingApp = true
                                     appResult = nil
                                     Task {
@@ -208,7 +211,11 @@ struct BottleDetailView: View {
                                     }
                                 }
                             }
-                            Text("Game: \(game.executable.lastPathComponent)")
+                            // Name what Play will actually start. The resolver picks the biggest
+                            // executable, and on UE titles that is a deep Shipping.exe rather than
+                            // the obvious top-level one — worth showing so a wrong pick is visible
+                            // rather than mysterious.
+                            Text("Play starts \(game.executable.lastPathComponent)")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         if let appResult {
@@ -252,6 +259,15 @@ struct BottleDetailView: View {
             }
         }
         .padding(16)
+    }
+
+    @ViewBuilder
+    private func steamLabel(_ launching: Bool) -> some View {
+        if launching {
+            Label("Opening…", systemImage: "hourglass")
+        } else {
+            Label("Launch Steam", systemImage: "arrow.up.forward.app.fill")
+        }
     }
 
     private func infoRow(_ label: String, _ value: String, mono: Bool = false) -> some View {
