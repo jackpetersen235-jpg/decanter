@@ -124,6 +124,77 @@ final class AppModel: ObservableObject {
                 exit(0)
             }
         }
+        // Full health check: is the RIGHT engine installed, and is everything loaded?
+        //
+        // Deeper than `doctor.sh` can go from the shell, because it uses the app's own probes —
+        // notably `supportsFastSync`, which reads the ntdll for `WINEMSYNC`/`WINEESYNC` rather than
+        // trusting a version number. A wine 10 without msync looks identical from outside and is
+        // the difference between smooth play and frame spikes.
+        //   Decanter.app/Contents/MacOS/Decanter --verify
+        if CommandLine.arguments.contains("--verify") {
+          Task {
+            var out = "\n=== Decanter verification ===\n\n"
+            var problems: [String] = []
+            func line(_ ok: Bool, _ label: String, _ detail: String = "") {
+                out += "  \(ok ? "OK  " : "FAIL") \(label)\(detail.isEmpty ? "" : "  —  \(detail)")\n"
+                if !ok { problems.append(label) }
+            }
+
+            out += "SYSTEM\n"
+            line(isRosettaInstalled, "Rosetta 2 installed",
+                 isRosettaInstalled ? "" : "run: softwareupdate --install-rosetta")
+
+            out += "\nENGINE\n"
+            if let engine = defaultInstallation {
+                // Ask the engine directly rather than reading `engine.version`. That field is
+                // filled in ASYNCHRONOUSLY after discovery, so a synchronous check sees nil and
+                // reports a perfectly good engine as incomplete — which this hook did on its first
+                // run. A health check that invents problems is worse than no health check.
+                let reportedVersion = await Wine.version(of: engine)
+                line(true, "Engine found", "\(engine.name) \(reportedVersion ?? "version unknown")")
+                line(reportedVersion != nil, "Engine version readable",
+                     reportedVersion ?? "wine --version returned nothing; the engine may be incomplete")
+                line(engine.isSteamCapable, "New enough for Steam",
+                     engine.isSteamCapable ? "" : "too old — Steam will fail to start")
+                // The check that matters most and is invisible from outside.
+                line(engine.supportsFastSync, "Fast sync (msync) present",
+                     engine.supportsFastSync
+                        ? "this is the tuned build"
+                        : "WRONG BUILD — plays with frame spikes; reinstall via Setup Assistant")
+                line(FileManager.default.isExecutableFile(atPath: engine.loader.path),
+                     "wine binary is executable", engine.loader.path)
+            } else {
+                line(false, "Engine found", "none — run the Setup Assistant")
+            }
+            line(Paths.bundledDXMT != nil, "DXMT graphics payload bundled",
+                 Paths.bundledDXMT == nil ? "games will fall back to the slow renderer" : "")
+
+            out += "\nBOTTLES (\(bottles.count))\n"
+            if bottles.isEmpty { line(false, "At least one bottle", "none yet — press the setup button") }
+            for bottle in bottles {
+                out += "\n  [\(bottle.name)]\n"
+                line(bottle.isInitialized, "  prefix initialised")
+                line(bottle.isSteamInstalled, "  Steam installed")
+                line(bottle.isSteamBootstrapped, "  Steam client downloaded",
+                     bottle.isSteamBootstrapped ? "" : "launch Steam once and WAIT — it downloads itself")
+                if let game = resolvedGame(for: bottle) {
+                    line(FileManager.default.fileExists(atPath: game.executable.path),
+                         "  game executable present", game.executable.lastPathComponent)
+                    line(GameAppBuilder.isCurrent(for: bottle), "  launcher up to date",
+                         GameAppBuilder.isCurrent(for: bottle)
+                            ? "" : "will rebuild itself on next Play")
+                } else {
+                    out += "       --  no game (this is a launcher bottle)\n"
+                }
+            }
+
+            out += problems.isEmpty
+                ? "\nEverything checks out.\n"
+                : "\n\(problems.count) problem(s): \(problems.map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: ", "))\n"
+            FileHandle.standardError.write(out.data(using: .utf8)!)
+            exit(problems.isEmpty ? 0 : 1)
+          }
+        }
         // What the New Bottle picker will offer.
         //   Decanter.app/Contents/MacOS/Decanter --scan-games
         if CommandLine.arguments.contains("--scan-games") {

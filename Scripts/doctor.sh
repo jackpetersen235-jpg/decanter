@@ -148,3 +148,19 @@ fi
 echo
 info "Reference for a helper (or Claude Code): docs/SETUP-WITH-CLAUDE.md"
 echo
+
+# ---------------------------------------------------------------------------
+# Deep check, if the app is installed.
+#
+# The shell can see files; only Decanter can tell you whether the engine is the
+# RIGHT build. `supportsFastSync` reads the ntdll for WINEMSYNC/WINEESYNC rather
+# than trusting a version number — a wine 10 without msync looks identical from
+# out here and is the difference between smooth play and frame spikes.
+# ---------------------------------------------------------------------------
+for APP in "/Applications/Decanter.app" "$HOME/Applications/Decanter.app"; do
+    if [ -x "$APP/Contents/MacOS/Decanter" ]; then
+        echo
+        "$APP/Contents/MacOS/Decanter" --verify 2>&1
+        break
+    fi
+done
