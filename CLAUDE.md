@@ -317,6 +317,30 @@ reimplementing things Apple already ships.
 - Third-party lensing libraries exist (BarredEwe/LiquidGlass, DnV1eX/LiquidGlassKit) but the ones
   checked are **iOS-only** — no help here.
 
+### Accessibility cannot be verified by injecting the environment
+
+`\.accessibilityReduceTransparency` and `\.accessibilityReduceMotion` are **read-only**
+`KeyPath`s, not `WritableKeyPath`s — `.environment(...)` will not compile against them. A launch
+flag that forces one on for verification is therefore impossible; the attempt was removed rather
+than left as dead scaffolding.
+
+Two consequences:
+
+1. **These settings can only be checked by toggling them for real** in System Settings ▸
+   Accessibility ▸ Display. Restart the app afterwards.
+2. **Never set those keys unconditionally.** The first draft applied all three every launch, so
+   with no flag they were forced to `false`/`.standard` — a machine with Reduce Transparency
+   genuinely on would have had the app switch it off. An accessibility aid that disables
+   accessibility is worse than none.
+
+Reduce Motion has nothing to switch off here by design: bubbles come from a fixed table and never
+animate, and the pressed state is a flat darkening rather than a transition.
+
+What to look for when checking by hand:
+- **Reduce transparency** — gloss flattens to a wash, bubbles disappear, glass controls turn
+  opaque, the sidebar loses its material.
+- **Increase contrast** — Aero button fills darken by 18% (`AeroButtonStyle`).
+
 ## Verification habits that mattered
 
 - **Screenshots beat logs.** `screencapture -x` + Read. Logs said "0 errors" while the screen was
