@@ -69,6 +69,11 @@ MD
 
 # Keep the diagnostic runnable when double-clicked from Finder as well as `bash doctor.command`.
 
+# Ship the debugging guide alongside the app. If the friend asks an AI for help, that assistant
+# lands in a machine it has never seen; the guide is written for exactly that situation.
+[ -f "$ROOT/docs/DEBUGGING-GUIDE.md" ] && \
+  cp "$ROOT/docs/DEBUGGING-GUIDE.md" "$STAGE/DEBUGGING GUIDE (for an AI helper).md"
+
 cat > "$STAGE/READ ME FIRST.txt" <<'TXT'
 DECANTER — play Windows games on your Mac
 ==========================================

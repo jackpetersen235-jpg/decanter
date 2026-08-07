@@ -9,6 +9,10 @@ Two separate things live here, and they are **not currently in sync**:
 2. **A working Sekiro setup** (outside this repo) — `~/Applications/Sekiro.app`, hand-tuned.
    This is what actually runs the game. Decanter's bottle metadata is **stale** relative to it.
 
+> **Debugging this on someone else's Mac?** Start at
+> [`docs/DEBUGGING-GUIDE.md`](docs/DEBUGGING-GUIDE.md) — triage commands, symptom→cause tables, the
+> investigation habits that caught this project's wrong answers, and what to do when the answer is
+> "that is impossible".
 > Deep technical findings: [`docs/GAMING-STACK.md`](docs/GAMING-STACK.md) ← **read before touching
 > anything Wine-related; it documents dead ends that cost hours.**
 > Every file/download/path: [`docs/INVENTORY.md`](docs/INVENTORY.md)
