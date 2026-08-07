@@ -60,6 +60,13 @@ enum AeroTokens {
 
     // MARK: Atmosphere
 
+    /// Haze at the very top of the sky.
+    ///
+    /// Close to the toolbar's own near-white. Without it the sky began at full-saturation
+    /// `skyTop` directly beneath the light toolbar and left a hard horizontal seam across the
+    /// window. Real skies wash out toward the top of frame anyway, so this reads as atmosphere
+    /// rather than as a fix.
+    static let skyHaze = Color(red: 0.90, green: 0.95, blue: 0.99)
     static let skyTop = Color(red: 0.42, green: 0.74, blue: 0.94)
     static let skyBottom = Color(red: 0.82, green: 0.93, blue: 0.98)
     static let grass = Color(red: 0.38, green: 0.68, blue: 0.24)

@@ -28,8 +28,14 @@ struct AeroAtmosphere: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                LinearGradient(colors: [AeroTokens.skyTop, AeroTokens.skyBottom],
-                               startPoint: .top, endPoint: .bottom)
+                // Three stops, not two. The first is haze at the top so the sky meets the light
+                // toolbar without a visible seam — starting straight at `skyTop` put a hard
+                // horizontal edge across the window where the two met.
+                LinearGradient(stops: [
+                    .init(color: AeroTokens.skyHaze, location: 0.00),
+                    .init(color: AeroTokens.skyTop, location: 0.22),
+                    .init(color: AeroTokens.skyBottom, location: 1.00),
+                ], startPoint: .top, endPoint: .bottom)
 
                 if !reduceTransparency {
                     ForEach(Array(Self.bubbles.enumerated()), id: \.offset) { _, b in

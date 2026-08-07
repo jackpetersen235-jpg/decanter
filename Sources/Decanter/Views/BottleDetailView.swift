@@ -18,6 +18,11 @@ struct BottleDetailView: View {
     @State private var quitResult: String?
     @State private var buildingApp = false
     @State private var appResult: String?
+    @Environment(\.appTheme) private var appTheme
+
+    /// Header type is coloured for the Aero panel it sits on. In Liquid Glass there is no panel and
+    /// the system chrome is dark, so the ink must not be forced there.
+    private var isAero: Bool { appTheme == .frutigerAero }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -68,9 +73,18 @@ struct BottleDetailView: View {
                 .font(.system(size: 30))
                 .foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
+                // Dark ink on the light chrome panel, with the 1pt white shadow below — the
+                // period treatment, and the pairing that measures 14.76:1. White type was tried
+                // first and cannot work here: the gloss lightens the top of the panel far too much
+                // for it to hold.
                 Text(bottle.name).font(.title2.bold())
+                    .foregroundStyle(isAero ? AnyShapeStyle(AeroTokens.ink)
+                                            : AnyShapeStyle(.primary))
+                    .aeroTextShadow(isAero)
                 Text(model.installation(for: bottle)?.name ?? "No Wine build")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption)
+                    .foregroundStyle(isAero ? AnyShapeStyle(AeroTokens.inkSecondary)
+                                            : AnyShapeStyle(.secondary))
             }
             Spacer()
             if !bottle.isInitialized {
@@ -79,6 +93,13 @@ struct BottleDetailView: View {
             }
         }
         .padding(16)
+        // A raised rounded panel rather than a full-width band of colour. The band met the content
+        // below in a straight square edge, which read as a seam next to a UI that is rounded and
+        // has depth everywhere else. Inset so the panel visibly floats instead of butting into the
+        // window edges. No-op in Liquid Glass.
+        .aeroPanel(cornerRadius: 14)
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
     }
 
     // MARK: Overview

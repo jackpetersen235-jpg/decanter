@@ -51,10 +51,69 @@ struct AeroGloss: ViewModifier {
     }
 }
 
+/// Applies the raised panel only in Aero. Liquid Glass has its own depth model and must not get a
+/// painted one layered on top.
+struct ThemedPanel: ViewModifier {
+    var cornerRadius: CGFloat = 12
+    var tint: Color = AeroTokens.aqua
+    @Environment(\.appTheme) private var theme
+
+    func body(content: Content) -> some View {
+        switch theme {
+        case .liquidGlass:  content
+        case .frutigerAero: content.modifier(AeroPanel(cornerRadius: cornerRadius, tint: tint))
+        }
+    }
+}
+
+/// A raised, rounded Aero panel — the surface treatment for headers and grouped areas.
+///
+/// Exists because a flat band of colour meeting the content below in a straight square edge reads
+/// as a rendering seam, not as a design. Everything else in this theme is rounded and has depth,
+/// so a full-width rectangle is the one element that looks unfinished. This gives the band the
+/// same vocabulary as the buttons: rounded corners, a vertical fill, the same painted gloss, a
+/// bright top bevel and a hue-matched drop shadow.
+struct AeroPanel: ViewModifier {
+    var cornerRadius: CGFloat = 12
+    var tint: Color = AeroTokens.chromeTop
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    // OPAQUE. The gloss is defined as painting over an object's own fill, so a
+                    // translucent one breaks it: the first attempt used a 38%-opacity tint, the sky
+                    // showed through, and the 0.72 top stop washed the upper half to near-white
+                    // while the lower half stayed mid-blue. It read as two stacked bands rather
+                    // than one raised object, and no text colour was legible across both.
+                    .fill(LinearGradient(colors: [tint, AeroTokens.chromeBottom],
+                                         startPoint: .top, endPoint: .bottom))
+            }
+            .aeroGloss(cornerRadius: cornerRadius)
+            .overlay {
+                // Two-tone edge: a bright top rim and a darker lower rim is what makes a surface
+                // read as raised rather than as a coloured rectangle with a border.
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(colors: [.white.opacity(0.85), .black.opacity(0.22)],
+                                       startPoint: .top, endPoint: .bottom),
+                        lineWidth: 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            // Hue-matched to the panel, like every other shadow in the theme.
+            .shadow(color: AeroTokens.shadow(for: AeroTokens.chromeBottom), radius: 5, x: 0, y: 3)
+    }
+}
+
 extension View {
     /// Paint the Aero gloss over this view. See `AeroGloss` before changing any number.
     func aeroGloss(cornerRadius: CGFloat = 6) -> some View {
         modifier(AeroGloss(cornerRadius: cornerRadius))
+    }
+
+    /// Raised rounded panel — Aero only, a no-op in Liquid Glass.
+    func aeroPanel(cornerRadius: CGFloat = 12, tint: Color = AeroTokens.aqua) -> some View {
+        modifier(ThemedPanel(cornerRadius: cornerRadius, tint: tint))
     }
 
     /// The period text treatment: dark type on a light fill gets a 1pt white shadow BELOW it.
