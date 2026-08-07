@@ -18,9 +18,14 @@ enum GameAppBuilder {
         let name: String
         let folder: URL
         let executable: URL
-        /// Steam's numeric app id. `steam_api64.dll` needs it in the environment because Steam is
-        /// not the one spawning the process on this path.
+        /// Steam's numeric app id.
         let appID: String?
+        /// True when the bottle explicitly names a `directExecutable`.
+        ///
+        /// That setting exists for titles whose Steam entry point is an anti-cheat shim (JJBA),
+        /// where going through Steam runs the wrong binary. Everywhere else, a Steam game should be
+        /// started BY Steam — see `launcherScript`.
+        var prefersDirectLaunch: Bool = false
     }
 
     enum BuildError: LocalizedError {
@@ -45,7 +50,7 @@ enum GameAppBuilder {
     /// The stamp goes into the script as a comment; `isCurrent` compares it and the app rebuilds on
     /// mismatch. BUMP THIS when you change the script, or the fix will not reach anyone who already
     /// has a launcher.
-    static let generatorVersion = 3
+    static let generatorVersion = 4
     private static let stampPrefix = "# decanter-launcher-version:"
 
     /// Does this bottle's launcher exist AND come from the current generator?
@@ -269,6 +274,28 @@ enum GameAppBuilder {
                 "fi",
                 "",
             ]
+        }
+
+        // LAUNCH VIA STEAM WHEN WE CAN, not by running the .exe.
+        //
+        // Legacy Steam DRM (`Steam.dll`, which older Steamworks titles ship beside the binary) does
+        // not merely require the client to be RUNNING — it requires the game to have been STARTED
+        // BY Steam. Running the executable directly fails the handshake even with the client up and
+        // `SteamAppId` exported, which is why Peggle Deluxe kept reporting "Unable to load
+        // Steam.dll" after the client-start fix.
+        //
+        // Direct execution is kept only where it was chosen deliberately (`directExecutable`, for
+        // titles whose Steam entry point is an anti-cheat shim) or where no app id is known.
+        if let id = game.appID, !id.isEmpty, !game.prefersDirectLaunch {
+            lines += [
+                "# Started BY Steam, not directly: legacy Steam DRM checks the parent, not just that",
+                "# a client is running. Decanter's own Launch button has always done it this way.",
+                "log 'Asking Steam to launch app id \(id).'",
+                "cd \"$GAME_DIR\" 2>/dev/null || true",
+                "exec \"$WINE\" \(q(steamExecutable.path)) -applaunch \(id)",
+                "",
+            ]
+            return lines.joined(separator: "\n")
         }
 
         lines += [

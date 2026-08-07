@@ -630,14 +630,13 @@ final class AppModel: ObservableObject {
 
         let direct = (bottle.settings.directExecutable ?? "").trimmingCharacters(in: .whitespaces)
         if !direct.isEmpty {
-            let exe = direct.hasPrefix("/")
-                ? URL(fileURLWithPath: direct)
-                : bottle.driveC.appendingPathComponent(direct)
-            if fm.fileExists(atPath: exe.path) {
+            if let exe = Self.resolveStoredExecutable(direct, driveC: bottle.driveC),
+               fm.fileExists(atPath: exe.path) {
                 return GameAppBuilder.Game(name: bottle.name,
                                            folder: exe.deletingLastPathComponent(),
                                            executable: exe,
-                                           appID: appID)
+                                           appID: appID,
+                                           prefersDirectLaunch: true)
             }
         }
 
@@ -673,6 +672,37 @@ final class AppModel: ObservableObject {
         guard let exe = GameScanner.largestExecutable(in: folder) else { return nil }
         return GameAppBuilder.Game(name: acfValue("name", in: text) ?? bottle.name,
                                    folder: folder, executable: exe, appID: appID)
+    }
+
+    /// Turn a stored executable path into a real macOS URL.
+    ///
+    /// `directExecutable` is written by whatever produced it, and in practice that is a **quoted
+    /// Windows path**: `"C:\Program Files (x86)\Steam\steamapps\common\…\ASBR.exe"`. The
+    /// original code only handled macOS paths — anything not starting with `/` was appended to
+    /// `drive_c` verbatim, quotes and backslashes and all, producing a path that can never exist.
+    ///
+    /// So `directExecutable` never resolved for ANY bottle. JJBA appeared to work only because it
+    /// fell through to the app-id branch; the setting that exists precisely to bypass Steam was
+    /// silently doing nothing.
+    ///
+    /// Handles, in order: surrounding quotes, absolute macOS paths, `X:\…` drive letters, and
+    /// backslash-separated relative paths.
+    static func resolveStoredExecutable(_ raw: String, driveC: URL) -> URL? {
+        var s = raw.trimmingCharacters(in: .whitespaces)
+        if s.count >= 2, s.hasPrefix("\""), s.hasSuffix("\"") { s = String(s.dropFirst().dropLast()) }
+        guard !s.isEmpty else { return nil }
+
+        if s.hasPrefix("/") { return URL(fileURLWithPath: s) }
+
+        // Drive letter: "C:\rest" or "C:/rest". Everything after the colon-separator is relative
+        // to drive_c — Decanter only ever maps one drive.
+        let chars = Array(s)
+        if chars.count > 2, chars[1] == ":" {
+            var rest = String(chars.dropFirst(2))
+            while rest.hasPrefix("\\") || rest.hasPrefix("/") { rest = String(rest.dropFirst()) }
+            return driveC.appendingPathComponent(rest.replacingOccurrences(of: "\\", with: "/"))
+        }
+        return driveC.appendingPathComponent(s.replacingOccurrences(of: "\\", with: "/"))
     }
 
     /// The bottle's Steam app id, from the explicit setting or parsed out of `-applaunch <id>`.

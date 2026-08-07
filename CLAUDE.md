@@ -269,6 +269,38 @@ BASE=$(count); BASE=${BASE:-0}
 covers the genuinely-empty case. Verified across all three: missing file, present-but-empty, and
 populated.
 
+### `directExecutable` is stored as a QUOTED WINDOWS PATH and never resolved
+
+The stored value looks like:
+
+```
+"C:\Program Files (x86)\Steam\steamapps\common\JoJo's …\ASBR.exe"
+```
+
+`resolvedGame` only handled macOS paths — anything not starting with `/` was appended to `drive_c`
+verbatim, quotes and `C:\` and backslashes included, producing a path that cannot exist. So
+**`directExecutable` never resolved for any bottle**, and the setting that exists specifically to
+bypass Steam was silently doing nothing. JJBA appeared to work only because it fell through to the
+app-id branch.
+
+`AppModel.resolveStoredExecutable` now strips surrounding quotes, passes absolute macOS paths
+through, maps `X:\…` onto `drive_c`, and converts backslashes.
+
+### Steam-DRM games must be launched BY Steam, not merely with Steam running
+
+Older Steamworks titles ship `Steam.dll` beside the executable, and it checks that the game was
+**started by Steam** — not just that a client is up. Running the `.exe` directly fails the handshake
+even with the client running and `SteamAppId` exported. Peggle Deluxe kept reporting "Unable to load
+Steam.dll" through two fixes aimed at the wrong thing before this was understood.
+
+Generated launchers therefore `exec wine steam.exe -applaunch <id>` whenever an app id is known.
+Direct execution survives only where it was chosen deliberately — `directExecutable`, for titles
+whose Steam entry point is an anti-cheat shim — or where no app id exists.
+
+**These two interact, and the interaction bit.** Making launchers prefer `-applaunch` regressed JJBA
+onto the EAC shim, because its `directExecutable` was not resolving and so `prefersDirectLaunch`
+never became true. Both had to be fixed together; verify BOTH after touching either.
+
 ### Generated launchers must LOG, or every failure looks the same
 
 A missing executable, a Steam that never logs in, and the already-running guard firing on a stale
