@@ -17,10 +17,24 @@ struct AeroAtmosphere: View {
     /// Bubbles are seeded from a fixed table rather than `random()` so the layout is identical on
     /// every launch and every redraw. A view body that produces new randomness each time it runs
     /// makes the backdrop flicker as SwiftUI re-evaluates.
+    /// Positions are kept OUT of the two regions that hold text: the sidebar's list (roughly the
+    /// left quarter) and the detail pane's label column (upper-middle). Bubbles are pushed to the
+    /// margins, the corners and the empty lower half instead.
+    ///
+    /// This matters more now that the backdrop runs the full width of the window. It has to, or
+    /// the floating glass panes have nothing to refract — but texture that gives glass its edge
+    /// also sits behind body copy, and a bubble rim crossing a row of text is exactly the kind of
+    /// decoration that must never compete with a label.
     private static let bubbles: [(x: CGFloat, y: CGFloat, r: CGFloat, o: Double)] = [
-        (0.08, 0.22, 46, 0.20), (0.19, 0.63, 22, 0.16), (0.31, 0.14, 15, 0.22),
-        (0.44, 0.78, 34, 0.14), (0.57, 0.31, 26, 0.18), (0.66, 0.69, 18, 0.15),
-        (0.74, 0.19, 40, 0.13), (0.86, 0.52, 24, 0.19), (0.93, 0.83, 30, 0.12),
+        (0.16, 0.05, 26, 0.18),      // above the sidebar list, beside the traffic lights
+        (0.06, 0.90, 34, 0.15),      // below it, in the footer margin
+        (0.36, 0.92, 30, 0.14),      // empty lower band of the detail pane
+        (0.53, 0.85, 22, 0.16),
+        (0.68, 0.95, 18, 0.13),
+        (0.72, 0.08, 40, 0.14),      // top-right, clear of the header panel's text
+        (0.88, 0.26, 24, 0.18),
+        (0.94, 0.62, 32, 0.15),      // right margin, past the value column
+        (0.83, 0.88, 20, 0.12),
     ]
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -102,7 +116,50 @@ struct ThemedBackground: ViewModifier {
     }
 }
 
+/// The backdrop ALONE, with no ink or chrome changes.
+///
+/// Split out from `ThemedBackground` because the two now belong at different levels: the atmosphere
+/// has to span the whole window so the floating glass panes have something to refract, while the
+/// ink and light-chrome treatment belongs only to the detail column — applying it window-wide would
+/// force the sidebar's own text to a colour chosen for a different surface.
+struct ThemedAtmosphere: ViewModifier {
+    @Environment(\.appTheme) private var theme
+
+    func body(content: Content) -> some View {
+        switch theme {
+        case .liquidGlass:  content
+        case .frutigerAero: content.background { AeroAtmosphere() }
+        }
+    }
+}
+
+/// The ink and light-chrome treatment ALONE, with no backdrop.
+///
+/// Paired with `ThemedAtmosphere`: the backdrop spans the window, this applies only to the surface
+/// whose colours it was chosen against. Forcing it window-wide would recolour the sidebar's text
+/// for a surface it no longer sits on.
+struct AeroInk: ViewModifier {
+    @Environment(\.appTheme) private var theme
+
+    func body(content: Content) -> some View {
+        switch theme {
+        case .liquidGlass:  content
+        case .frutigerAero: content.aeroLightChrome()
+        }
+    }
+}
+
 extension View {
+    /// Aero ink + light system chrome, without painting a backdrop. No-op in Liquid Glass.
+    func aeroInk() -> some View {
+        modifier(AeroInk())
+    }
+
+    /// Paint the theme's backdrop behind this view, changing nothing else.
+    func themedAtmosphere() -> some View {
+        modifier(ThemedAtmosphere())
+    }
+
     /// - Parameter restrained: pass `true` for dense screens (see `ThemedBackground`).
     func themedBackground(restrained: Bool = false) -> some View {
         modifier(ThemedBackground(restrained: restrained))

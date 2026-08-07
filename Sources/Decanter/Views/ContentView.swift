@@ -18,15 +18,16 @@ struct ContentView: View {
                 // The wizard is a single full-window pane with no sidebar, so it still takes the
                 // backdrop directly.
                 SetupWizard(dismiss: (showingWizard && !model.isSettingUp) ? { showingWizard = false } : nil)
-                    .themedBackground()
+                    .aeroInk()
             } else {
                 splitView
             }
         }
-        // NOT applied window-wide any more. The atmosphere is an OPAQUE sky gradient, and while it
-        // painted behind the sidebar the sidebar's glass had only that to refract — so it came out
-        // as flat pale blue and read as nothing like glass. Glass needs the desktop behind it, so
-        // the backdrop is now scoped to the detail column and the sidebar is left transparent.
+        // The BACKDROP spans the whole window, deliberately — the floating glass panes need
+        // something behind them to refract, and a flat window fill gives them nothing. Only the
+        // backdrop is applied here; the ink/light-chrome treatment stays on the detail column,
+        // which is the surface it was chosen against.
+        .themedAtmosphere()
         .sheet(isPresented: $showingCreate) { CreateBottleSheet() }
         .sheet(isPresented: $showingSetup) { SetupSheet() }
         .sheet(item: $model.activeConsole) { console in
@@ -69,7 +70,7 @@ struct ContentView: View {
             // sidebar keeps its inset, because the traffic lights float there.
             detail
                 .ignoresSafeArea(.container, edges: .top)
-                .themedBackground()
+                .aeroInk()
         }
     }
 
