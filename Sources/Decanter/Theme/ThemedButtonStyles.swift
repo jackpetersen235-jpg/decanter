@@ -53,48 +53,37 @@ struct AeroButtonStyle: ButtonStyle {
     }
 }
 
-/// A clear Liquid Glass button — refractive, picking up whatever sits behind it.
+/// Apple's OWN Liquid Glass button styles.
 ///
-/// The genuine `.glassEffect(.clear,…)` needs macOS 26. The package deploys to macOS 14, so older
-/// systems get a translucent material fallback rather than failing to build. That fallback is NOT
-/// the same effect and is not used for Aero anywhere — Aero gloss is painted (see `AeroGloss`).
-struct LiquidGlassButtonStyle: ButtonStyle {
+/// This replaces a hand-rolled `ButtonStyle` that padded a label and applied `.glassEffect(…, in:
+/// .capsule)` to it. That was the reason the buttons never looked right: reimplementing a control
+/// Apple already ships gets the material but none of the rest of it — the real metrics, the
+/// concentric corner radius, the press and hover behaviour, the way the system tunes the material
+/// specifically for controls, and the automatic light/dark adaptation. `.glassEffect` is for
+/// applying glass to CUSTOM views; a button is not a custom view.
+///
+/// `.glass` and `.glassProminent` need macOS 26. The package deploys to macOS 14, so older systems
+/// get bordered styles rather than failing to build.
+struct NativeGlassButton: ViewModifier {
     var prominent: Bool = false
-
-    @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
-    func makeBody(configuration: Configuration) -> some View {
-        let label = configuration.label
-            .font(.system(size: 13, weight: .medium))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-
-        return Group {
-            if reduceTransparency {
-                // Reduce Transparency means an opaque fill, not a thinner glass.
-                label.background(
-                    Capsule().fill(prominent ? Color.accentColor : Color(nsColor: .controlColor)))
-                    .foregroundStyle(prominent ? .white : Color(nsColor: .labelColor))
-            } else if #available(macOS 26.0, *) {
-                label
-                    .foregroundStyle(prominent ? .white : Color(nsColor: .labelColor))
-                    // `.regular`, not `.clear`. `.clear` is the high-transparency variant and needs
-                    // busy content behind it to register at all — over a flat pane it is close to
-                    // invisible, which is why the first version read as a plain capsule.
-                    // `.interactive()` gives the press response Liquid Glass is supposed to have.
-                    .glassEffect(prominent ? .regular.tint(.accentColor).interactive()
-                                           : .regular.interactive(),
-                                 in: .capsule)
-            } else {
-                label
-                    .foregroundStyle(prominent ? .white : Color(nsColor: .labelColor))
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay { Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 0.5) }
-            }
+    // SwiftUI's button styles are distinct TYPES, so they cannot be chosen with a ternary — every
+    // branch has to apply its own `.buttonStyle` call. Verbose, but the alternative is erasing the
+    // style, which loses the very behaviour this change exists to get back.
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        // Reduce Transparency means an opaque control, not a thinner glass one.
+        if reduceTransparency {
+            if prominent { content.buttonStyle(.borderedProminent) }
+            else { content.buttonStyle(.bordered) }
+        } else if #available(macOS 26.0, *) {
+            if prominent { content.buttonStyle(.glassProminent) }
+            else { content.buttonStyle(.glass) }
+        } else {
+            if prominent { content.buttonStyle(.borderedProminent) }
+            else { content.buttonStyle(.bordered) }
         }
-        .brightness(configuration.isPressed ? -0.05 : 0)
-        .opacity(isEnabled ? 1 : 0.45)
     }
 }
 
@@ -114,7 +103,7 @@ struct ThemedButton: ViewModifier {
         case .frutigerAero:
             content.buttonStyle(AeroButtonStyle(accent: accent, prominent: prominent))
         case .liquidGlass:
-            content.buttonStyle(LiquidGlassButtonStyle(prominent: prominent))
+            content.modifier(NativeGlassButton(prominent: prominent))
         }
     }
 }
@@ -159,7 +148,7 @@ extension View {
     /// them first. Everything else is secondary and recedes into glass, which is what keeps a row
     /// of eight controls from competing with the two that matter.
     func glassButton(prominent: Bool = false) -> some View {
-        buttonStyle(LiquidGlassButtonStyle(prominent: prominent))
+        modifier(NativeGlassButton(prominent: prominent))
     }
 
     /// A focus ring that is visible in both themes.

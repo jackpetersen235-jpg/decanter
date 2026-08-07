@@ -287,6 +287,36 @@ creates a bottle already configured for it (app id or direct exe) and generates 
   written asynchronously after a bottle is created, so SwiftUI never re-rendered and the button
   stayed hidden for a launcher that existed. It now always shows and builds on demand.
 
+## Liquid Glass — what the research actually said
+
+Four rounds of "that doesn't look like Liquid Glass" all traced to the same mistake:
+reimplementing things Apple already ships.
+
+- **Use Apple's button styles, not `.glassEffect` on a padded label.** `.buttonStyle(.glass)` and
+  `.buttonStyle(.glassProminent)` exist on macOS 26 and were what was missing the whole time.
+  Hand-rolling a `ButtonStyle` that pads a label and calls `.glassEffect(…, in: .capsule)` gets the
+  material and *none of the rest*: real control metrics, concentric corner radius, press/hover
+  behaviour, the system's control-specific tuning of the material, automatic light/dark adaptation.
+  `.glassEffect` is for applying glass to CUSTOM views — a button is not a custom view.
+- **It is only for the navigation layer that floats ABOVE content.** Apple names content layers,
+  full-screen backgrounds and scrollable content as things it must not be applied to. A sidebar
+  holding a scrollable list is all three, which is why glassing it read as a tinted panel no matter
+  which variant was used.
+- **Glass cannot sample other glass.** `GlassEffectContainer(spacing:)` gives adjacent glass
+  elements one shared sampling region; without it each samples independently and they render as
+  flat capsules.
+- **The effect lives in the EDGES.** The rim bends and magnifies what is behind it. A full-bleed
+  pane has no visible rim, so the whole effect is clipped away — float and inset anything that must
+  read as glass.
+- **Refraction is only visible where there is detail to bend.** Over a flat fill or a smooth
+  gradient even a correct implementation reads as a tint. This is a property of the material, not a
+  bug to tune out.
+- Variants: `.regular` (default, for controls that must stay legible against anything), `.clear`
+  (high transparency, wants busy content behind it), `.identity` (off). `.interactive()` adds the
+  press response.
+- Third-party lensing libraries exist (BarredEwe/LiquidGlass, DnV1eX/LiquidGlassKit) but the ones
+  checked are **iOS-only** — no help here.
+
 ## Verification habits that mattered
 
 - **Screenshots beat logs.** `screencapture -x` + Read. Logs said "0 errors" while the screen was
