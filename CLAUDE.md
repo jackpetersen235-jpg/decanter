@@ -248,6 +248,46 @@ Steam** and **Launch Game App**. Regenerate headlessly with `--build-game-apps`.
   `sampleNaNToZero`/`defuseFma`, and a per-game shader cache). The bottle is the source of truth
   now; port anything worth keeping into the bottle's settings.
 
+### `grep -c … || echo 0` is a broken idiom — it produces TWO lines
+
+`BASE=$(grep -c 'X' file 2>/dev/null || echo 0)` looks defensive and is not. When the file **exists
+but has no matches**, `grep -c` prints `0` **and exits 1**, so the `|| echo 0` fires as well and the
+variable becomes `"0\n0"`. Every later `[ "$N" -gt "$BASE" ]` then dies with *integer expression
+expected*, so the loop can never break early.
+
+In the generated launcher that meant waiting the **full 150 s, then 10 s more**, before the game
+started — indistinguishable from "it never opens". Verified in a shell before fixing.
+
+Use a function that sanitises instead:
+
+```bash
+count() { grep -c 'Logged On,' "$CONNLOG" 2>/dev/null | head -1 | tr -dc '0-9'; }
+BASE=$(count); BASE=${BASE:-0}
+```
+
+`head -1` guards multi-line output, `tr -dc '0-9'` strips anything non-numeric, and `${BASE:-0}`
+covers the genuinely-empty case. Verified across all three: missing file, present-but-empty, and
+populated.
+
+### Generated launchers must LOG, or every failure looks the same
+
+A missing executable, a Steam that never logs in, and the already-running guard firing on a stale
+process all present identically: nothing happens, nothing to read. The launcher now writes to
+`~/Library/Logs/Decanter-launcher.log` — first thing to ask for when someone says a game will not
+open.
+
+It also checks the executable still exists before `cd`, and says so if the game was uninstalled.
+
+### `pgrep -x` does NOT truncate long names — a first test said otherwise and was wrong
+
+Suspecting `MAXCOMLEN` (16), a test appeared to show `pgrep -x` failing on a 31-character
+executable name. **The control failed too** — copied system binaries will not run on Apple Silicon
+(code signing), so neither process existed. Rebuilt with `swiftc`, `pgrep -x` matches a 10- and a
+31-character name equally.
+
+The lesson is the general one: when a test shows a failure, check that the control passes before
+believing it.
+
 ## New-bottle game picker (`GameScanner`)
 
 **New Bottle** scans every known prefix's `drive_c` and lists what it finds; clicking a game

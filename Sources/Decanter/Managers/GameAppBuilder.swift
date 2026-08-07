@@ -45,7 +45,7 @@ enum GameAppBuilder {
     /// The stamp goes into the script as a comment; `isCurrent` compares it and the app rebuilds on
     /// mismatch. BUMP THIS when you change the script, or the fix will not reach anyone who already
     /// has a launcher.
-    static let generatorVersion = 2
+    static let generatorVersion = 3
     private static let stampPrefix = "# decanter-launcher-version:"
 
     /// Does this bottle's launcher exist AND come from the current generator?
@@ -170,6 +170,14 @@ enum GameAppBuilder {
             "# few KB. It is therefore tied to this Mac — as is the prefix it launches.",
             "set -u",
             "",
+            "# Everything this script does is logged. Without it every failure mode - a missing",
+            "# executable, a Steam that never logs in, an already-running guard firing on a stale",
+            "# process - presents to the user identically as 'nothing happened', with nothing to",
+            "# read afterwards.",
+            "LOG=\"$HOME/Library/Logs/Decanter-launcher.log\"",
+            "mkdir -p \"$(dirname \"$LOG\")\" 2>/dev/null",
+            "log() { printf '%s  %s\\n' \"$(date '+%Y-%m-%d %H:%M:%S')\" \"$1\" >>\"$LOG\"; }",
+            "log '--------------------------------------------'",
             "WINE=\(q(wine))",
             "GAME_DIR=\(q(game.folder.path))",
             "GAME_EXE=\(q(game.executable.path))",
@@ -185,6 +193,7 @@ enum GameAppBuilder {
             "# not to any bundle `open -a` can name, and driving it needs Accessibility permission",
             "# this script does not have. Exiting quietly beats a command that always fails.",
             "if pgrep -x \(q(exeName)) >/dev/null 2>&1; then",
+            "  log 'Already running - nothing to do.'",
             "  exit 0",
             "fi",
             "",
@@ -229,24 +238,47 @@ enum GameAppBuilder {
                 "# slash — Steam's webhelpers carry -steampath=C:\\...\\steam.exe in their argv and",
                 "# a bare match hits those orphans, which outlive Steam by hours.",
                 "if ! pgrep -f '/steam\\.exe' >/dev/null 2>&1; then",
+                "  log 'Steam is not running - starting it.'",
                 "  \"$WINE\" \(q(steamExecutable.path)) \(flags) >/dev/null 2>&1 &",
                 "  CONNLOG=\(q(connLog.path))",
                 "  # Count NEW logons. The log is cumulative, so 'any logon present' would be",
                 "  # satisfied by yesterday's and the game would start before Steam is ready.",
-                "  BASE=$(grep -c 'Logged On,' \"$CONNLOG\" 2>/dev/null || echo 0)",
+                "  #",
+                "  # `count` is a FUNCTION, not `grep -c ... || echo 0`. That idiom is broken: when the",
+                "  # log exists but has no matches, grep prints 0 AND exits 1, so the fallback fires",
+                "  # too and the variable becomes two lines. Every later [ -gt ] then dies with",
+                "  # 'integer expression expected', the loop can never break early, and the launcher",
+                "  # waits the full 150s + 10s before starting the game - which reads as 'it never",
+                "  # opens'. Verified in a shell before this fix.",
+                "  count() { grep -c 'Logged On,' \"$CONNLOG\" 2>/dev/null | head -1 | tr -dc '0-9'; }",
+                "  BASE=$(count); BASE=${BASE:-0}",
+                "  log \"Waiting for Steam to log in (baseline $BASE)...\"",
+                "  READY=0",
                 "  for _ in $(seq 1 75); do",
-                "    NOW=$(grep -c 'Logged On,' \"$CONNLOG\" 2>/dev/null || echo 0)",
-                "    [ \"$NOW\" -gt \"$BASE\" ] && break",
+                "    NOW=$(count); NOW=${NOW:-0}",
+                "    if [ \"$NOW\" -gt \"$BASE\" ]; then READY=1; break; fi",
                 "    sleep 2",
                 "  done",
+                "  if [ \"$READY\" = 1 ]; then log 'Steam logged in.'; else",
+                "    log 'Steam did not report a login within 150s - starting anyway.'",
+                "    log 'If the game fails its DRM check, sign in to Steam and try again.'",
+                "  fi",
                 "  sleep 10",
+                "else",
+                "  log 'Steam is already running.'",
                 "fi",
                 "",
             ]
         }
 
         lines += [
-            "cd \"$GAME_DIR\" || exit 1",
+            "if [ ! -f \"$GAME_EXE\" ]; then",
+            "  log \"Game executable is missing: $GAME_EXE\"",
+            "  log 'The game was probably uninstalled or moved. Press Rebuild Launcher in Decanter.'",
+            "  exit 1",
+            "fi",
+            "log \"Starting $GAME_EXE\"",
+            "cd \"$GAME_DIR\" || { log 'Game folder is missing.'; exit 1; }",
             "exec \"$WINE\" \"$GAME_EXE\"",
             "",
         ]
