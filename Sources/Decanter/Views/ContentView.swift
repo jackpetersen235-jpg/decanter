@@ -135,6 +135,12 @@ struct ContentView: View {
             wineStatusFooter
         }
         .listStyle(.plain)
+        // The sidebar needs the Aero treatment too, and did not have it: `aeroInk()` was applied
+        // only to the detail column and the wizard. Without it the sidebar stayed in the DARK
+        // colour scheme and its List kept painting an opaque dark backdrop — because
+        // `scrollContentBackground(.hidden)` lives inside `GlassPane`, which is a no-op in Aero.
+        // That is what made the left side very dark while the right showed the sky.
+        .aeroInk()
         .tonedText()
         // Floated and inset so the material has four visible edges to refract along. Full-bleed,
         // the rim — where the whole effect lives — is clipped off and only a flat tint remains.

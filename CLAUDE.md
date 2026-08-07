@@ -419,6 +419,21 @@ The fix is to keep the view installed always and pass the desired state as a par
 property in both directions. Any `NSViewRepresentable` that mutates window- or app-level state has
 this shape — conditionally inserting it means the "off" path never runs.
 
+### `aeroInk()` must reach EVERY column, not just the detail pane
+
+The Aero sidebar rendered very dark against a light sky. `aeroInk()` was applied to the detail
+column and the wizard but never to the sidebar, which caused two faults at once:
+
+1. The sidebar stayed in the **dark colour scheme** (`aeroLightChrome` sets `colorScheme` to
+   `.light`), so every system-drawn control in it was coloured for dark chrome.
+2. Its `List` kept painting an **opaque dark backdrop**, because
+   `scrollContentBackground(.hidden)` ships inside `GlassPane` — which is a no-op in Aero, so
+   nothing was hiding it.
+
+Anything that holds content needs `aeroInk()` in Aero, the same way it needs a surface in Liquid
+Glass. The two themes have mirror-image requirements and it is easy to satisfy one and forget the
+other.
+
 ### Accessibility cannot be verified by injecting the environment
 
 `\.accessibilityReduceTransparency` and `\.accessibilityReduceMotion` are **read-only**
