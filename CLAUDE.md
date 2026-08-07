@@ -317,6 +317,30 @@ reimplementing things Apple already ships.
 - Third-party lensing libraries exist (BarredEwe/LiquidGlass, DnV1eX/LiquidGlassKit) but the ones
   checked are **iOS-only** — no help here.
 
+### Getting a CLEAR window, not a grey one
+
+Two separate problems, solved in order:
+
+1. **Opaque window** — a SwiftUI window is opaque by default, so glass inside it samples the
+   window's own flat backing. Sampling a flat fill gives a flat tint.
+2. **Grey cast** — backing the window with an `NSVisualEffectView` fixes the sampling but every
+   `NSVisualEffectView.Material` *tints*. There is no clear material; `.underWindowBackground` and
+   the rest all add grey. `containerBackground(_:for: .window)` cannot help either — it takes a
+   `ShapeStyle`, so it always paints something.
+
+**Only AppKit gives a genuinely clear window:** `window.isOpaque = false` and
+`window.backgroundColor = .clear`, reached from SwiftUI via an `NSViewRepresentable` that reads
+`view.window` — inside a `DispatchQueue.main.async`, because `view.window` is nil while the view is
+still being inserted.
+
+**Consequence: every region holding content needs its own surface.** With the window clear, a pane
+with no background sits its text directly on the wallpaper. Both the sidebar and the detail column
+therefore carry `glassPane`. Anything added later that holds text needs one too.
+
+Trade-off worth knowing: `.clear` glass over a busy wallpaper is beautiful and hard to read. If
+legibility matters more than transparency for a given pane, `.regular` is the variant to switch to
+— it is still glass, just less transparent.
+
 ### The window must be non-opaque or glass has nothing to sample
 
 **This was the missing piece behind every failed attempt.** A SwiftUI window is opaque by default,

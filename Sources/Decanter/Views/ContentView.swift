@@ -74,6 +74,9 @@ struct ContentView: View {
             detail
                 .ignoresSafeArea(.container, edges: .top)
                 .aeroInk()
+                // Its own surface. The window is genuinely clear in Liquid Glass, so a pane with
+                // no background would sit its text straight on the desktop wallpaper.
+                .themedPaneSurface()
         }
     }
 

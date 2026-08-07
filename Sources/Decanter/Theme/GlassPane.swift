@@ -48,9 +48,31 @@ struct GlassPane: ViewModifier {
     }
 }
 
+/// A glass pane in Liquid Glass; nothing in Aero, where the atmosphere is already the surface.
+///
+/// Necessary once the window is genuinely clear: a pane with no background of its own would put
+/// its text directly on the desktop wallpaper. Every region that holds content needs a surface.
+struct ThemedPaneSurface: ViewModifier {
+    var cornerRadius: CGFloat = 18
+    var inset: CGFloat = 10
+    @Environment(\.appTheme) private var theme
+
+    func body(content: Content) -> some View {
+        switch theme {
+        case .frutigerAero: content
+        case .liquidGlass:  content.glassPane(cornerRadius: cornerRadius, inset: inset)
+        }
+    }
+}
+
 extension View {
     /// Float this pane on Liquid Glass. See `GlassPane` — the inset is load-bearing, not styling.
     func glassPane(cornerRadius: CGFloat = 18, inset: CGFloat = 10) -> some View {
         modifier(GlassPane(cornerRadius: cornerRadius, inset: inset))
+    }
+
+    /// Give this region a surface in whichever theme needs one.
+    func themedPaneSurface(cornerRadius: CGFloat = 18, inset: CGFloat = 10) -> some View {
+        modifier(ThemedPaneSurface(cornerRadius: cornerRadius, inset: inset))
     }
 }
