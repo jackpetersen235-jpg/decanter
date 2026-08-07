@@ -74,6 +74,12 @@ struct ContentView: View {
         HStack(spacing: 0) {
             sidebar
                 .frame(width: 264)
+                // Lifted slightly and given a real edge. Laid out by hand, the two columns had no
+                // boundary at all, and one continuous sky behind both turned the join into an
+                // accidental-looking seam.
+                .sidebarLift()
+
+            ColumnSeparator()
 
             // Wizard wallpaper removed. In Aero the atmosphere is the backdrop, and two competing
             // background images read as clutter; in Liquid Glass the detail pane is cleaner
