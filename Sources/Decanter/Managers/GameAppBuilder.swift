@@ -35,6 +35,26 @@ enum GameAppBuilder {
         }
     }
 
+    /// Bumped whenever `launcherScript` changes in a way that matters.
+    ///
+    /// Generated launchers are files on disk that outlive the app that wrote them, so shipping a fix
+    /// to the generator does nothing for a launcher already sitting in ~/Applications. That is
+    /// exactly what happened with the Steam.dll fix: the app updated, every existing launcher stayed
+    /// stale, and pressing Play kept running the old script.
+    ///
+    /// The stamp goes into the script as a comment; `isCurrent` compares it and the app rebuilds on
+    /// mismatch. BUMP THIS when you change the script, or the fix will not reach anyone who already
+    /// has a launcher.
+    static let generatorVersion = 2
+    private static let stampPrefix = "# decanter-launcher-version:"
+
+    /// Does this bottle's launcher exist AND come from the current generator?
+    static func isCurrent(for bottle: Bottle) -> Bool {
+        let script = destination(for: bottle).appendingPathComponent("Contents/MacOS/launch")
+        guard let text = try? String(contentsOf: script, encoding: .utf8) else { return false }
+        return text.contains("\(stampPrefix) \(generatorVersion)")
+    }
+
     // MARK: Paths
 
     static var applicationsDirectory: URL {
@@ -139,6 +159,7 @@ enum GameAppBuilder {
 
         var lines = [
             "#!/bin/bash",
+            "\(Self.stampPrefix) \(Self.generatorVersion)",
             "#",
             "# \(game.name) — launcher for the \"\(bottle.name)\" bottle.",
             "#",

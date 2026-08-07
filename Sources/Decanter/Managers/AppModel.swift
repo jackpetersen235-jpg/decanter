@@ -801,7 +801,10 @@ final class AppModel: ObservableObject {
     func launchGameApp(in bottle: Bottle) {
         Task {
             let app = GameAppBuilder.destination(for: bottle)
-            if !FileManager.default.fileExists(atPath: app.path) {
+            // Rebuild when MISSING **or STALE**. Checking only for existence meant a launcher
+            // written by an older build kept running forever: updating Decanter shipped the fix
+            // but never reached the file that needed it, so Play went on using the old script.
+            if !GameAppBuilder.isCurrent(for: bottle) {
                 if case .failure = await buildGameApp(for: bottle) { return }
             }
             NSWorkspace.shared.open(app)
