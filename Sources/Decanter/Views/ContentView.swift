@@ -28,6 +28,9 @@ struct ContentView: View {
         // backdrop is applied here; the ink/light-chrome treatment stays on the detail column,
         // which is the surface it was chosen against.
         .themedAtmosphere()
+        // Underneath everything: makes the window itself sample the desktop, so the glass panes and
+        // buttons have real content to refract instead of an opaque window fill.
+        .themedWindowBacking()
         .sheet(isPresented: $showingCreate) { CreateBottleSheet() }
         .sheet(isPresented: $showingSetup) { SetupSheet() }
         .sheet(item: $model.activeConsole) { console in

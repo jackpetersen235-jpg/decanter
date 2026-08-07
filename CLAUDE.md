@@ -317,6 +317,29 @@ reimplementing things Apple already ships.
 - Third-party lensing libraries exist (BarredEwe/LiquidGlass, DnV1eX/LiquidGlassKit) but the ones
   checked are **iOS-only** — no help here.
 
+### The window must be non-opaque or glass has nothing to sample
+
+**This was the missing piece behind every failed attempt.** A SwiftUI window is opaque by default,
+so a glass effect inside it can only sample the window's own flat backing — and sampling a flat
+fill produces a flat tint. The material was never the problem; there was nothing behind it.
+
+`DesktopBackdrop` fixes it with an `NSVisualEffectView`:
+
+- `blendingMode = .behindWindow` — the actual switch. It pulls pixels from the desktop wallpaper
+  and any windows underneath. The default (`.withinWindow`) blends only against the app's own
+  content, which is why the window looked like a solid slab.
+- `state = .active` — not optional. Without it the effect reverts to a solid system colour the
+  moment the window loses focus, so the app would only look right while frontmost.
+- Both are re-asserted in `updateNSView`: SwiftUI can recreate the backing view, and a reverted
+  blending mode silently restores the flat-tint behaviour.
+
+Applied in Liquid Glass only. Aero paints its own opaque sky, and letting the desktop through
+underneath would put a photograph behind a 2006 pastel gradient.
+
+Also on macOS 26: `NSGlassEffectView` is the AppKit first-class glass container, with a real
+`cornerRadius` instead of the old mask-image approach — worth knowing if the SwiftUI modifier ever
+proves too limited.
+
 ### Accessibility cannot be verified by injecting the environment
 
 `\.accessibilityReduceTransparency` and `\.accessibilityReduceMotion` are **read-only**
