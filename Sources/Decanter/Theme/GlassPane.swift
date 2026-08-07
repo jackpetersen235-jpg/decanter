@@ -55,12 +55,27 @@ struct GlassPane: ViewModifier {
 struct ThemedPaneSurface: ViewModifier {
     var cornerRadius: CGFloat = 18
     var inset: CGFloat = 10
+    /// Standard's fill for this region, if it needs one. The sidebar does — a plain column with no
+    /// fill does not read as a sidebar. The detail pane does not; the opaque window is its surface.
+    var plainFill: Color?
     @Environment(\.appTheme) private var theme
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         switch theme {
-        case .frutigerAero, .system: content
-        case .liquidGlass:           content.glassPane(cornerRadius: cornerRadius, inset: inset)
+        case .frutigerAero:
+            content
+        case .liquidGlass:
+            content.glassPane(cornerRadius: cornerRadius, inset: inset)
+        case .system:
+            // Full height, no inset, no rounding — an ordinary macOS sidebar. The floating inset
+            // pane is a Liquid Glass idea (it exists to expose the rim that does the refracting)
+            // and has no business in the plain appearance.
+            if let plainFill {
+                content.background(plainFill)
+            } else {
+                content
+            }
         }
     }
 }
@@ -72,7 +87,8 @@ extension View {
     }
 
     /// Give this region a surface in whichever theme needs one.
-    func themedPaneSurface(cornerRadius: CGFloat = 18, inset: CGFloat = 10) -> some View {
-        modifier(ThemedPaneSurface(cornerRadius: cornerRadius, inset: inset))
+    func themedPaneSurface(cornerRadius: CGFloat = 18, inset: CGFloat = 10,
+                           plainFill: Color? = nil) -> some View {
+        modifier(ThemedPaneSurface(cornerRadius: cornerRadius, inset: inset, plainFill: plainFill))
     }
 }

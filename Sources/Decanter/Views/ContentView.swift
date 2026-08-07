@@ -138,7 +138,10 @@ struct ContentView: View {
         .tonedText()
         // Floated and inset so the material has four visible edges to refract along. Full-bleed,
         // the rim — where the whole effect lives — is clipped off and only a flat tint remains.
-        .glassPane(cornerRadius: 18, inset: 10)
+        // Was an unconditional `.glassPane`, which meant Standard still got a floating glass
+        // sidebar — the whole reason "Standard" still looked like Liquid Glass.
+        .themedPaneSurface(cornerRadius: 18, inset: 10,
+                           plainFill: Color(nsColor: .controlBackgroundColor))
     }
 
     @ViewBuilder
