@@ -204,6 +204,9 @@ struct BottleDetailView: View {
                             }
                             .disabled(installingGFX)
                         }
+                        // One shared sampling region for the whole row. Without it each glass
+                        // button samples independently and they render as flat capsules.
+                        .glassGroup()
                         if let gfxResult {
                             Text(gfxResult).font(.caption).foregroundStyle(.secondary)
                         }

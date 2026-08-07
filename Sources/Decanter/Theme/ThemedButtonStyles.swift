@@ -79,7 +79,13 @@ struct LiquidGlassButtonStyle: ButtonStyle {
             } else if #available(macOS 26.0, *) {
                 label
                     .foregroundStyle(prominent ? .white : Color(nsColor: .labelColor))
-                    .glassEffect(prominent ? .clear.tint(.accentColor) : .clear, in: .capsule)
+                    // `.regular`, not `.clear`. `.clear` is the high-transparency variant and needs
+                    // busy content behind it to register at all — over a flat pane it is close to
+                    // invisible, which is why the first version read as a plain capsule.
+                    // `.interactive()` gives the press response Liquid Glass is supposed to have.
+                    .glassEffect(prominent ? .regular.tint(.accentColor).interactive()
+                                           : .regular.interactive(),
+                                 in: .capsule)
             } else {
                 label
                     .foregroundStyle(prominent ? .white : Color(nsColor: .labelColor))
@@ -113,9 +119,36 @@ struct ThemedButton: ViewModifier {
     }
 }
 
+/// Groups adjacent glass controls so they share one sampling region.
+///
+/// Required, not cosmetic. Glass cannot sample other glass, so several `.glassEffect` views sitting
+/// side by side each sample independently and render inconsistently — which is a large part of why
+/// the button row read as flat capsules rather than as one set of glass controls. The container
+/// gives them a shared region and lets nearby shapes blend.
+///
+/// A no-op in Aero, whose gloss is painted and needs no sampling at all.
+struct GlassGroup: ViewModifier {
+    var spacing: CGFloat = 10
+    @Environment(\.appTheme) private var theme
+
+    func body(content: Content) -> some View {
+        if theme == .liquidGlass, #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) { content }
+        } else {
+            content
+        }
+    }
+}
+
 extension View {
     func themedButton(prominent: Bool = false, accent: Color = AeroTokens.aqua) -> some View {
         modifier(ThemedButton(prominent: prominent, accent: accent))
+    }
+
+    /// Wrap a row/cluster of glass controls. See `GlassGroup` — this is required for glass to
+    /// render consistently, not an optimisation.
+    func glassGroup(spacing: CGFloat = 10) -> some View {
+        modifier(GlassGroup(spacing: spacing))
     }
 
     /// A focus ring that is visible in both themes.
