@@ -80,6 +80,18 @@ final class AppModel: ObservableObject {
                 exit(id == nil ? 1 : 0)
             }
         }
+        // Create or restore a non-default engine:  --reset-engine legacy | online
+        if let i = CommandLine.arguments.firstIndex(of: "--reset-engine"),
+           i + 1 < CommandLine.arguments.count,
+           let profile = EngineProfile(rawValue: CommandLine.arguments[i + 1]) {
+            Task {
+                let console = TaskConsole(title: "engine")
+                let ok = await resetEngine(for: profile, console: console)
+                FileHandle.standardError.write(
+                    "\(profile.rawValue) engine: \(ok ? "ready" : "FAILED")\n".data(using: .utf8)!)
+                exit(ok ? 0 : 1)
+            }
+        }
         if CommandLine.arguments.contains("--reset-online") {
             Task {
                 let console = TaskConsole(title: "reset")
@@ -604,26 +616,55 @@ final class AppModel: ObservableObject {
     /// free (measured: 1.0 s, 2 MB consumed for a 719 MB tree) while still giving the online setup
     /// its own engine files, DLL overrides and `winemetal`. A plain `cp -R` would cost 719 MB and a
     /// symlink would defeat the entire point by re-sharing the tree.
+    /// Root directory backing a profile. `offline` is the source everything else is cloned from.
+    static func engineRoot(for profile: EngineProfile) -> URL {
+        switch profile {
+        case .offline: return Paths.wineEngineRoot
+        case .online:  return Paths.onlineEngineRoot
+        case .legacy:  return Paths.legacyEngineRoot
+        }
+    }
+
+    /// Is this profile's engine present?
+    func isEngineInstalled(_ profile: EngineProfile) -> Bool {
+        FileManager.default.fileExists(
+            atPath: profile.binDirectory.appendingPathComponent("wine").path)
+    }
+
+    /// Clone the tuned engine into an independent copy for `profile`.
+    ///
+    /// Written once and parameterised rather than copied per profile. Three near-identical
+    /// functions is how the picker and the launcher resolver drifted apart earlier in this project,
+    /// and a third engine makes that risk concrete rather than theoretical.
     @discardableResult
-    func cloneEngineForOnline(console: TaskConsole? = nil) async -> Bool {
-        if isOnlineEngineInstalled { console?.append("Online engine already present."); return true }
-        guard FileManager.default.fileExists(atPath: Paths.wineEngineBin.appendingPathComponent("wine").path) else {
+    func cloneEngine(for profile: EngineProfile, console: TaskConsole? = nil) async -> Bool {
+        guard profile != .offline else { return true }        // offline IS the source
+        if isEngineInstalled(profile) {
+            console?.append("\(profile.label) engine already present."); return true
+        }
+        guard isEngineInstalled(.offline) else {
             console?.append("The main engine is not installed yet — run Setup Assistant first.")
             return false
         }
+        let dest = Self.engineRoot(for: profile)
         console?.append("Cloning the engine (APFS clone — instant, uses almost no disk)…")
-        try? FileManager.default.removeItem(at: Paths.onlineEngineRoot)
+        try? FileManager.default.removeItem(at: dest)
         let result = try? await Shell.run(
             URL(fileURLWithPath: "/bin/cp"),
-            arguments: ["-Rc", Paths.wineEngineRoot.path, Paths.onlineEngineRoot.path],
+            arguments: ["-Rc", Paths.wineEngineRoot.path, dest.path],
             environment: ProcessInfo.processInfo.environment)
-        guard result?.exitCode == 0, isOnlineEngineInstalled else {
+        guard result?.exitCode == 0, isEngineInstalled(profile) else {
             console?.append("Clone failed: \(result?.stderr ?? "unknown error")")
             return false
         }
         rescanInstallations()
-        console?.append("Online engine ready at \(Paths.onlineEngineRoot.lastPathComponent).")
+        console?.append("\(profile.label) engine ready at \(dest.lastPathComponent).")
         return true
+    }
+
+    @discardableResult
+    func cloneEngineForOnline(console: TaskConsole? = nil) async -> Bool {
+        await cloneEngine(for: .online, console: console)
     }
 
     /// Throw away the online engine and re-clone it from the offline one.
@@ -631,18 +672,34 @@ final class AppModel: ObservableObject {
     /// This is what makes the isolation worth having: experiment freely on the online engine, and
     /// if it ends up broken, restore a known-good copy in about a second instead of re-downloading
     /// 480 MB. The offline engine is only ever read from, never written to.
+    /// Throw a profile's engine away and re-clone it from the tuned one.
+    ///
+    /// This is what makes the isolation worth having: break the legacy or online engine freely, and
+    /// restore a known-good copy in about a second rather than re-downloading 480 MB. The offline
+    /// engine is only ever read from.
     @discardableResult
-    func resetOnlineEngine(console: TaskConsole? = nil) async -> Bool {
+    func resetEngine(for profile: EngineProfile, console: TaskConsole? = nil) async -> Bool {
+        guard profile != .offline else {
+            console?.append("The tuned engine is the source — reinstall it via Setup Assistant instead.")
+            return false
+        }
+        // Awaited separately: `||` short-circuits through an autoclosure, which cannot carry an
+        // async call. Both checks are wanted anyway.
         let steamUp = await isSteamRunning()
         let gameUp = await isAnyGameRunning()
         if steamUp || gameUp {
             console?.append("Quit Steam and any running game first.")
             return false
         }
-        console?.append("Removing the online engine…")
-        try? FileManager.default.removeItem(at: Paths.onlineEngineRoot)
+        console?.append("Removing the \(profile.label) engine…")
+        try? FileManager.default.removeItem(at: Self.engineRoot(for: profile))
         rescanInstallations()
-        return await cloneEngineForOnline(console: console)
+        return await cloneEngine(for: profile, console: console)
+    }
+
+    @discardableResult
+    func resetOnlineEngine(console: TaskConsole? = nil) async -> Bool {
+        await resetEngine(for: .online, console: console)
     }
 
     /// The discovered installation backing the online engine, if it exists.

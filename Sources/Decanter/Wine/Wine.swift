@@ -21,6 +21,10 @@ enum Wine {
             // The isolated online-play engine. Listed AFTER the main one so it never becomes the
             // default for ordinary new bottles - online bottles select it explicitly.
             ("Decanter Engine (Online)", Paths.onlineEngineBin.path),
+            // Must be listed here or the engine is invisible to `setEngineProfile`, which resolves
+            // a profile through `installations`. Creating the directory is not enough — the clone
+            // succeeded and switching to it still failed with "That engine isn't available".
+            ("Decanter Engine (Legacy)", Paths.legacyEngineBin.path),
             // Non-sandboxed WhiskyWine (manual install of Libraries.tar.gz) — the working build.
             ("Whisky", "\(home)/Library/Application Support/com.isaacmarovitz.Whisky/Libraries/Wine/bin"),
             // Whisky.app is sandboxed: its Wine lives inside the app container.

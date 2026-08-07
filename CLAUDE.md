@@ -120,6 +120,41 @@ a second, which is the point: break it freely, restore instantly, never re-downl
 Switching is refused while Steam or a game is running (Wine holds the engine tree open).
 Headless: `--engine offline|online`, `--reset-online`.
 
+### A third profile: `legacy`, for old 32-bit games
+
+`Configuration → Engine → Play mode` now offers **Legacy** alongside Offline and Online. Same
+mechanism: an APFS clone of the tuned engine (measured again here — **0.00 GB consumed** for a
+719 MB tree), selected per bottle. Create or restore it with `--reset-engine legacy`.
+
+It exists because old 32-bit titles hit a wall the tuned engine cannot help with, and every
+candidate fix threatens the setup that already works:
+
+- **Rosetta 2 emulates x87 floating point in software** — reportedly ~100× slower than it should
+  be. Pre-2010 games do their maths on the x87 FPU, so they fall off a cliff while modern 64-bit
+  titles (SSE) are fine. This is why Peggle Deluxe crawls while Sekiro and JJBA are smooth, and why
+  changing the graphics backend — DXMT, DXVK, WineD3D — makes no difference at all. **The graphics
+  API was never the constraint.**
+- The known fixes ([x87sidecar](https://github.com/athei/x87sidecar),
+  [rosettax87](https://github.com/Lifeisawful/rosettax87)) hook Rosetta's `translate_insn`. The
+  no-root "cooperative" mode needs a **patched Wine**; our engine has no such handshake (verified:
+  zero hits for the symbols), so it would otherwise need `sudo`.
+- **`athei/wine-build` is NOT a safe swap.** It is CrossOver-based, and CrossOver's patches are
+  exactly what broke Steam's loopback UI websocket — the finding that cost an overnight session
+  (see §Recently FIXED). It also does not mention msync and is x86_64-only. Adopting it would trade
+  a working setup for a broken one to fix one 2007 game.
+
+So the legacy profile is a **container for that experimentation**, not a fix in itself. What goes
+in it is a separate decision; what matters is that it cannot reach the engine Sekiro depends on.
+
+**Two things that bit during implementation:**
+
+- **A new engine must be added to `Wine.swift`'s discovery list.** Creating the directory is not
+  enough: `setEngineProfile` resolves a profile through `installations`, so the clone succeeded and
+  switching still failed with "That engine isn't available".
+- `clone`/`reset` are now **parameterised over the profile** rather than copied a third time. Three
+  near-identical functions is precisely how the game picker and the launcher resolver drifted apart
+  earlier in this file.
+
 **⚠️ Anti-cheat is the limit, and no engine work changes it.** Per
 [Epic's own announcement](https://onlineservices.epicgames.com/news/epic-online-services-launches-anti-cheat-support-for-linux-mac-and-steam-deck),
 EOS anti-cheat supports compatibility layers on **Linux only**; macOS support exists solely for

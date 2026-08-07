@@ -42,6 +42,8 @@ enum EngineProfile: String, Codable, CaseIterable, Identifiable {
     case offline
     /// A separate copy used for online play, so networking changes cannot affect the above.
     case online
+    /// A separate copy for old 32-bit titles, so experiments aimed at them cannot affect the above.
+    case legacy
 
     var id: String { rawValue }
 
@@ -49,6 +51,7 @@ enum EngineProfile: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .offline: return "Offline (tuned for single-player)"
         case .online:  return "Online (multiplayer)"
+        case .legacy:  return "Legacy (old 32-bit games)"
         }
     }
 
@@ -56,6 +59,7 @@ enum EngineProfile: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .offline: return "The engine your games are tuned on. Best framerate, no online changes."
         case .online:  return "A separate copy for playing with friends. Changes here can't affect offline."
+        case .legacy:  return "A separate copy for pre-2010 games. Experiment freely — it can't affect the others."
         }
     }
 
@@ -64,6 +68,7 @@ enum EngineProfile: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .offline: return Paths.wineEngineBin
         case .online:  return Paths.onlineEngineBin
+        case .legacy:  return Paths.legacyEngineBin
         }
     }
 }

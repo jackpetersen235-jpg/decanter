@@ -34,6 +34,16 @@ enum Paths {
     ///
     /// This is nearly free: it is created with `cp -Rc` (APFS clone), which shares blocks until a
     /// file is modified. Measured 2026-07-30: 1.0 s, 2 MB actually consumed for a 719 MB tree.
+    /// A third, independent engine for LEGACY titles.
+    ///
+    /// Old 32-bit games hit constraints the tuned engine cannot help with — Rosetta's x87 handling
+    /// above all — and every candidate fix (a CrossOver-based build, a Rosetta hook, a rebuilt
+    /// wine) risks the setup that already works. This gives that experimentation somewhere to live
+    /// where it cannot reach the engine Sekiro and JJBA depend on.
+    static var legacyEngineRoot: URL { appSupport.appendingPathComponent("WineLegacy", isDirectory: true) }
+    static var legacyEngineLibraries: URL { legacyEngineRoot.appendingPathComponent("Libraries", isDirectory: true) }
+    static var legacyEngineBin: URL { legacyEngineLibraries.appendingPathComponent("Wine/bin", isDirectory: true) }
+
     static var onlineEngineRoot: URL { appSupport.appendingPathComponent("WineOnline", isDirectory: true) }
     static var onlineEngineLibraries: URL { onlineEngineRoot.appendingPathComponent("Libraries", isDirectory: true) }
     static var onlineEngineBin: URL { onlineEngineLibraries.appendingPathComponent("Wine/bin", isDirectory: true) }
