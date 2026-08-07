@@ -59,10 +59,22 @@ struct ContentView: View {
         }
     }
 
+    /// Two columns laid out by hand rather than by `NavigationSplitView`.
+    ///
+    /// The split view's sidebar column is an `NSSplitViewItem` with sidebar behaviour, and that
+    /// installs a vibrancy backdrop BELOW anything SwiftUI can reach — it kept the left column grey
+    /// while the detail pane was clear. Neither
+    /// `.containerBackground(.clear, for: .navigationSplitView)` (iOS only) nor hiding the
+    /// `NSVisualEffectView` from either direction touched it.
+    ///
+    /// An `HStack` has no such backdrop, so the clear window shows through. The cost is the system
+    /// sidebar behaviour: the collapse animation and its toggle button. The width is handled here
+    /// instead.
     private var splitView: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
             sidebar
-        } detail: {
+                .frame(width: 264)
+
             // Wizard wallpaper removed. In Aero the atmosphere is the backdrop, and two competing
             // background images read as clutter; in Liquid Glass the detail pane is cleaner
             // without it. `Wallpaper` itself is kept — the app icon still uses the artwork.
@@ -72,6 +84,7 @@ struct ContentView: View {
             // inset is what actually reclaims the space. Only the detail column does this — the
             // sidebar keeps its inset, because the traffic lights float there.
             detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea(.container, edges: .top)
                 .aeroInk()
                 .tonedText()
@@ -107,6 +120,8 @@ struct ContentView: View {
             .padding(.top, 8)
             .padding(.bottom, 2)
 
+            // .plain, not .sidebar: the sidebar list style reintroduces its own vibrancy, which
+            // is the exact thing this layout exists to get rid of.
             List(selection: $model.selectedBottleID) {
                 Section("Bottles") {
                     ForEach(model.bottles) { bottle in
@@ -119,7 +134,7 @@ struct ContentView: View {
             Divider()
             wineStatusFooter
         }
-        .frame(minWidth: 240)
+        .listStyle(.plain)
         .tonedText()
         // Floated and inset so the material has four visible edges to refract along. Full-bleed,
         // the rim — where the whole effect lives — is clipped off and only a flat tint remains.

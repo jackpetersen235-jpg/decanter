@@ -364,19 +364,24 @@ Also on macOS 26: `NSGlassEffectView` is the AppKit first-class glass container,
 `cornerRadius` instead of the old mask-image approach — worth knowing if the SwiftUI modifier ever
 proves too limited.
 
-### The sidebar column's grey has NOT been solved
+### The sidebar's grey needed dropping NavigationSplitView entirely
 
-The detail pane is clear but the `NavigationSplitView` sidebar stays grey. Two attempts failed:
+A `NavigationSplitView` sidebar column is an `NSSplitViewItem` with sidebar behaviour, and that
+installs a vibrancy backdrop **below anything SwiftUI can reach**. It kept the left column grey
+while the detail pane was clear. Two fixes were tried and both failed:
 
-1. `.containerBackground(.clear, for: .navigationSplitView)` — **unavailable on macOS**, iOS only.
-2. Finding the `NSVisualEffectView` and hiding it, both by walking UP from a `.background`
-   placeholder and by searching DOWN from `window.contentView`. Neither changed the rendering; the
-   code was removed rather than left in place doing nothing.
+1. `.containerBackground(.clear, for: .navigationSplitView)` — compiles, but is **iOS-only**.
+2. Finding the `NSVisualEffectView` and hiding it, walking UP from a `.background` placeholder and
+   searching DOWN from `window.contentView`. Neither changed the rendering.
 
-On macOS the sidebar column is an `NSSplitViewItem` with sidebar behaviour, and its backdrop is
-applied below anything SwiftUI can reach. The likely real fix is to stop using
-`NavigationSplitView` for this window and lay the two columns out with an `HStack`, giving up the
-system sidebar behaviour in exchange for control of the background. Not attempted yet.
+A glass pane placed on top sits *above* that backdrop, so tuning the pane can never reach it.
+
+**The fix was to lay the two columns out with an `HStack`** and give up the split view. Its
+backdrop goes with it, and the clear window shows through. Also use `.listStyle(.plain)` — the
+`.sidebar` list style reintroduces its own vibrancy, which is the very thing being removed.
+
+Cost: the system sidebar behaviour. The collapse animation and its toggle button are gone, and the
+column width is now set explicitly (264pt) rather than managed.
 
 ### Accessibility cannot be verified by injecting the environment
 
