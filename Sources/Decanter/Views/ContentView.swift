@@ -74,6 +74,7 @@ struct ContentView: View {
             detail
                 .ignoresSafeArea(.container, edges: .top)
                 .aeroInk()
+                .tonedText()
                 // Its own surface. The window is genuinely clear in Liquid Glass, so a pane with
                 // no background would sit its text straight on the desktop wallpaper.
                 .themedPaneSurface()
@@ -119,6 +120,7 @@ struct ContentView: View {
             wineStatusFooter
         }
         .frame(minWidth: 240)
+        .tonedText()
         // Floated and inset so the material has four visible edges to refract along. Full-bleed,
         // the rim — where the whole effect lives — is clipped off and only a flat tint remains.
         .glassPane(cornerRadius: 18, inset: 10)

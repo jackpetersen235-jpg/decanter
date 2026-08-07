@@ -13,6 +13,13 @@ struct SettingsView: View {
                 .pickerStyle(.inline)
                 Text(themeController.theme.detail)
                     .font(.caption).foregroundStyle(.secondary)
+
+                Picker("Text colour", selection: $themeController.textTone) {
+                    ForEach(TextTone.allCases) { Text($0.label).tag($0) }
+                }
+                Text("A clear window puts text over your wallpaper, and no one colour suits every "
+                     + "desktop. Automatic keeps each theme's own choice.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Wine build for new bottles") {

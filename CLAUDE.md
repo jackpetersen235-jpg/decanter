@@ -364,6 +364,20 @@ Also on macOS 26: `NSGlassEffectView` is the AppKit first-class glass container,
 `cornerRadius` instead of the old mask-image approach — worth knowing if the SwiftUI modifier ever
 proves too limited.
 
+### The sidebar column's grey has NOT been solved
+
+The detail pane is clear but the `NavigationSplitView` sidebar stays grey. Two attempts failed:
+
+1. `.containerBackground(.clear, for: .navigationSplitView)` — **unavailable on macOS**, iOS only.
+2. Finding the `NSVisualEffectView` and hiding it, both by walking UP from a `.background`
+   placeholder and by searching DOWN from `window.contentView`. Neither changed the rendering; the
+   code was removed rather than left in place doing nothing.
+
+On macOS the sidebar column is an `NSSplitViewItem` with sidebar behaviour, and its backdrop is
+applied below anything SwiftUI can reach. The likely real fix is to stop using
+`NavigationSplitView` for this window and lay the two columns out with an `HStack`, giving up the
+system sidebar behaviour in exchange for control of the background. Not attempted yet.
+
 ### Accessibility cannot be verified by injecting the environment
 
 `\.accessibilityReduceTransparency` and `\.accessibilityReduceMotion` are **read-only**
