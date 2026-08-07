@@ -15,14 +15,18 @@ struct ContentView: View {
                 // in a UI they have no way to understand. `isSettingUp` keeps the wizard on screen
                 // through the whole run — creating the first bottle makes `bottles` non-empty, and
                 // without this the wizard would vanish mid-automation. The wizard skips finished steps.
+                // The wizard is a single full-window pane with no sidebar, so it still takes the
+                // backdrop directly.
                 SetupWizard(dismiss: (showingWizard && !model.isSettingUp) ? { showingWizard = false } : nil)
+                    .themedBackground()
             } else {
                 splitView
             }
         }
-        // The atmosphere sits behind the whole window, under the split view's own chrome. Nothing
-        // decorative is ever composited over a control or a label.
-        .themedBackground()
+        // NOT applied window-wide any more. The atmosphere is an OPAQUE sky gradient, and while it
+        // painted behind the sidebar the sidebar's glass had only that to refract — so it came out
+        // as flat pale blue and read as nothing like glass. Glass needs the desktop behind it, so
+        // the backdrop is now scoped to the detail column and the sidebar is left transparent.
         .sheet(isPresented: $showingCreate) { CreateBottleSheet() }
         .sheet(isPresented: $showingSetup) { SetupSheet() }
         .sheet(item: $model.activeConsole) { console in
@@ -65,6 +69,7 @@ struct ContentView: View {
             // sidebar keeps its inset, because the traffic lights float there.
             detail
                 .ignoresSafeArea(.container, edges: .top)
+                .themedBackground()
         }
     }
 
