@@ -403,6 +403,22 @@ A first pass deleted the helper as "dead code" — it was dead because it had ne
 which is the bug rather than evidence there wasn't one. When a helper exists and has zero call
 sites, check which of the two it is before removing it. `grep -c` on the call sites is the check.
 
+### Window state is sticky — whatever sets it must be able to UNSET it
+
+`ClearWindowBacking` set `window.isOpaque = false` for Liquid Glass, and the modifier only
+INSTALLED that view when the theme wanted a clear window. Switching to another theme removed the
+view instead of updating it, so `updateNSView` never ran again and nothing restored `isOpaque`. The
+window stayed transparent until relaunch.
+
+The symptom was confusing and worth recognising: **the right half looked like Liquid Glass while the
+left half looked correct.** The sidebar has an opaque fill in Standard so it rendered right; the
+detail pane deliberately has none, so the still-clear window showed the desktop through it.
+Relaunching "fixed" it because a fresh window starts opaque.
+
+The fix is to keep the view installed always and pass the desired state as a parameter, driving the
+property in both directions. Any `NSViewRepresentable` that mutates window- or app-level state has
+this shape — conditionally inserting it means the "off" path never runs.
+
 ### Accessibility cannot be verified by injecting the environment
 
 `\.accessibilityReduceTransparency` and `\.accessibilityReduceMotion` are **read-only**

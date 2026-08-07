@@ -21,15 +21,28 @@ import AppKit
 /// background puts its text straight over the wallpaper. The floating glass panes provide that
 /// surface; anything else that holds text needs one too.
 struct ClearWindowBacking: NSViewRepresentable {
+    /// Whether the window should currently be clear.
+    ///
+    /// A parameter rather than a fact about this view's existence. The first version simply wasn't
+    /// installed unless the theme wanted a clear window — which meant switching AWAY from Liquid
+    /// Glass removed the view without ever running `updateNSView` again, so nothing set `isOpaque`
+    /// back to `true` and the window stayed transparent until relaunch. The detail pane then looked
+    /// like glass in the Standard theme while the sidebar, which has an opaque fill, looked right.
+    ///
+    /// Window state is global and sticky: whatever sets it must be able to UNSET it. So this view
+    /// is always installed and drives the property in both directions.
+    var clear: Bool
+
     func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
 
     func updateNSView(_ view: NSView, context: Context) {
         // `view.window` is nil while the view is still being inserted, so this has to run after
         // the current layout pass rather than inline.
+        let clear = self.clear
         DispatchQueue.main.async {
             guard let window = view.window else { return }
-            window.isOpaque = false
-            window.backgroundColor = .clear
+            window.isOpaque = !clear
+            window.backgroundColor = clear ? .clear : .windowBackgroundColor
         }
     }
 }
@@ -44,11 +57,11 @@ struct ThemedWindowBacking: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     func body(content: Content) -> some View {
-        if theme == .liquidGlass && !reduceTransparency {
-            content.background(ClearWindowBacking().allowsHitTesting(false))
-        } else {
-            content
-        }
+        // ALWAYS installed, so it can restore the window as well as clear it. Conditionally
+        // inserting it is what left the window transparent after switching to another theme.
+        content.background(
+            ClearWindowBacking(clear: theme == .liquidGlass && !reduceTransparency)
+                .allowsHitTesting(false))
     }
 }
 
