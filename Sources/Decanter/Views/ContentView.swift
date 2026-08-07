@@ -64,6 +64,30 @@ struct ContentView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
+            // These two used to live in the window toolbar. The toolbar is gone — it drew an
+            // unthemed white strip across the top of the window that duplicated the header panel's
+            // title — so they move into the sidebar itself. The leading gap is clearance for the
+            // traffic lights, which now float over the content; they are deliberately left alone
+            // rather than restyled.
+            HStack(spacing: 6) {
+                Spacer(minLength: 74)
+                Button { showingCreate = true } label: {
+                    Image(systemName: "plus").frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help("Create a new bottle")
+                .disabled(model.defaultInstallation == nil)
+
+                Button { showingSetup = true } label: {
+                    Image(systemName: "gearshape").frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help("Wine installations & system checks")
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+
             List(selection: $model.selectedBottleID) {
                 Section("Bottles") {
                     ForEach(model.bottles) { bottle in
@@ -77,21 +101,6 @@ struct ContentView: View {
             wineStatusFooter
         }
         .frame(minWidth: 240)
-        .toolbar {
-            ToolbarItem {
-                Button { showingCreate = true } label: {
-                    Label("New Bottle", systemImage: "plus")
-                }
-                .help("Create a new bottle")
-                .disabled(model.defaultInstallation == nil)
-            }
-            ToolbarItem {
-                Button { showingSetup = true } label: {
-                    Label("Setup", systemImage: "gearshape")
-                }
-                .help("Wine installations & system checks")
-            }
-        }
     }
 
     @ViewBuilder

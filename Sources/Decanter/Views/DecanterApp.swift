@@ -21,6 +21,14 @@ struct DecanterApp: App {
                 // running in any bottle, so a live game's virtual desktop is never touched.
                 .task { model.reapOrphanedSystray() }
         }
+        // Removes the title-bar STRIP while keeping the window controls.
+        //
+        // `.toolbar(.hidden, for: .windowToolbar)` was tried first and is wrong: it takes the
+        // close, minimise and zoom buttons with it, leaving a window that cannot be closed.
+        // `.hiddenTitleBar` drops the chrome and lets the traffic lights float over the content —
+        // which is why the sidebar's button row carries a 74pt leading gap to clear them. The
+        // lights themselves are left exactly as the system draws them.
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Bottle…") {

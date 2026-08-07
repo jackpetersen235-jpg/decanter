@@ -43,7 +43,9 @@ struct BottleDetailView: View {
                 }
             }
         }
-        .navigationTitle(bottle.name)
+        // No navigation title: the raised header panel directly below already names the bottle, and
+        // the toolbar strip repeated it in unthemed white chrome across the top of the window.
+        .navigationTitle("")
         // Confirmed, not immediate: this is `wineserver -k` on the whole prefix, so a game that is
         // still running dies with it and unsaved progress goes with it.
         .confirmationDialog("Quit Steam in “\(bottle.name)”?",
