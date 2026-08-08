@@ -181,6 +181,18 @@ GOOD TO KNOW
     frames. Some demanding 3D games need extra per-game setup to run their best
     — ask whoever sent you this if a specific game feels slow.
 
+  • OLD 2D GAMES (Peggle, Bejeweled, Zuma, anything pre-2010) — if one feels
+    slow, open Configuration and turn ON "Old 2D game - software rendering".
+    Measured on Peggle Deluxe: 18 fps before, 90 fps after.
+
+    Why: these games draw every single sprite as a separate instruction to the
+    graphics card - thousands per frame. On Windows that is cheap. On a Mac,
+    each one costs about 30 times more, because Apple's OpenGL is too old for
+    the shortcut that would make it cheap. Drawing in software skips all of
+    that. It sounds backwards and it is genuinely faster.
+
+    Leave it OFF for 3D games - it would slow those down.
+
 
 IF SOMETHING GOES WRONG
 -----------------------
