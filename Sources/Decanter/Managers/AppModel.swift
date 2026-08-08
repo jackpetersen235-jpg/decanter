@@ -92,6 +92,17 @@ final class AppModel: ObservableObject {
                 exit(ok ? 0 : 1)
             }
         }
+        // Apply each bottle's settings to its prefix (registry writes) without the GUI.
+        if CommandLine.arguments.contains("--apply-settings") {
+            Task {
+                let console = TaskConsole(title: "apply")
+                for bottle in bottles {
+                    await applyRegistry(bottleID: bottle.id, console: console, finish: false)
+                }
+                FileHandle.standardError.write("applied settings to \(bottles.count) bottle(s)\n".data(using: .utf8)!)
+                exit(0)
+            }
+        }
         if CommandLine.arguments.contains("--reset-online") {
             Task {
                 let console = TaskConsole(title: "reset")
@@ -1268,7 +1279,69 @@ final class AppModel: ObservableObject {
                 console.append("error: \(error.localizedDescription)")
             }
         }
+        await applySoftware2D(bottle, installation: installation, env: env, console: console)
         if finish { console.finish() }
+    }
+
+    /// Write (or clear) the per-executable "no 3D" override that forces an old 2D game to use its
+    /// software renderer. See `BottleSettings.software2D` for why this is a speed-up.
+    ///
+    /// Per-EXECUTABLE deliberately: `HKCU\Software\Wine\AppDefaults\<exe>\Direct3D`. A
+    /// prefix-wide `renderer=no3d` would hit every game sharing the prefix — Sekiro and JJBA share
+    /// this one — and strip 3D from titles that need it.
+    private func applySoftware2D(_ bottle: Bottle, installation: WineInstallation,
+                                 env: [String: String], console: TaskConsole) async {
+        // NOT gated on resolving a game: a plain Steam bottle plays everything and resolves
+        // nothing, yet it is exactly where an old 2D title gets launched from. The PopCap sweep
+        // below still finds the unpacked binary, so the setting works there too.
+        let exe = resolvedGame(for: bottle)?.executable.lastPathComponent
+        // The resolved exe is often a DRM WRAPPER that unpacks and runs the real binary somewhere
+        // else — Peggle's `Peggle.exe` extracts `C:\ProgramData\PopCap Games\Peggle\popcapgame1.exe`
+        // and it is the UNPACKED process that renders. An override on the wrapper alone does
+        // nothing at all. Cover both. (Same trap as aiming DLL overrides at `Peggle.exe`.)
+        var targets: Set<String> = exe.map { [$0] } ?? []
+
+        // ⚠️ ONLY widen the target list when TURNING THIS ON. Bottles share prefixes here — Steam,
+        // Sekiro and JJBA all live in `Steam-Wine11` — so if a bottle with the setting OFF also
+        // swept for extra executables, it would DELETE the override a different bottle just wrote
+        // for the same prefix. That happened: `popcapgame1.exe` was cleared moments after being
+        // set, by a bottle that has nothing to do with Peggle. Turning it off touches only the
+        // executable this bottle itself resolves to.
+        guard bottle.settings.software2D else {
+            for target in targets.sorted() {
+                let key = #"HKCU\Software\Wine\AppDefaults\"# + target + #"\Direct3D"#
+                console.append("Software 2D off for \(target)")
+                _ = try? await Shell.run(installation.loader,
+                                         arguments: ["reg", "delete", key, "/v", "renderer", "/f"],
+                                         environment: env)
+            }
+            return
+        }
+
+        // PopCap/SexyAppFramework Steam releases all unpack to this one name, and the wrapper
+        // DELETES it on exit — so a filesystem sweep only finds it while the game is running,
+        // which is never when settings are applied. Include it by name: an override on an
+        // executable that does not exist costs nothing, and this is the binary that renders.
+        targets.insert("popcapgame1.exe")
+        let popcap = bottle.driveC.appendingPathComponent("ProgramData/PopCap Games", isDirectory: true)
+        let fm = FileManager.default
+        for dir in (try? fm.contentsOfDirectory(at: popcap, includingPropertiesForKeys: nil)) ?? [] {
+            for file in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+            where file.pathExtension.lowercased() == "exe" {
+                targets.insert(file.lastPathComponent)
+            }
+        }
+
+        if targets.isEmpty {
+            if bottle.settings.software2D { console.append("Software 2D: no target executable found.") }
+            return
+        }
+        for target in targets.sorted() {
+            let key = #"HKCU\Software\Wine\AppDefaults\"# + target + #"\Direct3D"#
+            let args = ["reg", "add", key, "/v", "renderer", "/t", "REG_SZ", "/d", "no3d", "/f"]
+            console.append("Software 2D ON for \(target)")
+            _ = try? await Shell.run(installation.loader, arguments: args, environment: env)
+        }
     }
 
     /// Launch one of Wine's built-in tools (winecfg, regedit, …).

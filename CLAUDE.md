@@ -724,6 +724,68 @@ that. objdump's format is `addr: bytes<TAB>mnemonic<TAB>operands`; split on TAB 
 does not use Metal", which was wrong — the loaded binary images (`com.apple.Metal`, `AGXMetalG17G`)
 prove otherwise. Check loaded images, not an overlay.
 
+## ✅ Peggle SOLVED — old 2D games need the SOFTWARE renderer (2026-08-08)
+
+**Measured: 17.8 fps → 90.1 fps mean** (max 100.5, n=363 during real play). Ship it via
+**Configuration → "Old 2D game — software rendering"** (`BottleSettings.software2D`).
+
+**Why it works, and why it is counter-intuitive.** Peggle issues **3,567 draw calls per frame** —
+one 4-vertex quad per sprite, from a user-memory pointer, all sharing ONE vertex format and 92
+textures. Each costs **~62,300 cycles** (a native draw is 1,000–3,000, so ~31x). The reason is
+specific to macOS: wined3d must map a GL buffer per user-pointer draw, upstream fixed that with
+persistent buffers (`ARB_buffer_storage`), and that extension needs **GL 4.4** while **Apple caps
+OpenGL at 4.1** — verified here: `GL_VERSION: 4.1 Metal`, extension absent from all 43.
+
+So the per-draw tax is unavoidable on a Mac. Software rendering does MORE pixel work but presents
+**one surface per frame instead of 3,567 draws**, so it skips the tax entirely. At 10,000 cycles per
+draw the game would have hit 112 fps; it never exceeded 30 in hardware mode.
+
+**This is why old games suffer and modern ones do not.** Draw calls were cheap in 2007, so engines
+spent them freely; modern engines batch because driver overhead became the limit. Translation
+layers tax per-call overhead — punishing exactly what old games do most. Sekiro is smooth because
+it makes hundreds of calls, not thousands.
+
+### Implementation traps, all of which bit
+
+- **Wine's per-app key is the right lever**: `HKCU\Software\Wine\AppDefaults\<exe>\Direct3D`
+  → `renderer=no3d`. **NEVER prefix-wide** — Steam, Sekiro and JJBA share `Steam-Wine11`.
+- **The resolved exe is a DRM WRAPPER.** Steam launches `Peggle.exe`, which unpacks and runs
+  `C:\ProgramData\PopCap Games\Peggle\popcapgame1.exe` — and **the unpacked process is the one
+  that renders**. An override on the wrapper does nothing. Worse, the wrapper DELETES the unpacked
+  binary on exit, so a filesystem sweep finds it only while the game runs — i.e. never, when
+  settings are applied. `popcapgame1.exe` is therefore added by name.
+- **Bottles sharing a prefix fight over per-exe keys.** The first version swept for extra targets on
+  BOTH the on and off paths, so a bottle with the setting OFF deleted the override another bottle
+  had just written. Symptom: the key existed but was empty, with a newer timestamp than the write.
+  Turning the setting off now touches only the executable that bottle itself resolves to.
+- **A launcher bottle resolves no game** ("Steam: no game (launcher bottle)") — but that is exactly
+  where an old 2D title gets launched from, so the logic must not be gated on resolving one.
+- **`Is3D=0` in `HKCU\Software\Steam\Peggle` works identically** (it is the game's own setting)
+  and logs cleaner — no `ddraw_texture_init` warnings. It is PopCap-specific, so the shipped fix
+  uses the game-agnostic wine key. Both measured at ~100 fps on the menu.
+
+### ⚠️ Adding a field to `BottleSettings` USED to corrupt every existing install
+
+Swift's **synthesized** decoder throws `keyNotFound` for a missing key on a non-optional property
+**even when it has a default**. Adding `software2D` made 3 of 4 bottles undecodable instantly —
+Decanter salvaged 1 and backed the rest up. The file was intact; the decoder was the problem. The
+old workaround ("make new fields Optional") relied on every future author remembering.
+
+`BottleSettings` now has a hand-written `init(from:)` using `decodeIfPresent` with defaults for
+every field. **Add new fields freely — give them a default and decode them there.**
+
+### Tooling notes from this hunt
+
+- **Registry reads are stale until wineserver flushes.** `reg query` and `user.reg` both lied
+  repeatedly right after a write, and a concurrently-running wineserver silently reverted a delete
+  by flushing its own copy on exit. Kill the server, sleep, THEN read the file.
+- **`reg delete /v` empties a key but leaves it present** — check for the VALUE, not the key.
+- **`sample` cannot attribute per-thread CPU** (it ticks every thread, running or blocked) and under
+  Rosetta a blocked thread's leaf is `???` like a busy one. Use `ps -M <pid>`.
+- **Count draw calls with `WINEDEBUG=+ddraw`**, not a profiler: the sampler could not distinguish
+  the game's code from wine's `ddraw.dll` (both are PE modules in the same JIT buffer, unsymbolized).
+  The API trace settled in one command what sampling could not.
+
 ## Verification habits that mattered
 
 - **Screenshots beat logs.** `screencapture -x` + Read. Logs said "0 errors" while the screen was

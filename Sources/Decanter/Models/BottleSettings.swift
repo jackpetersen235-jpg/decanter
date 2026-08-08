@@ -150,6 +150,23 @@ struct BottleSettings: Codable, Equatable {
     var metalFXFactor: Double = 2.0
     var dxvkHUD: Bool = false         // DXVK_HUD — DXVK's own overlay
     var advertiseAVX: Bool = true     // ROSETTA_ADVERTISE_AVX — several GPTk games require AVX
+
+    /// Force the game's SOFTWARE renderer (old 2D DirectDraw/D3D7 titles).
+    ///
+    /// Counter-intuitive, and measured: Peggle Deluxe issues **3,567 draw calls per frame** — one
+    /// 4-vertex quad per sprite, from a user-memory pointer. Each costs ~62,300 cycles through
+    /// ddraw → wined3d → OpenGL (a native draw is 1,000–3,000), because wined3d must map a GL
+    /// buffer per draw and the upstream fix for that needs `ARB_buffer_storage`, which requires
+    /// GL 4.4 — while **Apple caps OpenGL at 4.1**. So the per-draw tax cannot be avoided on macOS.
+    ///
+    /// Rendering in software does more pixel work but presents ONE surface per frame instead of
+    /// 3,567 draws, sidestepping the tax entirely. Measured on Peggle: **17.8 fps → 90.1 fps mean**
+    /// (max 100.5, n=363 during real play).
+    ///
+    /// Applied per-executable, never prefix-wide — three bottles here share `Steam-Wine11`, and
+    /// denying 3D to Sekiro would be catastrophic.
+    var software2D: Bool = false
+
     var retinaMode: Bool = false      // HiDPI rendering inside the prefix
     var dpi: Int = 96                 // LogPixels
     var verboseLogging: Bool = false  // WINEDEBUG toggle
@@ -200,6 +217,47 @@ struct BottleSettings: Codable, Equatable {
 
     /// Environment variables implied purely by these settings (no Wine paths — those are
     /// added by `Wine.environment(...)`).
+    // MARK: - Codable
+
+    /// Decode every field with `decodeIfPresent`, falling back to the property's default.
+    ///
+    /// ⚠️ THE REASON THIS EXISTS. Swift's *synthesized* decoder throws `keyNotFound` for a missing
+    /// key on a non-optional property **even when that property has a default value**. So adding
+    /// any new non-optional field silently makes every previously-saved bottle undecodable — on
+    /// update, a user's bottles.json partially fails to load and Decanter salvages what it can.
+    ///
+    /// That is not hypothetical: adding `software2D` did exactly this here, and 3 of 4 bottles
+    /// stopped decoding. The file was intact; the decoder was the problem. The old workaround was
+    /// "make new fields Optional", which relies on every future author remembering. This does not.
+    ///
+    /// **Add new fields freely — just give them a default and decode them here.**
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func v<T: Decodable>(_ k: CodingKeys, _ fallback: T) -> T {
+            (try? c.decodeIfPresent(T.self, forKey: k)) .flatMap { $0 } ?? fallback
+        }
+        windowsVersion  = v(.windowsVersion, .win10)
+        syncMode        = v(.syncMode, .msync)
+        graphics        = v(.graphics, .dxmt)
+        metalHUD        = v(.metalHUD, false)
+        metalFX         = v(.metalFX, false)
+        metalFXFactor   = v(.metalFXFactor, 2.0)
+        dxvkHUD         = v(.dxvkHUD, false)
+        advertiseAVX    = v(.advertiseAVX, true)
+        software2D      = v(.software2D, false)
+        retinaMode      = v(.retinaMode, false)
+        dpi             = v(.dpi, 96)
+        verboseLogging  = v(.verboseLogging, false)
+        esyncFileLimit  = v(.esyncFileLimit, true)
+        environment     = v(.environment, [:])
+        steamArguments  = v(.steamArguments, "-no-cef-sandbox -skipinitialbootstrap")
+        directExecutable = try? c.decodeIfPresent(String.self, forKey: .directExecutable)
+        engineProfile    = try? c.decodeIfPresent(EngineProfile.self, forKey: .engineProfile)
+        steamAppID       = try? c.decodeIfPresent(String.self, forKey: .steamAppID)
+    }
+
+    init() {}
+
     var derivedEnvironment: [String: String] {
         var env: [String: String] = [:]
 
