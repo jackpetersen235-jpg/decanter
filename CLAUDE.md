@@ -132,12 +132,10 @@ candidate fix threatens the setup that already works:
 - **Rosetta 2 emulates x87 floating point in software** — reportedly ~100× slower than it should
   be. Pre-2010 games do their maths on the x87 FPU, so they fall off a cliff while modern 64-bit
   titles (SSE) are fine.
-  ⚠️ **This was written as the explanation for Peggle Deluxe. MEASUREMENT SAYS IT IS NOT.** See
-  §"Peggle Deluxe — what the measurements actually showed" below. Peggle is indeed 32-bit and
-  translated, but the bottleneck is Wine's DirectDraw front-buffer path, not x87. The claim was
-  reasoned, never measured, and it cost two wrong fixes (a DXVK switch and a byte-identical engine
-  clone) before anyone ran a profiler. **Treat it as an untested hypothesis for any given game
-  until that game has been sampled.**
+  ⚠️ For Peggle this was asserted long before it was measured, and it cost two wrong fixes (a DXVK
+  switch, then a byte-identical engine clone). It is now **supported by measurement but still not
+  causally proven** — see §"Peggle Deluxe — what the measurements actually showed". **Treat it as a
+  hypothesis for any given game until that game has been disassembled and sampled.**
 - The known fixes ([x87sidecar](https://github.com/athei/x87sidecar),
   [rosettax87](https://github.com/Lifeisawful/rosettax87)) hook Rosetta's `translate_insn`. The
   no-root "cooperative" mode needs a **patched Wine**; our engine has no such handshake (verified:
@@ -681,11 +679,37 @@ override, a launch option, an x87 hook — lands on the wrapper and misses the g
   Apple's `AppleMetalOpenGLRenderer`, never a DXMT/DXVK `d3d9.dll`. Every backend experiment aimed
   at this game was aimed at a layer it does not use.
 
-**The real bottleneck:** one thread at ~97% inside `ddraw_surface_update_frontbuffer` — Wine's
-DirectDraw front-buffer path. ~13 fps in ordinary play against a 60 fps ceiling, collapsing to
-**1 fps during Extreme Fever**, the end-of-level effect that floods the screen with alpha-blended
-sprites. The collapse is discrete (18 → 1 → back to 27), not gradual, so it is a per-blit cost, not
-accumulation.
+**The real bottleneck: the GAME'S OWN CODE, translated.** Two independent samples caught during
+the Extreme Fever collapse (auto-triggered when fps dropped below 4) agree closely:
+
+| | Fever #1 | Fever #2 |
+|---|---|---|
+| game's own translated code (`???`, `<unknown binary>`) | 93.7% | 91.1% |
+| Rosetta Runtime Routines | 4.3% | 4.2% |
+| OpenGL / ddraw / wined3d | ~0% | 0.4% |
+
+**`ddraw_surface_update_frontbuffer` was a red herring, and the direction of causation was
+backwards.** That counter measures the PRESENTATION RATE. It reads low because the game takes ~1 s
+to produce a frame — it is the symptom, not the mechanism. A counter that goes down when things get
+slow is not automatically where the time goes.
+
+**The binary is overwhelmingly x87** (`objdump -d --triple=i386-pc-windows`):
+
+```
+total instructions : 661,894
+x87 FP             :  29,944  (4.52%)   fdivrp, fabs, fstl, fsqrt, frndint …
+SSE/MMX            :     411  (0.06%)
+```
+
+73x more x87 than SSE — the signature of a 2007 32-bit binary, and Rosetta emulates x87 in
+software. Combined with ~92% of Fever time sitting in that translated code, x87 emulation is the
+leading explanation. **It is still not causally proven**: proving it requires running the same
+scene under an x87 acceleration hook (`x87sidecar` / `rosettax87`) and comparing fps. Until that
+test is run, this is a well-evidenced hypothesis, not a finding.
+
+⚠️ **Beware disassembly-counting scripts.** A first pass reported "0 x87 instructions" because it
+took "the first alphabetic token" as the mnemonic — and hex byte pairs (`de`, `fa`, `ff`) match
+that. objdump's format is `addr: bytes<TAB>mnemonic<TAB>operands`; split on TAB and read field 2.
 
 **`MTL_HUD_ENABLED=1` draws nothing in a `winemac.drv` window.** Its absence was read as "the game
 does not use Metal", which was wrong — the loaded binary images (`com.apple.Metal`, `AGXMetalG17G`)
