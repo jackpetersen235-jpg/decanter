@@ -131,9 +131,13 @@ candidate fix threatens the setup that already works:
 
 - **Rosetta 2 emulates x87 floating point in software** — reportedly ~100× slower than it should
   be. Pre-2010 games do their maths on the x87 FPU, so they fall off a cliff while modern 64-bit
-  titles (SSE) are fine. This is why Peggle Deluxe crawls while Sekiro and JJBA are smooth, and why
-  changing the graphics backend — DXMT, DXVK, WineD3D — makes no difference at all. **The graphics
-  API was never the constraint.**
+  titles (SSE) are fine.
+  ⚠️ **This was written as the explanation for Peggle Deluxe. MEASUREMENT SAYS IT IS NOT.** See
+  §"Peggle Deluxe — what the measurements actually showed" below. Peggle is indeed 32-bit and
+  translated, but the bottleneck is Wine's DirectDraw front-buffer path, not x87. The claim was
+  reasoned, never measured, and it cost two wrong fixes (a DXVK switch and a byte-identical engine
+  clone) before anyone ran a profiler. **Treat it as an untested hypothesis for any given game
+  until that game has been sampled.**
 - The known fixes ([x87sidecar](https://github.com/athei/x87sidecar),
   [rosettax87](https://github.com/Lifeisawful/rosettax87)) hook Rosetta's `translate_insn`. The
   no-root "cooperative" mode needs a **patched Wine**; our engine has no such handshake (verified:
@@ -645,6 +649,47 @@ that calls `sin()` in a loop: `sin` came out top at 687 samples.
 **The legacy engine is a byte-identical clone and cannot change performance.** Verified with
 `diff -rq`: **0 differing files** against the tuned engine. Switching to it is expected to change
 nothing — it is isolation for experiments, not a fix. Say that out loud before suggesting it.
+
+## Peggle Deluxe — what the measurements actually showed (2026-08-08)
+
+Installed the WINDOWS build into the `Steam-Wine11` bottle and profiled it live. Everything below
+is measured on an M5 Air; the earlier x87 story was reasoning and was wrong.
+
+**How it runs:** Steam launches `peggle.exe`, a DRM shell that unpacks and runs
+`C:\ProgramData\PopCap Games\Peggle\popcapgame1.exe`. **Anything aimed at `Peggle.exe` — a DLL
+override, a launch option, an x87 hook — lands on the wrapper and misses the game.**
+
+**The numbers:**
+
+| config | CPU | hot threads | fps (active) |
+|---|---|---|---|
+| stock | 207% | 98.6% + 96.4% | 12.7 avg, 32 max |
+| `csmt=0` | 109% | 97.2% | ~15 |
+| `csmt=0` + `VideoMemorySize=4096` | 110% | 97.5% | ~14 — **no effect** |
+| `renderer=vulkan` | 102% | 59% + 43% | **BROKEN — hangs on the loading screen** |
+
+- **`csmt=0` is a genuine win: a whole core back, no frame-rate cost.** WineD3D's command-stream
+  thread busy-polls; under Rosetta that costs a full core. Frame rate is unchanged, so it is a
+  power/heat fix, not a speed fix.
+- **`renderer=vulkan` looked like a 2.5× win and was an artifact.** It reported 60 fps because the
+  game was animating its LOADING BAR and never finished loading. Six presented frames in 120 s
+  while burning 102% CPU. **A frame-rate win with an implausibly low sample count means the game is
+  not running — screenshot before believing any number.**
+- **`renderer=gdi` is not a valid value on this build** (`strings wined3d.dll` → only `no3d`,
+  `vulkan`). Wine responds by *disabling 3D entirely* and the game will not open.
+- **DXMT and DXVK are irrelevant here.** Peggle is DirectDraw; the process loads `opengl32.so` and
+  Apple's `AppleMetalOpenGLRenderer`, never a DXMT/DXVK `d3d9.dll`. Every backend experiment aimed
+  at this game was aimed at a layer it does not use.
+
+**The real bottleneck:** one thread at ~97% inside `ddraw_surface_update_frontbuffer` — Wine's
+DirectDraw front-buffer path. ~13 fps in ordinary play against a 60 fps ceiling, collapsing to
+**1 fps during Extreme Fever**, the end-of-level effect that floods the screen with alpha-blended
+sprites. The collapse is discrete (18 → 1 → back to 27), not gradual, so it is a per-blit cost, not
+accumulation.
+
+**`MTL_HUD_ENABLED=1` draws nothing in a `winemac.drv` window.** Its absence was read as "the game
+does not use Metal", which was wrong — the loaded binary images (`com.apple.Metal`, `AGXMetalG17G`)
+prove otherwise. Check loaded images, not an overlay.
 
 ## Verification habits that mattered
 
