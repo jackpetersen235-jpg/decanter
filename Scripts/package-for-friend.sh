@@ -76,6 +76,11 @@ MD
 cp "$ROOT/Scripts/updater-template.command" "$STAGE/UPDATE Decanter.command"
 chmod +x "$STAGE/UPDATE Decanter.command"
 
+# Optional helper for OLD 32-bit games only. Not wired into the app: it needs an admin password
+# and a third-party binary the user must fetch themselves, so it stays an explicit, opt-in step.
+cp "$ROOT/Scripts/x87-launch.command" "$STAGE/OPTIONAL - speed up old games.command"
+chmod +x "$STAGE/OPTIONAL - speed up old games.command"
+
 # Ship the debugging guide alongside the app. If the friend asks an AI for help, that assistant
 # lands in a machine it has never seen; the guide is written for exactly that situation.
 [ -f "$ROOT/docs/DEBUGGING-GUIDE.md" ] && \
