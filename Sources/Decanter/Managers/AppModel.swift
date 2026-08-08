@@ -462,7 +462,22 @@ final class AppModel: ObservableObject {
 
     func rescanInstallations() {
         installations = Wine.discover(extraDirectories: extraWineDirectories)
-        if defaultInstallationID == nil { defaultInstallationID = installations.first?.id }
+
+        // SELF-HEAL A STALE DEFAULT.
+        //
+        // `defaultInstallationID` is persisted in UserDefaults, so it survives the engine it names
+        // being moved, renamed or deleted. The old test was `== nil`, which a stale id is not — so
+        // the default kept pointing at nothing, `defaultInstallation` stayed nil, the UI kept
+        // saying "No Wine build", and pressing Rescan changed nothing. That is precisely the state
+        // the button exists to get you out of.
+        let resolves = defaultInstallationID.map { id in
+            installations.contains { $0.id == id }
+        } ?? false
+        if !resolves {
+            // Prefer Decanter's own engine over whatever happens to be discovered first: on a Mac
+            // with Whisky installed, "first" is wine-7.7, which cannot run modern Steam.
+            defaultInstallationID = decanterEngine?.id ?? installations.first?.id
+        }
         isRosettaInstalled = SystemChecks.isRosettaInstalled
         // Best-effort version labels in the background.
         Task { await enrichVersions() }
