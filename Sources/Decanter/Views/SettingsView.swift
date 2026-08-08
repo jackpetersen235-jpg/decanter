@@ -56,12 +56,7 @@ struct SettingsView: View {
                 HStack {
                     Button("Rescan") {
                         model.rescanInstallations()
-                        let n = model.installations.count
-                        // Say what happened AND what to do about it. "0 found" alone leaves someone
-                        // with no engine exactly as stuck as silence did.
-                        rescanResult = n == 0
-                            ? "No Wine builds found. Use View ▸ Setup Assistant to install one."
-                            : "Found \(n) Wine build\(n == 1 ? "" : "s")."
+                        rescanResult = model.rescanSummary()
                     }
                     Button("Add Wine bin folder…") {
                         if let url = Panels.chooseDirectory(prompt: "Select Wine bin folder") {

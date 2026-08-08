@@ -435,7 +435,7 @@ final class AppModel: ObservableObject {
         // remembering to add a second special case here; that is how the third one would break too.
         if profile != .offline, !isEngineInstalled(profile) {
             guard await cloneEngine(for: profile) else {
-                return "Could not create the \(profile.label) engine."
+                return "Could not create the \(profile.shortName) engine."
             }
             rescanInstallations()   // the clone is new on disk; discovery has not seen it yet
         }
@@ -648,6 +648,28 @@ final class AppModel: ObservableObject {
         case .online:  return Paths.onlineEngineRoot
         case .legacy:  return Paths.legacyEngineRoot
         }
+    }
+
+    /// One line describing what a Rescan found — and what it deliberately did NOT find.
+    ///
+    /// A bare count is worse than it looks. Rescan only *discovers* engines that already exist, but
+    /// Online and Legacy are created on demand when a bottle selects them, so a machine that has
+    /// never used them truthfully reports "Found 2" forever. Reported as "even when I click rescan
+    /// it doesn't show anything new" — the button was doing its job and saying nothing about the
+    /// one thing the person was actually waiting for.
+    func rescanSummary() -> String {
+        if installations.isEmpty {
+            return "No Wine builds found. Use View ▸ Setup Assistant to install one."
+        }
+        let n = installations.count
+        let found = "Found \(n) Wine build\(n == 1 ? "" : "s")."
+        let missing = [EngineProfile.online, .legacy].filter { !isEngineInstalled($0) }
+        guard !missing.isEmpty else { return found }
+        let names = missing.map(\.shortName).joined(separator: " and ")
+        return found + " The \(names) engine\(missing.count == 1 ? "" : "s") "
+            + "build\(missing.count == 1 ? "s" : "") automatically when you pick "
+            + "\(missing.count == 1 ? "it" : "one") in a bottle's Configuration ▸ Engine — "
+            + "Rescan can't create \(missing.count == 1 ? "it" : "them")."
     }
 
     /// Is this profile's engine present?

@@ -55,6 +55,18 @@ enum EngineProfile: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    /// The bare name, for use inside a sentence.
+    ///
+    /// `label` carries a parenthetical that reads well in a picker and badly anywhere else —
+    /// "Could not create the Legacy (old 32-bit games) engine."
+    var shortName: String {
+        switch self {
+        case .offline: return "Offline"
+        case .online:  return "Online"
+        case .legacy:  return "Legacy"
+        }
+    }
+
     var detail: String {
         switch self {
         case .offline: return "The engine your games are tuned on. Best framerate, no online changes."

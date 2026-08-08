@@ -594,6 +594,32 @@ What to look for when checking by hand:
   opaque, the sidebar loses its material.
 - **Increase contrast** — Aero button fills darken by 18% (`AeroButtonStyle`).
 
+## "Why is this game slow" — measure it (`Scripts/profile-slow-game.command`)
+
+Peggle Deluxe was guessed at **twice** — first the graphics backend (DXVK), then the Wine engine
+(the legacy profile). Both were plausible, both were wrong, and each cost a round trip with someone
+else's Mac in the loop. The script reports the three facts that separate the real causes:
+
+1. **Is the .exe 32-bit or 64-bit?** (`file` on the resolved path.) This is the discriminator. A
+   64-bit game uses SSE and is NOT subject to Rosetta's software x87 emulation, which would kill
+   the whole x87 theory outright. Guessing at the cause without this is guessing twice.
+2. **Is Rosetta actually translating it?**
+3. **Where did the time go?** (`sample`, aggregated by symbol.)
+
+**⚠️ `grep -i rosetta` on a sample is ALWAYS a false positive.** `libRosetta.dylib` is loaded into
+every process on Apple silicon, *including native arm64 ones* — verified against a native arm64
+test binary, which reported "Rosetta IS translating this process". Match the translator itself:
+`/usr/libexec/rosetta` or `libRosettaRuntime`. Same bug class as `pgrep -f` matching its own argv:
+**a substring that happens to be present is not evidence of the thing you are looking for.**
+
+Also drop `start`, `main` and `Thread_N` from a symbol tally — they hold every thread's full weight
+by definition, so they always top the list and say nothing. Validated end-to-end against a spinner
+that calls `sin()` in a loop: `sin` came out top at 687 samples.
+
+**The legacy engine is a byte-identical clone and cannot change performance.** Verified with
+`diff -rq`: **0 differing files** against the tuned engine. Switching to it is expected to change
+nothing — it is isolation for experiments, not a fix. Say that out loud before suggesting it.
+
 ## Verification habits that mattered
 
 - **Screenshots beat logs.** `screencapture -x` + Read. Logs said "0 errors" while the screen was

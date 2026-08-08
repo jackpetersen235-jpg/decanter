@@ -81,6 +81,11 @@ chmod +x "$STAGE/UPDATE Decanter.command"
 cp "$ROOT/Scripts/x87-launch.command" "$STAGE/OPTIONAL - speed up old games.command"
 chmod +x "$STAGE/OPTIONAL - speed up old games.command"
 
+# The "why is this game slow" profiler. Peggle was guessed at twice — first the graphics backend,
+# then the Wine engine — and both guesses were wrong. This produces evidence instead.
+cp "$ROOT/Scripts/profile-slow-game.command" "$STAGE/WHY IS MY GAME SLOW - run while playing.command"
+chmod +x "$STAGE/WHY IS MY GAME SLOW - run while playing.command"
+
 # Ship the debugging guide alongside the app. If the friend asks an AI for help, that assistant
 # lands in a machine it has never seen; the guide is written for exactly that situation.
 [ -f "$ROOT/docs/DEBUGGING-GUIDE.md" ] && \
