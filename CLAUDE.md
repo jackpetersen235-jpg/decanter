@@ -146,6 +146,31 @@ candidate fix threatens the setup that already works:
 So the legacy profile is a **container for that experimentation**, not a fix in itself. What goes
 in it is a separate decision; what matters is that it cannot reach the engine Sekiro depends on.
 
+**A profile that cannot CREATE its engine is not a profile — it is an error message.**
+
+`setEngineProfile` auto-created the engine only for `.online`, hardcoded. `.legacy` was therefore
+usable exactly on the one Mac where the clone had been made by hand, and nowhere else: selecting
+Legacy fell through to the `installations` check and returned *"That engine isn't available"*.
+Pressing **Rescan** could not help either — discovery lists the legacy path, but there was nothing
+on disk to find, and Rescan reported nothing at all, so it read as a broken button.
+
+Reported as "even when I click rescan it doesn't show anything new". The screenshot settled it in
+one detail: the paths read `/Users/<friend>/...`, so it was the FRIEND's Mac, where **only**
+`Wine` and `Whisky` exist. Check the username in a screenshot before assuming whose machine it is —
+the entire diagnosis turned on it.
+
+Fixed by generalising: any non-offline profile clones on demand, then rescans. Verified by moving
+`WineLegacy` aside to reproduce his state exactly, then `--engine legacy` (created it, 719 MB tree,
+~0 disk) and `--engine offline` to restore. **Restore the bottles afterwards** — that test leaves
+Sekiro and JJBA pointing at the legacy engine; confirm from `bottles.json`, not the command output.
+
+`--reset-engine` reported a bare `FAILED` during this because Steam was running and the guard
+correctly refused. The guard is right; the silence is not — a headless failure with no reason
+printed sends you looking for a bug that isn't there.
+
+**Rescan now says what it found.** A control that does real work silently is one users conclude is
+dead, and this one had no output whatsoever.
+
 **Two things that bit during implementation:**
 
 - **A new engine must be added to `Wine.swift`'s discovery list.** Creating the directory is not

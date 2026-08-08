@@ -426,8 +426,18 @@ final class AppModel: ObservableObject {
         if steamUp || gameUp {
             return "Quit Steam and any running game first, then switch."
         }
-        if profile == .online, !isOnlineEngineInstalled {
-            guard await cloneEngineForOnline() else { return "Could not create the online engine." }
+        // Create the engine on demand for ANY non-offline profile, not just online.
+        //
+        // This was hardcoded to `.online`, so `.legacy` was only ever usable on a machine where
+        // someone had cloned it by hand. Everywhere else, selecting Legacy fell through to the
+        // installations check and failed with "That engine isn't available" — and Rescan could not
+        // help, because there was no engine on disk to find. Adding a profile must not mean
+        // remembering to add a second special case here; that is how the third one would break too.
+        if profile != .offline, !isEngineInstalled(profile) {
+            guard await cloneEngine(for: profile) else {
+                return "Could not create the \(profile.label) engine."
+            }
+            rescanInstallations()   // the clone is new on disk; discovery has not seen it yet
         }
         guard installations.contains(where: {
             $0.binDirectory.standardizedFileURL == profile.binDirectory.standardizedFileURL

@@ -4,6 +4,14 @@ struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var themeController: ThemeController
 
+    /// What the last Rescan actually found.
+    ///
+    /// Rescan used to report NOTHING. When it found nothing new — the common case, since it only
+    /// re-reads fixed locations — the button was indistinguishable from a broken one, which is
+    /// exactly how it was reported. A control that does work silently is a control users conclude
+    /// is dead.
+    @State private var rescanResult: String?
+
     var body: some View {
         Form {
             Section("Appearance") {
@@ -46,12 +54,24 @@ struct SettingsView: View {
                     }
                 }
                 HStack {
-                    Button("Rescan") { model.rescanInstallations() }
+                    Button("Rescan") {
+                        model.rescanInstallations()
+                        let n = model.installations.count
+                        // Say what happened AND what to do about it. "0 found" alone leaves someone
+                        // with no engine exactly as stuck as silence did.
+                        rescanResult = n == 0
+                            ? "No Wine builds found. Use View ▸ Setup Assistant to install one."
+                            : "Found \(n) Wine build\(n == 1 ? "" : "s")."
+                    }
                     Button("Add Wine bin folder…") {
                         if let url = Panels.chooseDirectory(prompt: "Select Wine bin folder") {
                             model.addWineDirectory(url)
+                            rescanResult = "Added. Now \(model.installations.count) Wine build(s)."
                         }
                     }
+                }
+                if let rescanResult {
+                    Text(rescanResult).font(.caption).foregroundStyle(.secondary)
                 }
             }
 
