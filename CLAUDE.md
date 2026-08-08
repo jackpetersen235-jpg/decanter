@@ -129,9 +129,18 @@ mechanism: an APFS clone of the tuned engine (measured again here — **0.00 GB 
 It exists because old 32-bit titles hit a wall the tuned engine cannot help with, and every
 candidate fix threatens the setup that already works:
 
-- **Rosetta 2 emulates x87 floating point in software** — reportedly ~100× slower than it should
-  be. Pre-2010 games do their maths on the x87 FPU, so they fall off a cliff while modern 64-bit
-  titles (SSE) are fine.
+- **Rosetta 2 emulates x87 floating point in software — MEASURED at ~10x on this M5**, not the
+  "~100x" this file used to quote from hearsay. Benchmark (same loop, `long double` forces x87,
+  `double` uses SSE; `Scripts/../scratchpad x87bench.c`):
+
+  | | SSE (double) | x87 (long double) | ratio |
+  |---|---|---|---|
+  | native arm64 | 0.147 s | 0.122 s | 0.8x |
+  | x86_64 under Rosetta | 0.123 s | 1.248 s | **10.1x** |
+
+  **Rosetta's SSE path is free** (0.123 s translated vs 0.147 s native) — translation itself is not
+  slow. x87 is the only penalty, and it is ~10x vs native. Pre-2010 games do their maths on the x87
+  FPU, so they fall off a cliff while modern 64-bit titles (SSE) are unaffected.
   ⚠️ For Peggle this was asserted long before it was measured, and it cost two wrong fixes (a DXVK
   switch, then a byte-identical engine clone). It is now **supported by measurement but still not
   causally proven** — see §"Peggle Deluxe — what the measurements actually showed". **Treat it as a
