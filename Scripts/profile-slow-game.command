@@ -81,32 +81,54 @@ fi
 # Is Rosetta in the picture at all, and how much of the time is spent inside it?
 # `grep -c` prints 0 AND exits 1 when a file has no matches, so `|| echo 0` would produce TWO
 # lines. Sanitise instead — this exact idiom caused a 160-second hang elsewhere in this project.
-count() { grep -ci "$1" "$TMP" 2>/dev/null | head -1 | tr -dc '0-9'; }
-TOTAL=$(count "Thread_"); TOTAL=${TOTAL:-0}
-# Match the TRANSLATOR, not the string "rosetta". libRosetta.dylib is loaded into EVERY process on
-# Apple silicon, including native arm64 ones, so a bare grep for "rosetta" reports translation on
-# a process that is not being translated — verified against a native arm64 test binary. The actual
-# translator is /usr/libexec/rosetta/... or libRosettaRuntime, and neither appears unless it is real.
-ROSETTA=$(count "/usr/libexec/rosetta\|libRosettaRuntime"); ROSETTA=${ROSETTA:-0}
+# ASK THE HEADER, don't guess from substrings. `sample` states this outright:
+#   Code Type:       X86-64 (translated)
+# Two earlier attempts got this wrong in both directions. `grep -i rosetta` matched
+# libRosetta.dylib, which is loaded into EVERY process including native arm64 ones -> false
+# POSITIVE. Narrowing to /usr/libexec/rosetta then matched nothing on a process the header
+# explicitly marks as translated -> false NEGATIVE, because the frames are labelled
+# "Rosetta Runtime Routines". The header is authoritative; use it.
+CODETYPE=$(grep -m1 '^Code Type:' "$TMP" | sed 's/^Code Type: *//')
 
 echo
 echo "TRANSLATION"
-if [ "$ROSETTA" -gt 0 ]; then
-  echo "  Rosetta 2 IS translating this process ($ROSETTA references)."
-  [ "${BITS:-0}" = "32" ] && echo "  Combined with a 32-bit binary, x87 emulation is the prime suspect."
-else
-  echo "  No Rosetta frames seen — this is running natively or the sample missed it."
-fi
+echo "  Code Type: ${CODETYPE:-unknown}"
+case "$CODETYPE" in
+  *translated*)
+    echo "  -> Rosetta 2 IS translating this process."
+    [ "${BITS:-0}" = "32" ] && echo "  -> 32-bit AND translated: x87 software emulation is the prime suspect."
+    ;;
+  *) echo "  -> Not translated (running natively)." ;;
+esac
 
 echo
 echo "TOP FRAMES (where the time actually went)"
-# Leading integers in a sample file are sample counts; the heaviest lines are the hot paths.
-# Drop the frame-tree ROOTS: start/main/Thread_N carry the entire weight of every thread by
-# definition, so they always top the list and say nothing about where the time went.
-grep -oE '[0-9]+ [A-Za-z_][A-Za-z0-9_:.$<>-]+' "$TMP" \
-  | awk '{c[$2]+=$1} END {for (k in c) printf "%8d  %s\n", c[k], k}' \
-  | grep -vE ' (start|main|start_wqthread|_pthread_[a-z_]+|Thread_[0-9]+)$' \
-  | sort -nr | head -15 | sed 's/^/ /'
+# COUNT LEAVES ONLY. `sample` prints a call TREE and repeats a frame's count at every level of
+# nesting ("+ ! :   | 5262 foo"), so tallying every matching line multiplies each frame by how
+# deep it sits. The first version did exactly that and reported 24 MILLION samples from an
+# 8-second capture — a number that cannot exist and should have been caught on sight.
+#
+# A frame is a leaf when the NEXT line is not deeper than it. The leading run of " +!:|" is the
+# depth. awk rather than python3: a stock Mac need not have python3, but awk is always there.
+awk '
+  {
+    if (match($0, /^[ +!:|]*/)) { d = RLENGTH; rest = substr($0, d + 1) } else next
+    if (match(rest, /^[0-9]+ /)) {
+      c = substr(rest, 1, RLENGTH - 1) + 0
+      sym = substr(rest, RLENGTH + 1)
+      sub(/^[ \t]+/, "", sym)          # or the same symbol tallies twice, once per indent width
+      sub(/  \(in .*/, "", sym); sub(/ \+ [0-9]+.*/, "", sym)
+      # The previous frame was a leaf iff this one is not deeper than it.
+      if (have && d <= pd) { tally[ps] += pc; total += pc }
+      pd = d; pc = c; ps = sym; have = 1
+    }
+  }
+  END {
+    if (have) { tally[ps] += pc; total += pc }
+    if (total < 1) total = 1
+    for (k in tally) printf "%7.1f%%  %8d  %s\n", 100 * tally[k] / total, tally[k], k
+  }
+' "$TMP" | sort -rn | head -15 | sed 's/^/ /'
 
 cp "$TMP" "$HOME/Desktop/decanter-sample-raw.txt" 2>/dev/null
 rm -f "$TMP"

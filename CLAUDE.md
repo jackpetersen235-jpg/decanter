@@ -606,6 +606,32 @@ else's Mac in the loop. The script reports the three facts that separate the rea
 2. **Is Rosetta actually translating it?**
 3. **Where did the time go?** (`sample`, aggregated by symbol.)
 
+**Both of the profiler's readouts were wrong the first time it met a real game.** Fixed and
+regression-tested against Peggle's own sample; the lesson in each is general:
+
+- **Rosetta detection swung from false positive to false NEGATIVE.** After narrowing the match to
+  `/usr/libexec/rosetta`, it reported "no Rosetta frames" for a process whose header literally says
+  `Code Type: X86-64 (translated)` — the frames are labelled *"Rosetta Runtime Routines"*. Read the
+  `Code Type:` header; it is authoritative and needs no guessing.
+- **The symbol tally counted every tree line.** `sample` prints a call TREE and repeats a frame's
+  count at every nesting level, so summing all lines multiplies each frame by its depth. It
+  reported **24 million samples from an 8-second capture** — a number that cannot exist and should
+  have been caught on sight. Count LEAVES only: a frame is a leaf when the next line is not deeper.
+
+**`sample` cannot tell you which threads are burning CPU.** It ticks every thread each interval
+whether running or blocked, so all threads show near-identical counts (they looked like "49.2% of a
+core" each — meaningless). Worse, under Rosetta a blocked thread's leaf is `???` just like a running
+one, so the symbol cannot classify it either. **Use `ps -M <pid>`** for real per-thread CPU and
+state. That is what showed Peggle's shape: 2 threads at 99.5%/99.4% in state `R`, 28 threads idle.
+
+**`pgrep -x` does not match a Wine process.** Its `comm` is a full Windows path
+(`C:\ProgramData\...\popcapgame1.exe`), so exact-name matching finds nothing. Get the pid from
+`ps -Ao pid,comm= | awk '/name\.exe/{print $1}'`.
+
+**A CPU-drop "stall" detector cannot distinguish a hitch from the player alt-tabbing.** Peggle went
+to ~0% for 16 s and it was simply someone switching to Steam — `wineserver` spiked to 81% for the
+window teardown, then everything settled. Screenshot every stall before believing it.
+
 **⚠️ `grep -i rosetta` on a sample is ALWAYS a false positive.** `libRosetta.dylib` is loaded into
 every process on Apple silicon, *including native arm64 ones* — verified against a native arm64
 test binary, which reported "Rosetta IS translating this process". Match the translator itself:
