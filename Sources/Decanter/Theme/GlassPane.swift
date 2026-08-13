@@ -12,9 +12,11 @@ import SwiftUI
 /// other requirements follow from the same idea:
 ///
 /// - Something with texture must sit behind it. Glass over a flat fill has nothing to bend.
-/// - `.clear` is the right variant here: high transparency, so the background reads through the
-///   middle and the rim does the work. `.regular` is for small controls that need to stay legible
-///   against anything.
+/// - **`.regular`, not `.clear`.** `.clear` is the most transparent variant, and over a busy
+///   wallpaper it is beautiful and hard to read — the trade-off this file used to note and then
+///   take the wrong side of. `.regular` is the same material with the same rim refraction, just
+///   less see-through, and it is Apple's variant for content that must stay legible against
+///   anything. Switch back to `.clear` only if the panes ever sit over something plain.
 struct GlassPane: ViewModifier {
     var cornerRadius: CGFloat = 18
     var inset: CGFloat = 10
@@ -31,7 +33,7 @@ struct GlassPane: ViewModifier {
                             .fill(Color(nsColor: .windowBackgroundColor)))
             } else if #available(macOS 26.0, *) {
                 content
-                    .glassEffect(.clear, in: .rect(cornerRadius: cornerRadius))
+                    .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
             } else {
                 content
                     .background(.ultraThinMaterial,

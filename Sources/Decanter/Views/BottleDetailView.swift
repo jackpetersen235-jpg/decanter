@@ -274,8 +274,13 @@ struct BottleDetailView: View {
                             Text("Play starts \(game.executable.lastPathComponent)")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
+                        // Fall back to the message from the automatic build at bottle creation.
+                        // Without this, a launcher that failed to build when the bottle was made
+                        // left no trace anywhere in the UI — the user just never got an app.
                         if let appResult {
                             Text(appResult).font(.caption).foregroundStyle(.secondary)
+                        } else if let auto = model.lastLauncherMessage {
+                            Text(auto).font(.caption).foregroundStyle(.secondary)
                         }
                         if launching {
                             Text("Steam is opening — this can take a few seconds the first time.")

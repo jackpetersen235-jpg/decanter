@@ -8,6 +8,10 @@ final class AppModel: ObservableObject {
 
     // MARK: Published state
     @Published var bottles: [Bottle] = []
+
+    /// Result of the most recent launcher build, shown on the bottle's Overview tab.
+    /// Silent success is fine; silent FAILURE is what made "the app never appears" unreportable.
+    @Published var lastLauncherMessage: String?
     @Published var installations: [WineInstallation] = []
     @Published var selectedBottleID: Bottle.ID?
     @Published var activeConsole: TaskConsole?
@@ -979,7 +983,28 @@ final class AppModel: ObservableObject {
         bottles.append(bottle)
         selectedBottleID = bottle.id
         saveBottles()
-        Task { await buildGameApp(for: bottle) }
+
+        // Build the permanent launcher NOW, at bottle creation, and SAY SO IF IT FAILS.
+        //
+        // This used to be `Task { await buildGameApp(for: bottle) }` with the Result discarded.
+        // Every failure mode — no engine, no resolvable game, an unwritable ~/Applications —
+        // produced a bottle with no app and not one word anywhere. Reported as "the auto app build
+        // doesn't seem to be working", which is indistinguishable from "it silently failed"
+        // BECAUSE IT WAS. A `@discardableResult` that is always discarded is a swallowed error.
+        Task {
+            switch await buildGameApp(for: bottle) {
+            case .success(let url):
+                lastLauncherMessage = "Created \(url.lastPathComponent) in your Applications folder."
+            case .failure(let error):
+                lastLauncherMessage = "Could not create the launcher app: \(error.localizedDescription)"
+                let console = openConsole(title: "Launcher — \(bottle.name)")
+                console.append("Could not create the launcher app.")
+                console.append(error.localizedDescription)
+                console.append("The bottle itself is fine — press \"Rebuild Launcher\" on the "
+                               + "Overview tab once the game is installed.")
+                console.finish()
+            }
+        }
         return bottle.id
     }
 

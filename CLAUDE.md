@@ -790,6 +790,25 @@ flushed: both targets `no3d`, Sekiro and JJBA untouched.
 the launcher wrote them; they were present in `user.reg` once the server exited. Four wrong
 readings in one session came from this. Kill the server, sleep, read the FILE.
 
+### A `@discardableResult` that is ALWAYS discarded is a swallowed error
+
+Reported as "the auto app build doesn't seem to be working". Bottle creation did call
+`buildGameApp`, but as `Task { await buildGameApp(for: bottle) }` — **the Result thrown away**. Every
+failure (no engine, no resolvable game, unwritable `~/Applications`) produced a bottle with no
+launcher and not one word anywhere, which is indistinguishable from the feature not existing.
+
+`createBottle(named:for:)` now switches on the Result, sets `lastLauncherMessage`, and opens a
+console on failure; `BottleDetailView` shows that message when there is no fresher one. The likely
+real cause on someone else's Mac is `BuildError.noGame` — a bottle whose game cannot be resolved —
+and that now says so instead of failing silently.
+
+### Liquid Glass: `.regular` over `.clear` for panes
+
+`.clear` is the most transparent variant and was chosen for the rim effect, but over a busy
+wallpaper it is hard to read — reported as "make it a little less see-through". `.regular` is the
+same material with the same edge refraction, just less transparent, and is Apple's variant for
+content that must stay legible against anything. One-line change in `GlassPane`.
+
 ### ⚠️ Adding a field to `BottleSettings` USED to corrupt every existing install
 
 Swift's **synthesized** decoder throws `keyNotFound` for a missing key on a non-optional property
