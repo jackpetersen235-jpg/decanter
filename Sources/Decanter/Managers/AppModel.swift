@@ -1014,8 +1014,24 @@ final class AppModel: ObservableObject {
     }
 
     /// Open the generated launcher, building it first if it is missing.
+    /// Make the prefix's registry match `software2D` before launching.
+    ///
+    /// ⚠️ THE SETTING USED TO DO NOTHING UNLESS YOU PRESSED "Apply to Prefix". `applySoftware2D`
+    /// was reachable only from `applyRegistry`, so toggling it on and pressing Play changed
+    /// nothing at all — reported as "I turned the 2D game thing on and it's still slow", and it
+    /// was a design fault, not user error. A per-game override that the game must be launched
+    /// with has to be written ON LAUNCH, not on a button the user has no reason to press.
+    func ensureSoftware2D(for bottle: Bottle) async {
+        guard let installation = installation(for: bottle) else { return }
+        let console = TaskConsole(title: "2D")
+        await applySoftware2D(bottle, installation: installation,
+                              env: Wine.environment(for: bottle, using: installation),
+                              console: console)
+    }
+
     func launchGameApp(in bottle: Bottle) {
         Task {
+            await ensureSoftware2D(for: bottle)
             let app = GameAppBuilder.destination(for: bottle)
             // Rebuild when MISSING **or STALE**. Checking only for existence meant a launcher
             // written by an older build kept running forever: updating Decanter shipped the fix
@@ -1460,6 +1476,7 @@ final class AppModel: ObservableObject {
         // exactly right — so we must NOT skip it. Only a plain Steam launcher should short-circuit.
         let isGameLauncher = bottle.settings.steamArguments.contains("-applaunch")
         Task {
+            await ensureSoftware2D(for: bottle)
             // Guard against a rapid double-click on the same bottle regardless of kind.
             if launchingBottleIDs.contains(bottle.id) {
                 activateRunningGame()

@@ -764,6 +764,32 @@ it makes hundreds of calls, not thousands.
   and logs cleaner — no `ddraw_texture_init` warnings. It is PopCap-specific, so the shipped fix
   uses the game-agnostic wine key. Both measured at ~100 fps on the menu.
 
+### The setting must be applied ON LAUNCH — a button nobody presses is not a fix
+
+Reported as *"he turned the 2D game thing on and it's still slow"*, and it was three faults, none
+of them the user's:
+
+1. **`applySoftware2D` was reachable only from `applyRegistry`** — i.e. only when you press
+   **"Apply to Prefix"**. Toggle on, press Play, nothing written. Nothing in the UI says otherwise.
+   Now `ensureSoftware2D` runs at the top of `launchGameApp` AND `launchSteam`.
+2. **The generated `.app` bypasses Decanter entirely**, so no setting the app writes can reach it —
+   and it is the obvious way to launch a game. The launcher now writes the key itself, every time.
+   That also covers the shared-prefix hazard: another bottle turning the setting off clears the
+   same key, and the next launch simply puts it back.
+3. **`generatorVersion` must be bumped** (4 → 5) or every existing launcher stays stale and the
+   fix reaches nobody who already has one. Same lesson as the Steam.dll fix.
+
+⚠️ **Anything invoking `wine` in the generated script MUST come below the `export` lines.** The
+first attempt put the `reg add` above them, so it ran with no `WINEPREFIX` and wrote into the
+DEFAULT prefix — silently creating a **332 MB stray `~/.wine`** while the game's prefix was never
+touched. The launcher logged *"software rendering applied"* and had changed nothing. Verified the
+fix by wiping both keys, launching from the `.app` alone, and reading `user.reg` after the server
+flushed: both targets `no3d`, Sekiro and JJBA untouched.
+
+⚠️ **`reg query` lies while wineserver is running.** It reported both keys ABSENT immediately after
+the launcher wrote them; they were present in `user.reg` once the server exited. Four wrong
+readings in one session came from this. Kill the server, sleep, read the FILE.
+
 ### ⚠️ Adding a field to `BottleSettings` USED to corrupt every existing install
 
 Swift's **synthesized** decoder throws `keyNotFound` for a missing key on a non-optional property

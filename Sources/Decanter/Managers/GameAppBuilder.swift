@@ -50,7 +50,7 @@ enum GameAppBuilder {
     /// The stamp goes into the script as a comment; `isCurrent` compares it and the app rebuilds on
     /// mismatch. BUMP THIS when you change the script, or the fix will not reach anyone who already
     /// has a launcher.
-    static let generatorVersion = 4
+    static let generatorVersion = 5
     private static let stampPrefix = "# decanter-launcher-version:"
 
     /// Does this bottle's launcher exist AND come from the current generator?
@@ -215,6 +215,32 @@ enum GameAppBuilder {
             "",
         ]
         _ = path
+
+        // Old-2D software rendering, re-asserted by the launcher itself.
+        //
+        // ⚠️ THIS MUST STAY BELOW THE `export` LINES ABOVE. Placed above them, `wine reg add` runs
+        // with no WINEPREFIX and writes into the DEFAULT prefix — silently creating a stray
+        // ~/.wine (332 MB when this happened) while the game's own prefix is never touched. The
+        // launcher logged success and changed nothing. Anything that invokes wine belongs here.
+        //
+        // Re-asserted every launch on purpose: this bundle never goes through Decanter, so a
+        // setting the app writes on a button press is invisible to it — and bottles SHARE a
+        // prefix, so another bottle can clear the same key.
+        if bottle.settings.software2D {
+            lines += [
+                "# Force the game's software renderer (Configuration -> Old 2D game).",
+                "# These games issue thousands of tiny draw calls per frame, and each is ~30x more",
+                "# expensive through Wine on macOS than on Windows, because Apple's OpenGL 4.1 lacks",
+                "# the extension Wine's fast path needs. Software rendering presents ONE surface per",
+                "# frame instead, skipping the tax. Measured on Peggle Deluxe: 18 fps -> 90 fps.",
+                "for TARGET in \(q(exeName)) popcapgame1.exe; do",
+                #"  "$WINE" reg add "HKCU\\Software\\Wine\\AppDefaults\\$TARGET\\Direct3D" \"#,
+                "    /v renderer /t REG_SZ /d no3d /f >/dev/null 2>&1",
+                "done",
+                "log 'software rendering (no3d) applied for old 2D game'",
+                "",
+            ]
+        }
 
         // START STEAM FOR ANY GAME LIVING IN A STEAM LIBRARY, not only ones whose app id we know.
         //
