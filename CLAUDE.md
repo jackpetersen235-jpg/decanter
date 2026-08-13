@@ -802,12 +802,16 @@ console on failure; `BottleDetailView` shows that message when there is no fresh
 real cause on someone else's Mac is `BuildError.noGame` — a bottle whose game cannot be resolved —
 and that now says so instead of failing silently.
 
-### Liquid Glass: `.regular` over `.clear` for panes
+### Liquid Glass transparency: `.clear` + a scrim, not a variant swap
 
-`.clear` is the most transparent variant and was chosen for the rim effect, but over a busy
-wallpaper it is hard to read — reported as "make it a little less see-through". `.regular` is the
-same material with the same edge refraction, just less transparent, and is Apple's variant for
-content that must stay legible against anything. One-line change in `GlassPane`.
+Apple ships `.clear` and `.regular` and **nothing in between**, so tuning by swapping variants
+overshoots in whichever direction you move: `.clear` is unreadable over a busy wallpaper,
+`.regular` is readable and too solid. Both were rejected in turn ("make it less see-through",
+then "it needs to be a little more see-through").
+
+`GlassPane` now uses `.clear` for its transparency and puts a faint adaptive fill under the
+CONTENT — `scrim`, default **0.14**, where 0 is pure `.clear` and ~0.30 approaches `.regular`.
+`windowBackgroundColor` so it follows light/dark. **Turn the dial; do not swap the variant.**
 
 ### ⚠️ Adding a field to `BottleSettings` USED to corrupt every existing install
 

@@ -12,14 +12,18 @@ import SwiftUI
 /// other requirements follow from the same idea:
 ///
 /// - Something with texture must sit behind it. Glass over a flat fill has nothing to bend.
-/// - **`.regular`, not `.clear`.** `.clear` is the most transparent variant, and over a busy
-///   wallpaper it is beautiful and hard to read — the trade-off this file used to note and then
-///   take the wrong side of. `.regular` is the same material with the same rim refraction, just
-///   less see-through, and it is Apple's variant for content that must stay legible against
-///   anything. Switch back to `.clear` only if the panes ever sit over something plain.
+/// - **`.clear` plus a scrim, because neither shipped variant is right on its own.** `.clear` is
+///   the most transparent and reads beautifully, but text over a busy wallpaper is hard to read.
+///   `.regular` fixes legibility and looks too solid. Apple ships nothing in between, so this
+///   uses `.clear` and puts a faint adaptive fill under the CONTENT — `scrim`, default 0.14, where
+///   0 is pure `.clear` and ~0.30 approaches `.regular`. That is the dial to turn if it ever looks
+///   wrong again, rather than swapping variants and overshooting in the other direction.
 struct GlassPane: ViewModifier {
     var cornerRadius: CGFloat = 18
     var inset: CGFloat = 10
+    /// How much backing sits under the content. 0 = pure `.clear` glass, ~0.30 ≈ `.regular`.
+    /// Tuned by eye against the desktop wallpaper; see the note in `body`.
+    var scrim: Double = 0.14
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -32,8 +36,18 @@ struct GlassPane: ViewModifier {
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .fill(Color(nsColor: .windowBackgroundColor)))
             } else if #available(macOS 26.0, *) {
+                // Between the two variants Apple ships. `.clear` alone is beautiful and unreadable
+                // over a busy wallpaper; `.regular` is readable but too solid. There is no variant
+                // in between, so: take `.clear` for its transparency and slide a faint scrim under
+                // the CONTENT (not under the pane) to hold the text up. `scrim` is the dial —
+                // 0 is pure `.clear`, ~0.30 approaches `.regular`.
+                //
+                // `.windowBackgroundColor` rather than black/white so it follows light and dark.
                 content
-                    .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+                    .background(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .fill(Color(nsColor: .windowBackgroundColor).opacity(scrim)))
+                    .glassEffect(.clear, in: .rect(cornerRadius: cornerRadius))
             } else {
                 content
                     .background(.ultraThinMaterial,
@@ -84,8 +98,9 @@ struct ThemedPaneSurface: ViewModifier {
 
 extension View {
     /// Float this pane on Liquid Glass. See `GlassPane` — the inset is load-bearing, not styling.
-    func glassPane(cornerRadius: CGFloat = 18, inset: CGFloat = 10) -> some View {
-        modifier(GlassPane(cornerRadius: cornerRadius, inset: inset))
+    func glassPane(cornerRadius: CGFloat = 18, inset: CGFloat = 10,
+                   scrim: Double = 0.14) -> some View {
+        modifier(GlassPane(cornerRadius: cornerRadius, inset: inset, scrim: scrim))
     }
 
     /// Give this region a surface in whichever theme needs one.
