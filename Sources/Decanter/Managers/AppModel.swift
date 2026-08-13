@@ -1489,10 +1489,20 @@ final class AppModel: ObservableObject {
                 steamArgs.removeAll { $0 == "-skipinitialbootstrap" }
             }
             let args = [bottle.steamExecutable.path] + steamArgs
+            // Did WE bring Steam up? Only then may we shut it down when the game exits — a Steam
+            // the user already had open is theirs. Checked BEFORE launching, or the answer is
+            // always "yes" a moment later.
+            let startedSteamForGame = await !isSteamRunning()
             // Quiet: no console sheet pops over Decanter (which made the first click look like a
             // no-op). Steam just opens on its own.
             launchQuietly(bottle: bottle, arguments: args)
             suppressWineSystray(isGameLauncher: isGameLauncher)
+            // Reap after the game exits — this path (`steam.exe -applaunch <id>`) is how nearly
+            // every game starts, and it had no cleanup at all: only the direct-exe branch above
+            // called this, so Steam was left running after Peggle, Sekiro or Half Sword quit.
+            if isGameLauncher {
+                reapSteamAfterGame(in: bottle, weStartedSteam: startedSteamForGame)
+            }
             Task {
                 // Hold the guard while Steam comes up, then let isSteamRunning take over.
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
@@ -1586,6 +1596,11 @@ final class AppModel: ObservableObject {
     /// the title is still up, so this watches for the game to actually appear and actually go away.
     /// If the game never appears at all, Steam is still reaped — a headless Steam left over from a
     /// game that failed to start is the exact problem being fixed.
+    /// Seconds Steam is left alive after the game exits, so Steam Cloud can upload saves.
+    /// Generous on purpose: the cost of waiting is a background process for a few more seconds;
+    /// the cost of being too quick is someone's lost progress.
+    private var cloudSyncGrace: Int { 25 }
+
     private func reapSteamAfterGame(in bottle: Bottle, weStartedSteam: Bool) {
         guard weStartedSteam, !reapingBottleIDs.contains(bottle.id) else { return }
         reapingBottleIDs.insert(bottle.id)
@@ -1610,7 +1625,18 @@ final class AppModel: ObservableObject {
                 }
             }
 
-            // Phase 3 — if the user has meanwhile started using Steam directly, leave it alone.
+            // Phase 3 — LET STEAM SAVE YOUR PROGRESS BEFORE KILLING IT.
+            //
+            // Steam Cloud uploads a game's saves when the game exits, and `quitSteam` ends with
+            // `wineserver -k`, which is not a polite request — it takes the whole prefix down. Kill
+            // Steam too early and the sync is simply lost, silently, which is far worse than
+            // leaving Steam running. Steam is still up throughout this wait, which is what makes
+            // the sync possible at all.
+            if appeared {
+                try? await Task.sleep(nanoseconds: UInt64(cloudSyncGrace) * 1_000_000_000)
+            }
+
+            // Phase 4 — if the user has meanwhile started using Steam directly, leave it alone.
             guard launchingBottleIDs.isEmpty else { return }
             await quitSteam(in: bottle)
         }
@@ -1774,7 +1800,14 @@ final class AppModel: ObservableObject {
         let helpers: Set<String> = ["steam.exe", "explorer.exe", "services.exe", "winedevice.exe",
                                     "svchost.exe", "rpcss.exe", "plugplay.exe", "steamwebhelper.exe",
                                     "conhost.exe", "wineboot.exe", "start.exe", "tabtip.exe",
-                                    "steamsysinfo.exe", "steamerrorreporter64.exe"]
+                                    "steamsysinfo.exe", "steamerrorreporter64.exe",
+                                    // Observed running with Steam alone and NOT previously listed,
+                                    // so a Steam with no game counted as "a game is running" —
+                                    // which gates the post-game reaper, the engine switch and the
+                                    // systray sweep. Same allowlist bug as the Windows-path split.
+                                    "steamservice.exe", "steamerrorreporter.exe",
+                                    "gameoverlayui.exe", "gameoverlayui64.exe",
+                                    "winemenubuilder.exe", "wineconsole.exe", "rundll32.exe"]
         // SPLIT ON BOTH SEPARATORS. Wine reports `comm` as a WINDOWS path —
         // `C:\windows\system32\services.exe` — so splitting on "/" alone leaves the whole string,
         // the allowlist above never matches, and every Wine helper counts as a running game.

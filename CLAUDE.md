@@ -779,6 +779,36 @@ every field. **Add new fields freely — give them a default and decode them the
   the game's code from wine's `ddraw.dll` (both are PE modules in the same JIT buffer, unsymbolized).
   The API trace settled in one command what sampling could not.
 
+## Quitting the game now quits Steam — with a window for cloud saves (2026-08-12)
+
+Quit the game and Decanter waits, lets Steam finish syncing, then shuts Steam and the whole prefix
+down. **Measured end to end from the Play button: game quit 21:28:31 → Steam quit 21:29:10, 39 s
+later, ending at `steam=0 game=0 wineserver=0`.** That is ~15 s confirming the game is really gone
+plus a 25 s `cloudSyncGrace`.
+
+**Why the grace period is not optional.** Steam Cloud uploads a game's saves when the game exits,
+and `quitSteam` finishes with `wineserver -k` — not a polite request, it takes the prefix down.
+Killing Steam early loses the sync silently, which is far worse than leaving Steam running. Steam
+stays alive for the whole window, which is what makes the sync possible.
+
+**`reapSteamAfterGame` already existed and was wired to ONE branch.** Only the direct-exe path
+(JJBA) called it, so every game launched the normal way — `steam.exe -applaunch <id>`, i.e. Peggle,
+Sekiro, Half Sword — left Steam running forever. That is the documented "Steam reopens / won't
+quit" complaint, still half-unfixed. Now called from both paths.
+
+Guards worth keeping: it only quits a Steam that **Decanter** started (checked BEFORE launching, or
+the answer is always "yes" a moment later), and it backs off if the user starts using Steam during
+the wait.
+
+⚠️ **A stale reaper from an earlier launch will confuse timing measurements.** A first run showed
+20 s, which does not match the design; the cause was a pending reaper from a previous launch in the
+same session, not a logic error. Restart cleanly before timing this.
+
+⚠️ **`isAnyGameRunning`'s allowlist gates all of this** (plus the engine switch and the systray
+sweep). `steamservice.exe`, `gameoverlayui64.exe` and friends run ALONGSIDE a game and were absent
+from it. Verified separately that Steam *alone* was already reported correctly — so this was not
+the cause of the timing above, and the claim that it was should not have been made before testing.
+
 ## Verification habits that mattered
 
 - **Screenshots beat logs.** `screencapture -x` + Read. Logs said "0 errors" while the screen was
