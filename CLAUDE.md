@@ -790,6 +790,21 @@ flushed: both targets `no3d`, Sekiro and JJBA untouched.
 the launcher wrote them; they were present in `user.reg` once the server exited. Four wrong
 readings in one session came from this. Kill the server, sleep, read the FILE.
 
+### Play LAUNCHES; it does not build (removed at the user's request)
+
+`launchGameApp` used to rebuild the bundle whenever it was missing **or stale**, so pressing Play
+sometimes started the game and sometimes silently regenerated the launcher first — the click looked
+like it did nothing. Reported as "it works very poorly" and removed. The launcher is created when
+the BOTTLE is created; **Rebuild Launcher** on the Overview tab is the explicit refresh.
+
+⚠️ **Trade-off, accepted deliberately after being raised twice:** a generated `.app` outlives the
+Decanter that wrote it, so a future change to `launcherScript` will NOT reach a launcher that
+already exists — the user must press Rebuild Launcher. That is precisely how the Steam.dll fix once
+shipped and reached nobody, and how the `generatorVersion` stamp came to exist. **If launcher bugs
+reappear right after an update, suspect a stale bundle first.**
+
+Play now reports "No launcher app for this bottle yet" rather than opening a path that isn't there.
+
 ### A `@discardableResult` that is ALWAYS discarded is a swallowed error
 
 Reported as "the auto app build doesn't seem to be working". Bottle creation did call

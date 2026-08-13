@@ -1058,11 +1058,27 @@ final class AppModel: ObservableObject {
         Task {
             await ensureSoftware2D(for: bottle)
             let app = GameAppBuilder.destination(for: bottle)
-            // Rebuild when MISSING **or STALE**. Checking only for existence meant a launcher
-            // written by an older build kept running forever: updating Decanter shipped the fix
-            // but never reached the file that needed it, so Play went on using the old script.
-            if !GameAppBuilder.isCurrent(for: bottle) {
-                if case .failure = await buildGameApp(for: bottle) { return }
+
+            // Play LAUNCHES. It does not build.
+            //
+            // This used to rebuild whenever the launcher was missing or stale, which made pressing
+            // Play unpredictable: sometimes it started the game, sometimes it silently regenerated
+            // the bundle first and the click appeared to do nothing. Removed at the user's request
+            // after it "works very poorly".
+            //
+            // The launcher is created when the BOTTLE is created, and "Rebuild Launcher" on the
+            // Overview tab is the explicit way to refresh it.
+            //
+            // ⚠️ KNOWN TRADE-OFF, deliberately accepted: a generated .app outlives the Decanter
+            // that wrote it, so a future change to `launcherScript` will NOT reach a launcher that
+            // already exists — the user has to press Rebuild Launcher. That is exactly how the
+            // Steam.dll fix once shipped and reached nobody. If launcher bugs start reappearing
+            // after an update, this is the first thing to suspect.
+            guard FileManager.default.fileExists(atPath: app.path) else {
+                // Never open nothing and leave the user staring at a button that did nothing.
+                lastLauncherMessage = "No launcher app for this bottle yet — press "
+                    + "\"Rebuild Launcher\" to create it."
+                return
             }
             NSWorkspace.shared.open(app)
         }
