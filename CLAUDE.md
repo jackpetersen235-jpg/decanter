@@ -290,106 +290,35 @@ Strips quarantine + AppleDouble clutter, re-signs ad-hoc, writes a plain-languag
 - **`homeDirectoryForCurrentUser` ignores `$HOME`** (reads the passwd entry), so you cannot fake a
   fresh-Mac test by overriding HOME. Use `--install-engine` / Setup Assistant instead.
 
-## Generated game launchers (`GameAppBuilder`)
+## Generated game launchers — REMOVED (2026-08-12)
 
-Decanter writes a `.app` per game into `~/Applications`, and each game bottle shows **Launch
-Steam** and **Launch Game App**. Regenerate headlessly with `--build-game-apps`.
+Decanter used to write a `.app` per game into `~/Applications`, and **Play opened that bundle**
+instead of launching anything itself. The whole generator is gone: script emission, Info.plist, the
+`generatorVersion` stamp, `buildGameApp`, `launchGameApp`, `hasGameApp`, `--build-game-apps`, and
+the Rebuild Launcher / Show in Finder buttons. `GameAppBuilder` now holds only the `Game` struct
+that `resolvedGame` returns.
 
-- **They reference the shared engine, they do not embed Wine.** The hand-made `Sekiro.app` /
-  JJBA bundles embed one at ~696 MB each; generated ones are **8 KB**. The cost is that they only
-  work on this Mac — as does the prefix they point at, so nothing is lost.
-- **Shell-quote every path.** One of the two games is `JoJo's Bizarre Adventure…`. A raw
-  `"\(path)"` closes the quote at the apostrophe and the launcher runs the wrong thing.
-  `GameAppBuilder.shellQuote` emits `'JoJo'\''s …'`; verified in the generated output.
-- **`pgrep -x`, never `-f`, for the already-running check.** Same recurring bug class as
-  everywhere else in this file — `-f` matches the script's own argv.
-- **Do not try to raise a running Wine game from the script.** Its window belongs to
-  `winemac.drv`, no bundle `open -a` can name it, and driving it needs Accessibility. The first
-  draft shipped an `open -a <game folder>` that could only ever fail. It now exits quietly.
-- **Resolution order:** `directExecutable` → `steamAppID`/`-applaunch` → *exactly one* game
-  manifest in the prefix. That last fallback is what makes a plain new bottle work.
-- **Filter 228980 out of the manifest count.** "Steamworks Common Redistributables" is installed
-  beside almost every game, so a one-game prefix reports two manifests and looked ambiguous —
-  Half Sword produced no launcher until this was excluded (`AppModel.nonGameAppIDs`).
-- **Search one level deep for the exe.** UE titles ship a small top-level shim next to the real
-  binary: Half Sword's is `HalfSwordUE5/Binaries/Win64/…-Shipping.exe` (300 MB) beside a 0.3 MB
-  stub, so a top-level-only "biggest .exe" picks the stub.
-- Generated launchers take their DXMT settings from the BOTTLE, so they will not match the
-  hand-tuned bundles byte for byte (those used `metalSpatialUpscaleFactor=1.5` plus
-  `sampleNaNToZero`/`defuseFma`, and a per-game shader cache). The bottle is the source of truth
-  now; port anything worth keeping into the bottle's settings.
+Removed at the user's request — "a useless extra step that just gets in the way". It was: creating
+a bottle produced a second artifact to keep track of, and Play went through it rather than starting
+the game. **Play now calls `launchSteam` directly**, which already did everything the script did —
+waits for Steam to log in, runs `steam.exe -applaunch <id>` or the binary directly for anti-cheat
+shim bottles, and installs the per-game graphics DLLs first. Verified after removal: pressing Play
+on the Peggle bottle started `popcapgame1.exe` (134% CPU) with no bundle involved.
 
-### `grep -c … || echo 0` is a broken idiom — it produces TWO lines
+Existing generated bundles were moved to the Trash; the hand-made `Sekiro.app` / `JJBA All-Star
+Battle.app` (696 MB each, they embed their own Wine) are unrelated and were left alone.
 
-`BASE=$(grep -c 'X' file 2>/dev/null || echo 0)` looks defensive and is not. When the file **exists
-but has no matches**, `grep -c` prints `0` **and exits 1**, so the `|| echo 0` fires as well and the
-variable becomes `"0\n0"`. Every later `[ "$N" -gt "$BASE" ]` then dies with *integer expression
-expected*, so the loop can never break early.
+**What was learned here is worth keeping even though the code is gone:**
 
-In the generated launcher that meant waiting the **full 150 s, then 10 s more**, before the game
-started — indistinguishable from "it never opens". Verified in a shell before fixing.
-
-Use a function that sanitises instead:
-
-```bash
-count() { grep -c 'Logged On,' "$CONNLOG" 2>/dev/null | head -1 | tr -dc '0-9'; }
-BASE=$(count); BASE=${BASE:-0}
-```
-
-`head -1` guards multi-line output, `tr -dc '0-9'` strips anything non-numeric, and `${BASE:-0}`
-covers the genuinely-empty case. Verified across all three: missing file, present-but-empty, and
-populated.
-
-### `directExecutable` is stored as a QUOTED WINDOWS PATH and never resolved
-
-The stored value looks like:
-
-```
-"C:\Program Files (x86)\Steam\steamapps\common\JoJo's …\ASBR.exe"
-```
-
-`resolvedGame` only handled macOS paths — anything not starting with `/` was appended to `drive_c`
-verbatim, quotes and `C:\` and backslashes included, producing a path that cannot exist. So
-**`directExecutable` never resolved for any bottle**, and the setting that exists specifically to
-bypass Steam was silently doing nothing. JJBA appeared to work only because it fell through to the
-app-id branch.
-
-`AppModel.resolveStoredExecutable` now strips surrounding quotes, passes absolute macOS paths
-through, maps `X:\…` onto `drive_c`, and converts backslashes.
-
-### Steam-DRM games must be launched BY Steam, not merely with Steam running
-
-Older Steamworks titles ship `Steam.dll` beside the executable, and it checks that the game was
-**started by Steam** — not just that a client is up. Running the `.exe` directly fails the handshake
-even with the client running and `SteamAppId` exported. Peggle Deluxe kept reporting "Unable to load
-Steam.dll" through two fixes aimed at the wrong thing before this was understood.
-
-Generated launchers therefore `exec wine steam.exe -applaunch <id>` whenever an app id is known.
-Direct execution survives only where it was chosen deliberately — `directExecutable`, for titles
-whose Steam entry point is an anti-cheat shim — or where no app id exists.
-
-**These two interact, and the interaction bit.** Making launchers prefer `-applaunch` regressed JJBA
-onto the EAC shim, because its `directExecutable` was not resolving and so `prefersDirectLaunch`
-never became true. Both had to be fixed together; verify BOTH after touching either.
-
-### Generated launchers must LOG, or every failure looks the same
-
-A missing executable, a Steam that never logs in, and the already-running guard firing on a stale
-process all present identically: nothing happens, nothing to read. The launcher now writes to
-`~/Library/Logs/Decanter-launcher.log` — first thing to ask for when someone says a game will not
-open.
-
-It also checks the executable still exists before `cd`, and says so if the game was uninstalled.
-
-### `pgrep -x` does NOT truncate long names — a first test said otherwise and was wrong
-
-Suspecting `MAXCOMLEN` (16), a test appeared to show `pgrep -x` failing on a 31-character
-executable name. **The control failed too** — copied system binaries will not run on Apple Silicon
-(code signing), so neither process existed. Rebuilt with `swiftc`, `pgrep -x` matches a 10- and a
-31-character name equally.
-
-The lesson is the general one: when a test shows a failure, check that the control passes before
-believing it.
+- **Shell-quote every path.** `steamapps/common/JoJo's Bizarre Adventure…` — a raw interpolation
+  closes the quote at the apostrophe and runs something else entirely.
+- **`pgrep -x`, never `-f`,** for an already-running check: `-f` matches the script's own argv.
+- **Steam-DRM games must be launched BY Steam**, not merely with Steam running. Older Steamworks
+  titles ship `Steam.dll` and check they were started by the client; running the `.exe` directly
+  fails the handshake even with Steam up. `launchSteam` keeps this behaviour.
+- **A file that outlives the app that wrote it will go stale**, and shipping a fix to the generator
+  never reached bundles already on disk. That trap is why the version stamp existed, and removing
+  the generator removes the trap with it.
 
 ## New-bottle game picker (`GameScanner`)
 

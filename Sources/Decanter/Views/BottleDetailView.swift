@@ -162,10 +162,13 @@ struct BottleDetailView: View {
                             let game = model.resolvedGame(for: bottle)
                             if game != nil {
                                 Button {
-                                    model.launchGameApp(in: bottle)
+                                    // Launch the game DIRECTLY. Decanter used to open a generated
+                                    // .app that then started Steam and the game — an extra hop that
+                                    // bought nothing: `launchSteam` already waits for Steam, honours
+                                    // direct-exe bottles and installs the graphics driver first.
+                                    model.launchSteam(in: bottle)
                                 } label: {
-                                    Label(buildingApp ? "Building…" : "Play",
-                                          systemImage: "gamecontroller.fill")
+                                    Label("Play", systemImage: "gamecontroller.fill")
                                 }
                                 // Lime in Aero — the theme's signature accent — and its shadow
                                 // takes that hue rather than neutral gray. Liquid glass ignores
@@ -233,54 +236,12 @@ struct BottleDetailView: View {
                         // automatic — silently rewriting a bundle the user may have moved or
                         // renamed in Finder would be worse than an out-of-date one.
                         if let game = model.resolvedGame(for: bottle) {
-                            HStack(spacing: 8) {
-                                Button(buildingApp ? "Rebuilding…" : "Rebuild Launcher") {
-                                    buildingApp = true
-                                    appResult = nil
-                                    Task {
-                                        switch await model.buildGameApp(for: bottle) {
-                                        case .success(let url):
-                                            appResult = "Built \(url.lastPathComponent) in ~/Applications."
-                                        case .failure(let e):
-                                            appResult = e.localizedDescription
-                                        }
-                                        buildingApp = false
-                                    }
-                                }
-                                .glassButton()
-                                .disabled(buildingApp)
-                                // Shown unconditionally, and builds first if the bundle is not
-                                // there yet. Gating on `hasGameApp` looked right but was a
-                                // filesystem check with nothing observable behind it: after
-                                // creating a bottle the launcher is written asynchronously, and
-                                // SwiftUI had no reason to re-render when it appeared — so the
-                                // button stayed hidden for a launcher that existed.
-                                Button("Show in Finder") {
-                                    Task {
-                                        if !model.hasGameApp(for: bottle) {
-                                            _ = await model.buildGameApp(for: bottle)
-                                        }
-                                        NSWorkspace.shared.activateFileViewerSelecting(
-                                            [GameAppBuilder.destination(for: bottle)])
-                                    }
-                                }
-                                .glassButton()
-                            }
-                            .glassGroup()
                             // Name what Play will actually start. The resolver picks the biggest
                             // executable, and on UE titles that is a deep Shipping.exe rather than
                             // the obvious top-level one — worth showing so a wrong pick is visible
                             // rather than mysterious.
                             Text("Play starts \(game.executable.lastPathComponent)")
                                 .font(.caption).foregroundStyle(.secondary)
-                        }
-                        // Fall back to the message from the automatic build at bottle creation.
-                        // Without this, a launcher that failed to build when the bottle was made
-                        // left no trace anywhere in the UI — the user just never got an app.
-                        if let appResult {
-                            Text(appResult).font(.caption).foregroundStyle(.secondary)
-                        } else if let auto = model.lastLauncherMessage {
-                            Text(auto).font(.caption).foregroundStyle(.secondary)
                         }
                         if launching {
                             Text("Steam is opening — this can take a few seconds the first time.")

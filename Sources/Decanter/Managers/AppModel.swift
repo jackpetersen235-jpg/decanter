@@ -9,9 +9,6 @@ final class AppModel: ObservableObject {
     // MARK: Published state
     @Published var bottles: [Bottle] = []
 
-    /// Result of the most recent launcher build, shown on the bottle's Overview tab.
-    /// Silent success is fine; silent FAILURE is what made "the app never appears" unreportable.
-    @Published var lastLauncherMessage: String?
     @Published var installations: [WineInstallation] = []
     @Published var selectedBottleID: Bottle.ID?
     @Published var activeConsole: TaskConsole?
@@ -207,9 +204,6 @@ final class AppModel: ObservableObject {
                 if let game = resolvedGame(for: bottle) {
                     line(FileManager.default.fileExists(atPath: game.executable.path),
                          "  game executable present", game.executable.lastPathComponent)
-                    line(GameAppBuilder.isCurrent(for: bottle), "  launcher up to date",
-                         GameAppBuilder.isCurrent(for: bottle)
-                            ? "" : "will rebuild itself on next Play")
                 } else {
                     out += "       --  no game (this is a launcher bottle)\n"
                 }
@@ -235,28 +229,6 @@ final class AppModel: ObservableObject {
             }
             FileHandle.standardError.write(out.data(using: .utf8)!)
             exit(0)
-        }
-        // Generate the .app launchers for every bottle that resolves to a game.
-        //   Decanter.app/Contents/MacOS/Decanter --build-game-apps
-        if CommandLine.arguments.contains("--build-game-apps") {
-            Task {
-                var out = "\n"
-                for bottle in bottles {
-                    guard let game = resolvedGame(for: bottle) else {
-                        out += "  \(bottle.name.prefix(36)): no game (launcher bottle)\n"
-                        continue
-                    }
-                    switch await buildGameApp(for: bottle) {
-                    case .success(let url):
-                        out += "  \(bottle.name.prefix(36)): \(url.lastPathComponent)\n"
-                        out += "      game -> \(game.executable.lastPathComponent) (appid \(game.appID ?? "-"))\n"
-                    case .failure(let e):
-                        out += "  \(bottle.name.prefix(36)): FAILED — \(e.localizedDescription)\n"
-                    }
-                }
-                FileHandle.standardError.write(out.data(using: .utf8)!)
-                exit(0)
-            }
         }
         // Install Steam into ONE named bottle. `--run-setup` only ever targets the setup bottle,
         // so there was no way to provision a second one without the GUI.
@@ -930,11 +902,12 @@ final class AppModel: ObservableObject {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    /// A bottle name not already taken, since the generated launcher's path is derived from it.
+    /// A bottle name not already taken.
     ///
-    /// Two bottles sharing a name means two bottles resolving to the SAME `~/Applications/x.app`,
-    /// and `GameAppBuilder.build` deletes before it writes — so the second silently replaces the
-    /// first's launcher. Numbering keeps the filename readable, which a bottle-id suffix would not.
+    /// Originally required because the generated launcher's path was derived from the name, so two
+    /// bottles sharing one silently overwrote each other's `.app`. That generator is gone, but
+    /// duplicate names are still worth avoiding: the sidebar becomes ambiguous and every message
+    /// naming a bottle stops identifying which. Numbering keeps it readable.
     func uniqueBottleName(_ wanted: String) -> String {
         let base = wanted.trimmingCharacters(in: .whitespaces)
         guard !base.isEmpty else { return uniqueBottleName("Bottle") }
@@ -984,61 +957,14 @@ final class AppModel: ObservableObject {
         selectedBottleID = bottle.id
         saveBottles()
 
-        // Build the permanent launcher NOW, at bottle creation, and SAY SO IF IT FAILS.
-        //
-        // This used to be `Task { await buildGameApp(for: bottle) }` with the Result discarded.
-        // Every failure mode — no engine, no resolvable game, an unwritable ~/Applications —
-        // produced a bottle with no app and not one word anywhere. Reported as "the auto app build
-        // doesn't seem to be working", which is indistinguishable from "it silently failed"
-        // BECAUSE IT WAS. A `@discardableResult` that is always discarded is a swallowed error.
-        Task {
-            switch await buildGameApp(for: bottle) {
-            case .success(let url):
-                lastLauncherMessage = "Created \(url.lastPathComponent) in your Applications folder."
-            case .failure(let error):
-                lastLauncherMessage = "Could not create the launcher app: \(error.localizedDescription)"
-                let console = openConsole(title: "Launcher — \(bottle.name)")
-                console.append("Could not create the launcher app.")
-                console.append(error.localizedDescription)
-                console.append("The bottle itself is fine — press \"Rebuild Launcher\" on the "
-                               + "Overview tab once the game is installed.")
-                console.finish()
-            }
-        }
+        // No launcher bundle is generated. Decanter used to write a `.app` per game into
+        // ~/Applications and route Play through it; removed as "a useless extra step that just
+        // gets in the way". Play now launches the game directly via `launchSteam`, which already
+        // waits for Steam, honours direct-exe bottles and installs the graphics driver first —
+        // everything the generated script was doing.
         return bottle.id
     }
 
-    /// Build (or rebuild) the bottle's launcher bundle in ~/Applications.
-    @discardableResult
-    func buildGameApp(for bottle: Bottle) async -> Result<URL, Error> {
-        guard let installation = installation(for: bottle) else {
-            return .failure(GameAppBuilder.BuildError.writeFailed("no Wine engine for this bottle"))
-        }
-        guard let game = resolvedGame(for: bottle) else {
-            return .failure(GameAppBuilder.BuildError.noGame)
-        }
-        // Reuse the exact environment a Decanter-launched game gets, so the bundle and the app's
-        // own Launch button cannot drift apart in behaviour.
-        var env = Wine.environment(for: bottle, using: installation)
-        for key in ProcessInfo.processInfo.environment.keys where env[key] == ProcessInfo.processInfo.environment[key] {
-            env.removeValue(forKey: key)      // keep only what Decanter actually set
-        }
-        do {
-            let url = try GameAppBuilder.build(
-                game: game, bottle: bottle,
-                wineBin: installation.binDirectory,
-                wineLib: FileManager.default.fileExists(atPath: installation.libDirectory.path)
-                    ? installation.libDirectory : nil,
-                environment: env,
-                steamExecutable: bottle.steamExecutable,
-                skipInitialBootstrap: bottle.isSteamBootstrapped)
-            return .success(url)
-        } catch {
-            return .failure(error)
-        }
-    }
-
-    /// Open the generated launcher, building it first if it is missing.
     /// Make the prefix's registry match `software2D` before launching.
     ///
     /// ⚠️ THE SETTING USED TO DO NOTHING UNLESS YOU PRESSED "Apply to Prefix". `applySoftware2D`
@@ -1052,41 +978,6 @@ final class AppModel: ObservableObject {
         await applySoftware2D(bottle, installation: installation,
                               env: Wine.environment(for: bottle, using: installation),
                               console: console)
-    }
-
-    func launchGameApp(in bottle: Bottle) {
-        Task {
-            await ensureSoftware2D(for: bottle)
-            let app = GameAppBuilder.destination(for: bottle)
-
-            // Play LAUNCHES. It does not build.
-            //
-            // This used to rebuild whenever the launcher was missing or stale, which made pressing
-            // Play unpredictable: sometimes it started the game, sometimes it silently regenerated
-            // the bundle first and the click appeared to do nothing. Removed at the user's request
-            // after it "works very poorly".
-            //
-            // The launcher is created when the BOTTLE is created, and "Rebuild Launcher" on the
-            // Overview tab is the explicit way to refresh it.
-            //
-            // ⚠️ KNOWN TRADE-OFF, deliberately accepted: a generated .app outlives the Decanter
-            // that wrote it, so a future change to `launcherScript` will NOT reach a launcher that
-            // already exists — the user has to press Rebuild Launcher. That is exactly how the
-            // Steam.dll fix once shipped and reached nobody. If launcher bugs start reappearing
-            // after an update, this is the first thing to suspect.
-            guard FileManager.default.fileExists(atPath: app.path) else {
-                // Never open nothing and leave the user staring at a button that did nothing.
-                lastLauncherMessage = "No launcher app for this bottle yet — press "
-                    + "\"Rebuild Launcher\" to create it."
-                return
-            }
-            NSWorkspace.shared.open(app)
-        }
-    }
-
-    /// True when this bottle has a game to make a launcher for.
-    func hasGameApp(for bottle: Bottle) -> Bool {
-        FileManager.default.fileExists(atPath: GameAppBuilder.destination(for: bottle).path)
     }
 
     /// Copy the bundled DXMT DLLs into each detected game and register the per-game DLL overrides.
