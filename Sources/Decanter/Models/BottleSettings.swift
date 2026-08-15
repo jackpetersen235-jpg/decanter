@@ -296,11 +296,16 @@ struct BottleSettings: Codable, Equatable {
             env["DXMT_CONFIG"] = cfg.joined(separator: ";")
 
         case .dxvk:
-            // NOTE: deliberately no prefix-wide WINEDLLOVERRIDES here. A global override
-            // also routes the Steam client's CEF/ANGLE UI through DXVK, which fails to
-            // create a GL context and renders the client as a black window. DXVK is
-            // instead scoped per-executable via HKCU\Software\Wine\AppDefaults\<game>.exe,
-            // so only the game gets it and the launcher UI keeps Wine's built-in path.
+            // NOTE: no prefix-wide WINEDLLOVERRIDES here. A global override also routes the Steam
+            // client's CEF/ANGLE UI through DXVK, which fails to create a GL context and renders
+            // the client as a black window.
+            //
+            // ⚠️ This comment used to claim DXVK "is instead scoped per-executable via
+            // HKCU\Software\Wine\AppDefaults\<game>.exe". **No such code ever existed** — a
+            // description of an intention, left reading as a description of behaviour. Nothing
+            // installed DXVK at all; `installGraphicsDriver` copied DXMT whatever was selected.
+            // It now refuses with a reason, because the engine ships no `dxgi.dll` to pair with
+            // DXVK's `d3d11.dll` and DXVK will not create a device without it.
             if dxvkHUD { env["DXVK_HUD"] = "fps,frametimes,gpuload" }
         case .d3dmetal:
             if metalFX { env["D3DM_ENABLE_METALFX"] = "1" }

@@ -12,6 +12,8 @@ struct CreateBottleSheet: View {
     @State private var selected: GameScanner.FoundGame?
     /// Set by "Choose a Program…", the bypass for anything the scan misses.
     @State private var manualExecutable: URL?
+    /// Why the sheet could not do what was asked. Previously it just dismissed.
+    @State private var failure: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -41,6 +43,10 @@ struct CreateBottleSheet: View {
             if model.defaultInstallation == nil {
                 Label("No Wine build selected. Add one in Setup first.",
                       systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            if let failure {
+                Label(failure, systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange)
             }
 
@@ -170,21 +176,38 @@ struct CreateBottleSheet: View {
     }
 
     private func create() {
+        // The button says "Create & Play" whenever a game is chosen — so it must PLAY.
+        //
+        // It never did: this only appended a bottle and returned. Confirmed by creating a bottle
+        // and checking processes — 0 game processes, 0 steam.exe. The label promised an action the
+        // code did not contain, which is worse than a missing feature because the user waits for
+        // something that is never coming.
+        var createdID: Bottle.ID?
+
         if let game = selected {
-            model.createBottle(named: name, for: game)
+            createdID = model.createBottle(named: name, for: game)
         } else if let exe = manualExecutable {
             // Treat a hand-picked binary as a game in whichever prefix it sits in, so it gets the
-            // same bottle shape — and the same generated launcher — as a scanned one.
+            // same bottle shape as a scanned one.
             let current = model.bottles.first { $0.id == model.selectedBottleID }
-            let prefix = Self.prefixContaining(exe) ?? current?.url
-            if let prefix {
-                model.createBottle(named: name, for: GameScanner.FoundGame(
-                    name: name.isEmpty ? exe.deletingPathExtension().lastPathComponent : name,
-                    folder: exe.deletingLastPathComponent(), executable: exe,
-                    sizeBytes: 0, appID: nil, prefix: prefix))
+            guard let prefix = Self.prefixContaining(exe) ?? current?.url else {
+                // Was a silent dismissal: no bottle, no message, nothing to act on. A binary
+                // outside any prefix cannot be run by Wine, and saying so beats vanishing.
+                failure = "That program isn't inside a Wine prefix, so there's nothing to run it. "
+                    + "Pick a bottle first, or choose a program from inside one."
+                return
             }
+            createdID = model.createBottle(named: name, for: GameScanner.FoundGame(
+                name: name.isEmpty ? exe.deletingPathExtension().lastPathComponent : name,
+                folder: exe.deletingLastPathComponent(), executable: exe,
+                sizeBytes: 0, appID: nil, prefix: prefix))
         } else {
             model.createBottle(name: name)
+        }
+
+        // Play it, if this was a "Create & Play".
+        if let id = createdID, let bottle = model.bottles.first(where: { $0.id == id }) {
+            model.launchSteam(in: bottle)
         }
         dismiss()
     }

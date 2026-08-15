@@ -988,16 +988,95 @@ final class AppModel: ObservableObject {
     /// system32.
     @discardableResult
     func installGraphicsDriver(in bottle: Bottle, console: TaskConsole? = nil) async -> Int {
-        guard let src = Paths.bundledDXMT else {
-            console?.append("This build of Decanter ships no DXMT payload.")
-            return 0
-        }
         guard let installation = installation(for: bottle) else {
             console?.append("No Wine installation available for this bottle.")
             return 0
         }
-        let games = detectedSteamGames(in: bottle)
-        if games.isEmpty { console?.append("No games found in this bottle's Steam library yet.") }
+
+        // SCOPE TO THIS BOTTLE'S OWN GAME.
+        //
+        // `detectedSteamGames` lists every game in the PREFIX, and three bottles here share
+        // `Steam-Wine11`. Applying a per-bottle graphics choice to all of them means the Peggle
+        // bottle set to WineD3D strips Sekiro's DXMT overrides — and then the Sekiro bottle puts
+        // them back on the next pass, so the setting appears to do nothing while quietly fighting
+        // its neighbours. Observed exactly that: WineD3D cleared 4 games, DXMT bottles re-added 4.
+        //
+        // A bottle that resolves a game touches ONLY that game. A launcher bottle (plain Steam,
+        // resolves nothing) keeps the prefix-wide behaviour, which is what patches a whole fresh
+        // Steam library in one go.
+        let scoped: [(folder: URL, exe: String)]
+        if let mine = resolvedGame(for: bottle) {
+            let name = mine.executable.lastPathComponent.lowercased()
+            scoped = detectedSteamGames(in: bottle).filter { $0.exe.lowercased() == name }
+        } else {
+            scoped = detectedSteamGames(in: bottle)
+        }
+
+        // HONOUR THE BACKEND THE USER PICKED.
+        //
+        // This used to install DXMT unconditionally, so 3 of the 4 options in Configuration ▸
+        // Graphics ▸ Backend did nothing at all: `settings.graphics` was read only by the picker
+        // that set it and by the label that displayed it back. Picking DXVK installed DXMT.
+        switch bottle.settings.graphics {
+        case .dxmt:
+            break                                   // handled below
+
+        case .wined3d:
+            // Wine's own implementation — the point is the ABSENCE of an override. Remove any this
+            // bottle previously installed, or "WineD3D" would just mean "whatever was left behind".
+            var cleared = 0
+            let env = Wine.environment(for: bottle, using: installation)
+            for game in scoped {
+                // NOTE THE TRAILING BACKSLASH. Written without it this concatenates to
+                // `…\AppDefaultsPeggle.exe\DllOverrides` — a key that does not exist, so every
+                // `reg delete` "succeeds" against nothing and the overrides stay put. That exact
+                // typo shipped once already in the software-2D writer; both were introduced by a
+                // heredoc eating the final backslash, and both looked correct in review.
+                let key = #"HKCU\Software\Wine\AppDefaults\"# + game.exe + #"\DllOverrides"#
+                var removedAll = true
+                for dll in ["d3d11", "dxgi", "d3d10core"] {
+                    // Check the result. `reg delete` on an absent value returns non-zero, which is
+                    // fine, but a failure that means something else must not pass as success — the
+                    // whole reason this bug survived is that nobody looked.
+                    let r = try? await Shell.run(installation.loader,
+                                                 arguments: ["reg", "delete", key, "/v", dll, "/f"],
+                                                 environment: env)
+                    if r == nil { removedAll = false }
+                }
+                if !removedAll {
+                    console?.append("Could not clear overrides for \(game.exe).")
+                }
+                cleared += 1
+            }
+            console?.append("WineD3D selected — removed per-game graphics overrides for \(cleared) game(s).")
+            return cleared
+
+        case .dxvk:
+            // NOT SHIPPED COMPLETE. The engine carries `DXVK/x64/{d3d11,d3d10core}.dll` and **no
+            // `dxgi.dll`**. DXVK 1.10.3 needs its own dxgi: pairing it with Wine's builtin fails at
+            // device creation with "D3D11CoreCreateDevice: Adapter is not a DXVK adapter", observed
+            // directly on this machine. Installing the incomplete pair would swap one silent
+            // failure for another, so say so instead.
+            console?.append("DXVK isn't available in this build — the engine ships d3d11 and "
+                            + "d3d10core but no matching dxgi.dll, and DXVK refuses to create a "
+                            + "device without it. Use DXMT, or WineD3D for older games.")
+            return 0
+
+        case .d3dmetal:
+            // Comes from CrossOver / Game Porting Toolkit, not from Decanter. Bottles imported from
+            // CrossOver are set to this because THEIR engine provides it; Decanter's does not.
+            console?.append("D3DMetal comes with CrossOver or the Game Porting Toolkit and isn't "
+                            + "part of Decanter's engine. Use DXMT unless this bottle runs on a "
+                            + "CrossOver engine that provides it.")
+            return 0
+        }
+
+        guard let src = Paths.bundledDXMT else {
+            console?.append("This build of Decanter ships no DXMT payload.")
+            return 0
+        }
+        let games = scoped
+        if games.isEmpty { console?.append("No games found for this bottle yet.") }
 
         let fm = FileManager.default
         let env = Wine.environment(for: bottle, using: installation)
@@ -1408,8 +1487,13 @@ final class AppModel: ObservableObject {
         // exactly right — so we must NOT skip it. Only a plain Steam launcher should short-circuit.
         let isGameLauncher = bottle.settings.steamArguments.contains("-applaunch")
         Task {
-            await ensureSoftware2D(for: bottle)
-            // Guard against a rapid double-click on the same bottle regardless of kind.
+            // GUARD FIRST — nothing may `await` before the check-and-claim below.
+            //
+            // `ensureSoftware2D` used to run here, and it spawns a Wine subprocess against the
+            // prefix: an await of roughly a second sitting between the click and the guard. Two
+            // clicks inside that window both saw an empty `launchingBottleIDs` and both launched.
+            // The check and the `insert` that claims it must be reached with no suspension point
+            // between them, which on @MainActor makes them atomic with respect to other clicks.
             if launchingBottleIDs.contains(bottle.id) {
                 activateRunningGame()
                 return
@@ -1426,6 +1510,9 @@ final class AppModel: ObservableObject {
                 await shutdownPrefix(for: bottle)
             }
             launchingBottleIDs.insert(bottle.id)
+
+            // Safe here: the launch is claimed, so a second click short-circuits above.
+            await ensureSoftware2D(for: bottle)
 
             // Make sure anything newly installed has the patched graphics driver BEFORE it runs.
             // Doing it here rather than only in the wizard is what removes the last manual step: a

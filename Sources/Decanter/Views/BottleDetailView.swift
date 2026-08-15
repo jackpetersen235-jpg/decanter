@@ -16,8 +16,6 @@ struct BottleDetailView: View {
     @State private var confirmQuit = false
     @State private var quitting = false
     @State private var quitResult: String?
-    @State private var buildingApp = false
-    @State private var appResult: String?
     @Environment(\.appTheme) private var appTheme
 
     /// The two buttons that use a CUSTOM style in Aero, and so lose the focus ring macOS draws for
@@ -168,7 +166,14 @@ struct BottleDetailView: View {
                                     // direct-exe bottles and installs the graphics driver first.
                                     model.launchSteam(in: bottle)
                                 } label: {
-                                    Label("Play", systemImage: "gamecontroller.fill")
+                                    // Reflect the REAL launching state. This said "Play" forever and
+                                    // was `.disabled(buildingApp)` — a flag that died with the
+                                    // launcher generator and is never set true, so Play never
+                                    // disabled and never acknowledged a click. Only Launch Steam
+                                    // did, which is why one button felt responsive and the other
+                                    // felt broken.
+                                    Label(launching ? "Opening…" : "Play",
+                                          systemImage: "gamecontroller.fill")
                                 }
                                 // Lime in Aero — the theme's signature accent — and its shadow
                                 // takes that hue rather than neutral gray. Liquid glass ignores
@@ -176,7 +181,7 @@ struct BottleDetailView: View {
                                 .themedButton(prominent: true, accent: AeroTokens.lime)
                                 .focused($focusedControl, equals: .play)
                                 .aeroFocusRing(focusedControl == .play)
-                                .disabled(buildingApp)
+                                .disabled(launching)
                             }
 
                             // Two spellings of the same button because SwiftUI's ButtonStyle is not

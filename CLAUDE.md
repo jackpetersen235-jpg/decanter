@@ -809,6 +809,50 @@ sweep). `steamservice.exe`, `gameoverlayui64.exe` and friends run ALONGSIDE a ga
 from it. Verified separately that Steam *alone* was already reported correctly — so this was not
 the cause of the timing above, and the claim that it was should not have been made before testing.
 
+## Review findings 1–3 (2026-08-12) — a label, a guard, and a picker that did nothing
+
+**1. "Create & Play" never played.** `create()` called `createBottle(named:for:)` and returned; the
+button's own label promised an action the code did not contain. Confirmed by creating a bottle and
+counting processes: 0 game, 0 steam.exe. Now launches the bottle it just made. The same function
+silently dismissed when a hand-picked exe sat outside any prefix — it says so instead.
+
+**2. The double-click guard was defeated by its own preamble.** `launchSteam` opened with
+`await ensureSoftware2D(…)` — a Wine subprocess, ~1 s — BEFORE the `launchingBottleIDs.contains`
+check. Two clicks inside that window both saw an empty set and both launched. **Nothing may await
+between the check and the `insert` that claims it**; on `@MainActor` that pair is then atomic.
+Regression introduced by me when adding the software-2D call.
+
+Play also never showed launching state: it was `.disabled(buildingApp)`, and `buildingApp` died
+with the launcher generator and is never set true. It now reads `launchingBottleIDs` and says
+"Opening…", which is what Launch Steam always did.
+
+**3. The Graphics ▸ Backend picker was inert for 3 of its 4 options.** `settings.graphics` was read
+only by the picker that set it and the label that echoed it; `installGraphicsDriver` installed DXMT
+unconditionally. Picking DXVK installed DXMT. `BottleSettings` even claimed DXVK "is scoped
+per-executable via AppDefaults" — **no such code ever existed**, a description of an intention left
+reading as a description of behaviour.
+
+Now: DXMT installs, **WineD3D removes** the per-game overrides (the absence IS the setting), and
+DXVK/D3DMetal refuse with a reason — DXVK because the engine ships `d3d11`+`d3d10core` and **no
+`dxgi.dll`**, and DXVK will not create a device without it ("Adapter is not a DXVK adapter",
+observed here); D3DMetal because it belongs to CrossOver/GPTk, not Decanter's engine.
+
+⚠️ **Per-bottle graphics settings must be SCOPED TO THE BOTTLE'S GAME.** `detectedSteamGames` lists
+the whole PREFIX, and three bottles share `Steam-Wine11`. First cut had the Peggle bottle (WineD3D)
+clearing all 4 games' overrides and the DXMT bottles re-adding all 4 on the next pass — the setting
+appeared to do nothing while quietly fighting its neighbours. A bottle that resolves a game touches
+only that game; a launcher bottle keeps prefix-wide behaviour.
+
+⚠️ **`#"…\AppDefaults"# + exe` — MIND THE TRAILING BACKSLASH.** Written without it the key becomes
+`…\AppDefaultsPeggle.exe\DllOverrides`, which does not exist, so every `reg delete` "succeeds"
+against nothing. **This exact typo has now shipped twice**, both times introduced by a heredoc
+eating the final backslash, both times invisible in review. Check the VALUES in `user.reg` after a
+flush; never trust the command's exit status.
+
+**Found while fixing 3, not yet fixed:** the DXMT path skips a game whose DLLs already match, and
+that `continue` skips the override write too — so a game with patched DLLs but missing overrides
+never gets them back.
+
 ## Verification habits that mattered
 
 - **Screenshots beat logs.** `screencapture -x` + Read. Logs said "0 errors" while the screen was
