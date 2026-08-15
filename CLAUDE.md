@@ -853,6 +853,34 @@ flush; never trust the command's exit status.
 that `continue` skips the override write too — so a game with patched DLLs but missing overrides
 never gets them back.
 
+## Review findings 4–6 (2026-08-12) — three swallowed results
+
+**4. The setup wizard swallowed a Steam-install failure.** Steps 1–3 all set `failureMessage`;
+step 4 was `_ = await model.performSteamInstall(…)`. A failed install ended the run with the step
+simply unchecked and no reason anywhere — the user stares at a tick that never appears. Now checked
+and reported, with "press the button again, anything already finished is skipped".
+
+**5. A failed msync overlay reported SUCCESS.** `try? await installMsyncEngine()` then `phase =
+.done`. The non-fatal choice is right — a working wine 11 engine beats no engine — but the user
+silently received the **frame-spike engine that the overlay exists to avoid**, and only `--verify`
+could tell. `WineInstaller` now publishes a `warning`, and the wizard shows it in yellow, distinct
+from a red failure: the run finished, the result is just worse than intended. **Non-fatal must
+still mean reported.**
+
+**6. Rescan was silent in 2 of the 3 places it exists.** `rescanSummary()` had ONE caller
+(Settings); the sidebar gear sheet and View ▸ Rescan (⇧⌘R) said nothing — the "users conclude the
+button is dead" bug, fixed in a third of the places it occurs.
+
+The fix is structural: **`rescanInstallations()` now publishes `lastRescanMessage` itself**, so no
+call site — present or future — can forget to report. Settings reads that instead of keeping a
+private copy, which is exactly how the three drifted apart. Verified live: the gear sheet now shows
+"Found 5 Wine builds."
+
+Menu commands have nowhere inline to put a result, so ⇧⌘R and **Import CrossOver Bottles** (which
+threw away its `Int`, making it a total no-op on a Mac without CrossOver) now report through the
+console sheet. `openConsole` had to stop being `private` for that — a detail worth keeping, since
+"private" was quietly the reason menu actions could not talk to the user at all.
+
 ## Verification habits that mattered
 
 - **Screenshots beat logs.** `screencapture -x` + Read. Logs said "0 errors" while the screen was

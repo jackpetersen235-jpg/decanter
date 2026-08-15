@@ -54,19 +54,18 @@ struct SettingsView: View {
                     }
                 }
                 HStack {
-                    Button("Rescan") {
-                        model.rescanInstallations()
-                        rescanResult = model.rescanSummary()
-                    }
+                    Button("Rescan") { model.rescanInstallations() }
                     Button("Add Wine bin folder…") {
                         if let url = Panels.chooseDirectory(prompt: "Select Wine bin folder") {
                             model.addWineDirectory(url)
-                            rescanResult = "Added. Now \(model.installations.count) Wine build(s)."
                         }
                     }
                 }
-                if let rescanResult {
-                    Text(rescanResult).font(.caption).foregroundStyle(.secondary)
+                // Reads the model's message so every rescan — from here, the sidebar, or the
+                // menu — reports the same thing. A private copy here is how two of the three
+                // buttons ended up silent.
+                if let msg = model.lastRescanMessage {
+                    Text(msg).font(.caption).foregroundStyle(.secondary)
                 }
             }
 

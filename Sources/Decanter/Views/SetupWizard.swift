@@ -11,6 +11,9 @@ struct SetupWizard: View {
     @State private var running = false
     @State private var bottleName = "Games"
     @State private var failureMessage: String? = nil
+    /// Setup finished, but something optional did not — currently the msync overlay. Distinct from
+    /// `failureMessage`: the run succeeded, the result is just worse than it should be.
+    @State private var warningMessage: String? = nil
     @State private var steamInstalling = false
 
     private enum Step: Int, CaseIterable {
@@ -172,6 +175,15 @@ struct SetupWizard: View {
                         .font(.caption).foregroundStyle(.orange)
                         .padding(.top, 2)
                 }
+                // Setup SUCCEEDED but produced a worse result than intended — currently an engine
+                // without the msync overlay. Shown separately from a failure because the run did
+                // finish; staying silent is what let someone end up on the frame-spike engine
+                // believing everything was fine.
+                if let warningMessage {
+                    Label(warningMessage, systemImage: "exclamationmark.circle")
+                        .font(.caption).foregroundStyle(.yellow)
+                        .padding(.top, 2)
+                }
             }
         }
     }
@@ -204,6 +216,10 @@ struct SetupWizard: View {
                 return
             }
         }
+        // Non-fatal, but SAY IT: the engine can install without the msync overlay, in which case
+        // setup "succeeds" and the user quietly has the frame-spike engine.
+        if let w = installer.warning { warningMessage = w }
+
         guard model.hasUsableEngine else {
             failureMessage = "No Windows engine is available. Please check your internet connection and try again."
             return
@@ -221,8 +237,17 @@ struct SetupWizard: View {
         if let bottle = model.bottles.first(where: { model.installation(for: $0)?.isSteamCapable == true }),
            !bottle.isSteamInstalled {
             steamInstalling = true
-            _ = await model.performSteamInstall(in: bottle, console: nil)
+            // CHECK IT. Steps 1–3 all report their failures; this one discarded its result, so a
+            // failed Steam install ended the wizard with the step simply unchecked and no reason
+            // given anywhere — the user is left looking at a tick that never appeared.
+            let steamOK = await model.performSteamInstall(in: bottle, console: nil)
             steamInstalling = false
+            if !steamOK {
+                failureMessage = "Couldn't install Steam into the game environment. "
+                    + "Check your internet connection and press the button again — "
+                    + "anything already finished is skipped."
+                return
+            }
         }
 
         // 5. Patched graphics driver for anything already installed. Harmless when the library is

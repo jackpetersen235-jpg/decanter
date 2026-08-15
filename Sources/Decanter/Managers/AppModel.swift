@@ -9,6 +9,10 @@ final class AppModel: ObservableObject {
     // MARK: Published state
     @Published var bottles: [Bottle] = []
 
+    /// What the last `rescanInstallations()` found. Set by the model itself so that no button
+    /// which triggers a rescan can silently do nothing visible.
+    @Published var lastRescanMessage: String?
+
     @Published var installations: [WineInstallation] = []
     @Published var selectedBottleID: Bottle.ID?
     @Published var activeConsole: TaskConsole?
@@ -459,6 +463,11 @@ final class AppModel: ObservableObject {
 
     func rescanInstallations() {
         installations = Wine.discover(extraDirectories: extraWineDirectories)
+        // Report from HERE, not from each call site. `rescanSummary()` had exactly one caller
+        // (Settings), so the sidebar's Rescan and View ▸ Rescan stayed completely silent — the
+        // "users conclude the button is dead" bug, fixed in one place out of three. A published
+        // message means every present and future caller reports by default.
+        defer { lastRescanMessage = rescanSummary() }
 
         // SELF-HEAL A STALE DEFAULT.
         //
@@ -1913,8 +1922,10 @@ final class AppModel: ObservableObject {
 
     // MARK: Console plumbing
 
+    /// Internal rather than private: menu commands have nowhere inline to show a result, so they
+    /// report through this. Keeping it private is what left ⇧⌘R and Import CrossOver silent.
     @discardableResult
-    private func openConsole(title: String) -> TaskConsole {
+    func openConsole(title: String) -> TaskConsole {
         let console = TaskConsole(title: title)
         activeConsole = console
         return console

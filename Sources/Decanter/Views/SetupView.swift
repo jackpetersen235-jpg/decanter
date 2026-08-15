@@ -67,6 +67,11 @@ struct SetupView: View {
                     Button("Rescan") { model.rescanInstallations() }
                     Button("Add Manually…") { addManually() }
                 }
+                // Same reason Settings shows it: a button that does real work and says nothing is
+                // one users conclude is broken. This one was silent while Settings' was not.
+                if let msg = model.lastRescanMessage {
+                    Text(msg).font(.caption).foregroundStyle(.secondary)
+                }
 
                 if model.installations.isEmpty {
                     HStack(spacing: 8) {

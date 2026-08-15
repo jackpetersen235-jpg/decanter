@@ -29,6 +29,14 @@ final class WineInstaller: ObservableObject {
 
     @Published var phase: Phase = .idle
 
+    /// Set when the engine installed but the msync overlay did NOT.
+    ///
+    /// The overlay is deliberately non-fatal — a working wine 11 engine beats no engine — but it
+    /// used to be `try?` followed straight by `.done`, so a failed second download reported
+    /// SUCCESS and the user silently got the frame-spike engine that this overlay exists to avoid.
+    /// Only `--verify` could tell. Non-fatal must still mean *reported*.
+    @Published var warning: String?
+
     /// Base bundle: Wine 11 + DXVK + DXMT + the ~94 support dylibs (gnutls/freetype/MoltenVK/…),
     /// ~317 MB. We keep using this for everything EXCEPT the wine binaries themselves, because it
     /// is the only bundle that ships a complete, self-contained macOS support environment.
@@ -86,8 +94,16 @@ final class WineInstaller: ObservableObject {
             try? FileManager.default.removeItem(at: tarball)   // reclaim ~317 MB
             // Swap the wine tree for upstream-wine-10-with-msync (keeps DXMT/DXVK + support libs).
             // Non-fatal: if this fails we still have a working wine 11 engine, just with the
-            // frame spikes. A broken-but-present engine would be worse than a slower one.
-            try? await installMsyncEngine()
+            // frame spikes. A broken-but-present engine would be worse than a slower one — but the
+            // user has to be TOLD, or "setup complete" is a lie about which engine they now have.
+            do {
+                try await installMsyncEngine()
+                warning = nil
+            } catch {
+                warning = "The engine installed, but the fast-sync (msync) update didn't: "
+                    + error.localizedDescription
+                    + " Games will run, but demanding ones may stutter. Re-run Setup Assistant to retry."
+            }
             phase = .verifying
             let version = try await verify()
             phase = .done(version: version)

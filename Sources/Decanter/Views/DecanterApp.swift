@@ -38,9 +38,26 @@ struct DecanterApp: App {
                 .keyboardShortcut("n", modifiers: .command)
             }
             CommandGroup(after: .toolbar) {
-                Button("Rescan Wine Installations") { model.rescanInstallations() }
-                    .keyboardShortcut("r", modifiers: [.command, .shift])
-                Button("Import CrossOver Bottles") { model.importCrossOverBottles() }
+                // A MENU ITEM HAS NOWHERE TO PUT A RESULT, so these report through the console
+                // sheet. Both used to run and return in silence: ⇧⌘R looked identical whether it
+                // found five engines or none, and Import CrossOver on a Mac without CrossOver was
+                // a complete no-op with its Int result thrown away.
+                Button("Rescan Wine Installations") {
+                    model.rescanInstallations()
+                    let console = model.openConsole(title: "Rescan")
+                    console.append(model.lastRescanMessage ?? "Rescan finished.")
+                    console.finish()
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                Button("Import CrossOver Bottles") {
+                    let n = model.importCrossOverBottles()
+                    let console = model.openConsole(title: "Import CrossOver Bottles")
+                    console.append(n > 0
+                        ? "Imported \(n) bottle\(n == 1 ? "" : "s") from CrossOver."
+                        : "No CrossOver bottles found. CrossOver keeps them in "
+                          + "~/Library/Application Support/CrossOver/Bottles.")
+                    console.finish()
+                }
                 Button("Setup Assistant…") {
                     NotificationCenter.default.post(name: .setupAssistantRequested, object: nil)
                 }
