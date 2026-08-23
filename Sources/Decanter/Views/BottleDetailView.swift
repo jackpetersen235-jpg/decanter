@@ -16,6 +16,8 @@ struct BottleDetailView: View {
     @State private var confirmQuit = false
     @State private var quitting = false
     @State private var quitResult: String?
+    @State private var showQuitBlocked = false
+    @State private var quitBlockReason: String?
     @Environment(\.appTheme) private var appTheme
 
     /// The two buttons that use a CUSTOM style in Aero, and so lose the focus ring macOS draws for
@@ -52,6 +54,12 @@ struct BottleDetailView: View {
         .navigationTitle("")
         // Confirmed, not immediate: this is `wineserver -k` on the whole prefix, so a game that is
         // still running dies with it and unsaved progress goes with it.
+        //
+        // The message used to say "any game running in THIS BOTTLE" — wrong when bottles share a
+        // prefix (Steam, Sekiro, JJBA and Peggle all share Steam-Wine11 here): `wineserver -k` is
+        // scoped to the PREFIX, so it can kill a sibling bottle's game. Now names the real blast
+        // radius when there is one, via `PrefixSharing`. See `quitBlockAlert` for the refusal this
+        // pairs with — checked BEFORE this dialog even opens.
         .confirmationDialog("Quit Steam in “\(bottle.name)”?",
                             isPresented: $confirmQuit, titleVisibility: .visible) {
             Button("Quit Steam", role: .destructive) {
@@ -67,7 +75,22 @@ struct BottleDetailView: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This also closes any game running in this bottle. Unsaved progress will be lost.")
+            let others = model.otherBottlesSharingPrefix(with: bottle)
+            if others.isEmpty {
+                Text("This also closes any game running in this bottle. Unsaved progress will be lost.")
+            } else {
+                Text("This prefix is shared with \(others.map(\.name).joined(separator: ", ")). "
+                     + "Quitting Steam closes any game running in ANY of them. Unsaved progress "
+                     + "will be lost.")
+            }
+        }
+        // Refusal, shown INSTEAD of the confirmation above — see `quitSteamBlockReason` for why
+        // this can only be conservative rather than precise (no per-prefix process attribution
+        // exists on macOS without real new work). Fires before `confirmQuit` is ever set.
+        .alert("Can't quit Steam right now", isPresented: $showQuitBlocked) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(quitBlockReason ?? "")
         }
     }
 
@@ -205,7 +228,16 @@ struct BottleDetailView: View {
                             // a `-silent` Steam sits in the tray with no window and survives every
                             // attempt to quit it from Steam's own UI (closing the window just
                             // re-hides it), with no control anywhere in the app to end it.
-                            Button(quitting ? "Quitting…" : "Quit Steam") { confirmQuit = true }
+                            Button(quitting ? "Quitting…" : "Quit Steam") {
+                                Task {
+                                    if let reason = await model.quitSteamBlockReason(for: bottle) {
+                                        quitBlockReason = reason
+                                        showQuitBlocked = true
+                                    } else {
+                                        confirmQuit = true
+                                    }
+                                }
+                            }
                                 .glassButton()
                                 .disabled(quitting)
 
@@ -274,6 +306,14 @@ struct BottleDetailView: View {
                     infoRow("Graphics", bottle.settings.graphics.label)
                     infoRow("Sync", bottle.settings.syncMode.label)
                     infoRow("Prefix", bottle.url.path, mono: true)
+                    // Names the real blast radius (F1/F2). A bottle's own settings and actions can
+                    // read as isolated when three others share this exact directory.
+                    if !model.otherBottlesSharingPrefix(with: bottle).isEmpty {
+                        let names = model.otherBottlesSharingPrefix(with: bottle)
+                            .map(\.name).joined(separator: ", ")
+                        Label("Shared with \(names)", systemImage: "person.2")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
                     HStack {
                         // Glass, like every secondary control. Only Play and Launch Steam keep the
                         // active theme's own treatment, so the eye still lands on them first.

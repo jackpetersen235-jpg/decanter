@@ -16,3 +16,8 @@ Assets/bbox.txt
 # or the clang line in the header comment of the corresponding .m file.
 Scripts/sekiro/libgpustall.dylib
 Scripts/sekiro/gpuwake
+
+# External-reviewer scratch/coordination notes — not project source, must not be committed.
+FIX-PLAN-PROMPT.md
+ITEM1-CORRECTION.md
+ITEM1-GO-AHEAD.md

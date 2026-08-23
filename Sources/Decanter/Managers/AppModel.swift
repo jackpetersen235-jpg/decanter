@@ -1091,10 +1091,22 @@ final class AppModel: ObservableObject {
         let env = Wine.environment(for: bottle, using: installation)
         var done = 0
         for game in games {
-            // Skip games that already have exactly these DLLs. This is what makes the call cheap
-            // enough to run on every Steam launch, which in turn means a newly-installed game gets
-            // the driver with no user action. Size comparison is sufficient: the patched DLLs are a
-            // different size from both stock DXMT and whatever the game itself shipped.
+            // Skip COPYING the DLLs when they already match — this is what makes the call cheap
+            // enough to run on every Steam launch. Size comparison is sufficient: the patched DLLs
+            // are a different size from both stock DXMT and whatever the game itself shipped.
+            //
+            // ⚠️ F4 (bug-sweep, 2026-08-22): this used to be `if already { continue }` — skipping
+            // the DLL copy ALSO skipped the registry-override write below, unconditionally. A game
+            // whose DLLs matched but whose override had been cleared by something else (this
+            // project has one concrete way that happens: switching a bottle to WineD3D and back —
+            // WineD3D's branch clears the override but never touches the DLL files, so the very
+            // next DXMT install call sees `already == true` and walks straight past restoring it)
+            // silently stayed on WineD3D forever, while Configuration kept reporting DXMT as
+            // active. REPRODUCED LIVE before this fix: cleared Peggle's DllOverrides key by hand,
+            // re-ran `installGraphicsDriver` with DLLs already matching, and the key stayed absent.
+            //
+            // The fix is to make DLL-copying and override-writing two independent steps: skipping
+            // one must never skip the other.
             let already = Paths.dxmtDLLs.allSatisfy { dll in
                 let a = (try? game.folder.appendingPathComponent(dll)
                     .resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
@@ -1102,27 +1114,29 @@ final class AppModel: ObservableObject {
                     .resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -2
                 return a == b
             }
-            if already { continue }
 
             var copied = true
-            for dll in Paths.dxmtDLLs {
-                let dst = game.folder.appendingPathComponent(dll)
-                // Keep one backup of whatever was there first, so this is reversible by hand.
-                let backup = game.folder.appendingPathComponent(dll + ".decanter-orig")
-                if fm.fileExists(atPath: dst.path), !fm.fileExists(atPath: backup.path) {
-                    try? fm.copyItem(at: dst, to: backup)
+            if !already {
+                for dll in Paths.dxmtDLLs {
+                    let dst = game.folder.appendingPathComponent(dll)
+                    // Keep one backup of whatever was there first, so this is reversible by hand.
+                    let backup = game.folder.appendingPathComponent(dll + ".decanter-orig")
+                    if fm.fileExists(atPath: dst.path), !fm.fileExists(atPath: backup.path) {
+                        try? fm.copyItem(at: dst, to: backup)
+                    }
+                    try? fm.removeItem(at: dst)
+                    do { try fm.copyItem(at: src.appendingPathComponent(dll), to: dst) }
+                    catch { console?.append("Could not write \(dll) into \(game.folder.lastPathComponent): \(error.localizedDescription)"); copied = false }
                 }
-                try? fm.removeItem(at: dst)
-                do { try fm.copyItem(at: src.appendingPathComponent(dll), to: dst) }
-                catch { console?.append("Could not write \(dll) into \(game.folder.lastPathComponent): \(error.localizedDescription)"); copied = false }
             }
             guard copied else { continue }
 
-            // CHECK the registry writes. Copying the DLLs is only half the job — without the
-            // override Wine ignores them entirely and the game falls back to WineD3D, which is
-            // precisely the slow path this feature exists to avoid. Discarding the result meant a
-            // silent failure would still be reported as "installed", and the user would be left
-            // wondering why a game that Decanter said was patched still ran badly.
+            // ALWAYS check/re-assert the registry writes, even when the DLL copy above was
+            // skipped. Copying the DLLs is only half the job — without the override Wine ignores
+            // them entirely and the game falls back to WineD3D, which is precisely the slow path
+            // this feature exists to avoid. Discarding the result meant a silent failure would
+            // still be reported as "installed", and the user would be left wondering why a game
+            // that Decanter said was patched still ran badly.
             let key = #"HKCU\Software\Wine\AppDefaults\"# + game.exe + #"\DllOverrides"#
             var overridesOK = true
             for dll in ["d3d11", "dxgi", "d3d10core"] {
@@ -1344,7 +1358,20 @@ final class AppModel: ObservableObject {
         // set, by a bottle that has nothing to do with Peggle. Turning it off touches only the
         // executable this bottle itself resolves to.
         guard bottle.settings.software2D else {
+            // Don't clear an override a SIBLING bottle still wants ON for this same executable.
+            //
+            // Two bottles can independently resolve to one exe — the New Bottle picker explicitly
+            // allows a second "Peggle Deluxe" bottle, flagging it "Added" rather than refusing it —
+            // and this bottle turning off must not silently undo what the other one asked for.
+            // Bug-sweep F8: proven with `PrefixSharingTests.testSoftware2DIsWantedIfAnyBottle…`.
+            let group = bottlesSharingPrefix(with: bottle)
             for target in targets.sorted() {
+                if PrefixSharing.software2DWanted(forExe: target, in: group,
+                                                  resolve: { self.resolvedGame(for: $0)?.executable.lastPathComponent }) {
+                    console.append("Software 2D left ON for \(target) — another bottle sharing "
+                                   + "this prefix still wants it.")
+                    continue
+                }
                 let key = #"HKCU\Software\Wine\AppDefaults\"# + target + #"\Direct3D"#
                 console.append("Software 2D off for \(target)")
                 _ = try? await Shell.run(installation.loader,
@@ -1561,10 +1588,8 @@ final class AppModel: ObservableObject {
                 launchQuietly(bottle: bottle, arguments: [direct], extraEnvironment: steamAppEnvironment(for: bottle))
                 suppressWineSystray(isGameLauncher: true)
                 reapSteamAfterGame(in: bottle, weStartedSteam: weStartedSteam)
-                Task {
-                    try? await Task.sleep(nanoseconds: 30_000_000_000)
-                    launchingBottleIDs.remove(bottle.id)
-                }
+                let exeName = URL(fileURLWithPath: direct).lastPathComponent
+                clearLaunchGuard(for: bottle) { await self.isProcessRunning(named: exeName) }
                 return
             }
 
@@ -1599,11 +1624,11 @@ final class AppModel: ObservableObject {
             if isGameLauncher {
                 reapSteamAfterGame(in: bottle, weStartedSteam: startedSteamForGame)
             }
-            Task {
-                // Hold the guard while Steam comes up, then let isSteamRunning take over.
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
-                launchingBottleIDs.remove(bottle.id)
-            }
+            // Hold the guard until Steam is confirmed up. If Steam was already running before this
+            // call, `isSteamRunning()` is true on the very first check, so the guard clears almost
+            // immediately — correct, since -applaunch on an already-running Steam is near-instant
+            // and there's nothing more we can wait for (see clearLaunchGuard).
+            clearLaunchGuard(for: bottle) { await self.isSteamRunning() }
         }
     }
 
@@ -1713,11 +1738,26 @@ final class AppModel: ObservableObject {
             // Phase 2 — wait for it to be gone, and stay gone. `isAnyGameRunning` is global, not
             // per-prefix, so a game launched in ANY bottle keeps this waiting: conservative on
             // purpose, since the failure mode of reaping too early is killing someone's session.
+            //
+            // F7 (bug-sweep): this loop had no ceiling. A game running indefinitely in an unrelated
+            // bottle held it open forever, and because the whole Task never returned, the `defer`
+            // above never ran either — `reapingBottleIDs` for THIS bottle stayed set for the rest of
+            // the session, silently. Capped generously (an hour) so a genuinely long session
+            // elsewhere isn't cut short, but the task now always finishes one way or another.
             if appeared {
                 var clearStreak = 0
-                while clearStreak < 3 {                        // ~15 s of quiet before believing it
+                var elapsed = 0
+                let giveUpAfter = 3600                          // 1h — see comment above
+                while clearStreak < 3 && elapsed < giveUpAfter { // ~15 s of quiet before believing it
                     try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    elapsed += 5
                     clearStreak = await isAnyGameRunning() ? 0 : clearStreak + 1
+                }
+                guard clearStreak >= 3 else {
+                    NSLog("Decanter: gave up reaping Steam for \(bottle.name) after "
+                          + "\(giveUpAfter / 60) min — another game was still reported running "
+                          + "elsewhere. Steam was left open rather than risk killing it.")
+                    return
                 }
             }
 
@@ -1771,6 +1811,63 @@ final class AppModel: ObservableObject {
     /// reaches (`isGameLauncher` skips that branch).
     ///
     /// Retries once: `wineserver -k` is asynchronous and the straggler sweep can run before every
+    // MARK: Shared-prefix awareness (bug-sweep F1/F2/F8)
+    //
+    // Several bottles can point at the SAME WINEPREFIX (Steam, Sekiro, JJBA and Peggle all share
+    // `Steam-Wine11` here), which several parts of the app used to treat as though each bottle were
+    // isolated. `PrefixSharing` is the one place that answers "which bottles share this prefix";
+    // these are thin wrappers so views never re-derive the answer themselves — the same discipline
+    // as `resolvedGame`, and for the same reason: a second opinion about shared state is how the
+    // picker and the launcher resolver drifted apart earlier in this project.
+
+    /// Every bottle sharing `bottle`'s prefix, `bottle` itself included.
+    func bottlesSharingPrefix(with bottle: Bottle) -> [Bottle] { PrefixSharing.group(of: bottle, in: bottles) }
+
+    /// The OTHER bottles sharing `bottle`'s prefix — what a confirmation dialog names.
+    func otherBottlesSharingPrefix(with bottle: Bottle) -> [Bottle] { PrefixSharing.others(of: bottle, in: bottles) }
+
+    /// Why "Quit Steam" must not proceed right now, or nil if it's safe to ask for confirmation.
+    ///
+    /// ⚠️ IMPRECISE BY NECESSITY — documented rather than hidden. This can only ask "is ANY game
+    /// running anywhere" (`isAnyGameRunning`, itself flagged separately as inheriting a global,
+    /// unscoped check) because nothing here — and no cheap macOS API — attributes a running process
+    /// to the specific bottle/prefix that launched it. macOS has no `/proc`-equivalent for reading
+    /// another process's environment (verified: `ps -Eww` does not expose it the way Linux's
+    /// `/proc/PID/environ` does), so telling "a game in THIS prefix" from "a game in some other
+    /// prefix entirely" would need new process-to-prefix attribution — real work belonging to that
+    /// other fix, not this one.
+    ///
+    /// So this only engages when `bottle` actually shares its prefix with others: an isolated
+    /// bottle (Half Sword, today) is unaffected, because `wineserver -k` there can only ever hit its
+    /// OWN game, which the existing confirmation dialog already discloses. For a SHARED bottle it
+    /// takes the safe direction — OVER-refuse (may block even when the live game belongs to some
+    /// unrelated prefix) rather than under-refuse (silently kill a sibling bottle's game). The
+    /// escape hatch is quitting Steam from the bottle that actually owns the running game, not a
+    /// bypass added here.
+    func quitSteamBlockReason(for bottle: Bottle) async -> String? {
+        let siblings = otherBottlesSharingPrefix(with: bottle)
+        guard !siblings.isEmpty else { return nil }
+        // ⚠️ PREFIX-UNAWARE CHECK, READ THIS BEFORE TRUSTING THE RESULT. `isAnyGameRunning()` is
+        // `ps -Ao comm=` over the WHOLE MACHINE — it cannot tell "something is running in a
+        // sibling bottle sharing THIS prefix" from "something is running in a totally unrelated
+        // bottle, or a different prefix entirely". Concrete failure case: Half Sword (its own
+        // separate prefix) is playing, Steam-Wine11 is completely idle — Quit Steam on the Peggle
+        // bottle will still refuse here, citing Sekiro/JJBA/Steam as at risk when none of them are
+        // doing anything. That is a known, accepted over-block, not a bug to silently rely on being
+        // absent: see "quitSteamBlockReason over-blocks on unrelated-prefix activity" in
+        // CLAUDE.md's spotted-not-fixed list. Real per-prefix attribution would mean mapping a
+        // running PID to its WINEPREFIX — nothing in this codebase does that, and `ps` alone
+        // cannot give it without walking each process's environment, which is exactly the kind of
+        // attribution this project has been burned by guessing at before (comm-path splitting, the
+        // systray sweep, the helper allowlist). Not attempted here; over-blocking is the safe
+        // direction, so the imprecision is left in rather than built around.
+        guard await isAnyGameRunning() else { return nil }
+        let names = siblings.map(\.name).joined(separator: ", ")
+        return "This prefix is also used by \(names). A game appears to be running somewhere — "
+             + "quitting Steam here could close it. Quit Steam from the bottle that's actually "
+             + "playing it instead."
+    }
+
     /// process has gone. Reports whether Steam is actually gone rather than assuming.
     @discardableResult
     func quitSteam(in bottle: Bottle) async -> Bool {
@@ -1837,6 +1934,48 @@ final class AppModel: ObservableObject {
             }
         }
         return false
+    }
+
+    /// Play stayed disabled — surfaces a launch that never produced anything, instead of the
+    /// button quietly re-enabling with no explanation. F6 (bug-sweep).
+    @Published var lastLaunchFailure: String?
+
+    /// Release `launchingBottleIDs` as soon as `success` goes true, or after `ceiling` seconds,
+    /// whichever comes first — instead of always waiting out a flat duration regardless of outcome.
+    /// Publishes `lastLaunchFailure` if the ceiling passes with nothing to show for it. F6
+    /// (bug-sweep). Same poll-then-sleep shape as `waitForSteamLogon`, but checks BEFORE the first
+    /// sleep too: if the evidence is already true (e.g. Steam was already running), the guard
+    /// should clear immediately rather than waiting a pointless 2s.
+    private func clearLaunchGuard(for bottle: Bottle, ceiling: Int = 30,
+                                  success: @escaping () async -> Bool) {
+        Task {
+            var launched = await success()
+            var waited = 0
+            while !launched && waited < ceiling {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                waited += 2
+                launched = await success()
+            }
+            launchingBottleIDs.remove(bottle.id)
+            if !launched {
+                lastLaunchFailure = "\(bottle.name) didn't start. Check that Steam is installed "
+                    + "and logged in, then try again."
+            }
+        }
+    }
+
+    /// True if a process named `exeName` (matched case-insensitively on the final path component,
+    /// same split rule as `isAnyGameRunning`) is currently running. F6's success signal for a
+    /// direct-exe launch — the specific binary just started, not "some game or other."
+    private func isProcessRunning(named exeName: String) async -> Bool {
+        guard let result = try? await Shell.run(URL(fileURLWithPath: "/bin/ps"),
+                                                 arguments: ["-Ao", "comm="]) else { return false }
+        let target = exeName.lowercased()
+        return result.stdout.split(separator: "\n").contains { line in
+            let name = String(line.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last ?? "")
+                .lowercased()
+            return name == target
+        }
     }
 
     private func steamAppEnvironment(for bottle: Bottle) -> [String: String] {
@@ -1953,6 +2092,18 @@ final class AppModel: ObservableObject {
 
     // MARK: Persistence
 
+    /// Set when `loadBottles` had to salvage — i.e. `bottles.json` did not decode as a whole and
+    /// at least one entry was dropped rather than merely reordered. nil the rest of the time.
+    ///
+    /// F3 (bug-sweep, 2026-08-22): this recovery path existed and worked, but said so only via
+    /// `NSLog` — invisible to anyone not attached to Console.app. Every one of the 5 times this has
+    /// fired on this machine to date dropped only test fixtures, never a real bottle, so there is
+    /// no live damage this is recovering FROM here — but the failure mode is real (see the doc
+    /// comment on `loadBottles`: a single unknown-shape entry used to drop the WHOLE list, and the
+    /// very next save would have overwritten the original file with the empty result). The banner
+    /// is for the case that has not happened yet on this machine, not evidence that it has.
+    @Published var bottleSalvageWarning: String?
+
     /// Load the bottle index, surviving a single corrupt or out-of-date entry.
     ///
     /// The naive version — decode `[Bottle]` and silently give up — turns a recoverable problem
@@ -1993,7 +2144,30 @@ final class AppModel: ObservableObject {
         }
         bottles = salvaged
         selectedBottleID = bottles.first?.id
+        let dropped = raw.count - salvaged.count
         NSLog("Decanter: bottles.json partially unreadable — salvaged \(salvaged.count) of \(raw.count). Original saved to \(backup.lastPathComponent)")
+        // User-visible counterpart to the NSLog above — that line is invisible to anyone not
+        // attached to Console.app, which is how this went unnoticed as a gap rather than a bug:
+        // the mechanism worked, nobody could see it working. Names the backup file explicitly so
+        // whoever sees this (the user, or an AI helper following DEBUGGING-GUIDE.md) can find and
+        // inspect exactly what didn't make it, rather than being told only a count.
+        //
+        // ⚠️ MUST BE DEFERRED TO THE NEXT RUN LOOP TICK, not set synchronously here. `loadBottles`
+        // runs inside `AppModel.init()`, which completes BEFORE SwiftUI ever constructs
+        // `ContentView` — so setting the property directly makes `bottleSalvageWarning` already
+        // `true` on ContentView's very FIRST render. `.alert(isPresented:)` needs an OBSERVED
+        // false→true transition while the view is live; a binding that starts true never fires
+        // it. REPRODUCED LIVE: injected a malformed entry, confirmed via the corrupt-*.json
+        // timestamp and the in-memory bottle count that salvage genuinely ran — and no alert ever
+        // appeared. `DispatchQueue.main.async` pushes the write to the tick after `init()`
+        // returns, by which point ContentView exists and is observing, so the transition is real.
+        if dropped > 0 {
+            let message = "\(dropped) bottle\(dropped == 1 ? "" : "s") couldn't be read "
+                + "and \(dropped == 1 ? "was" : "were") skipped. Nothing was deleted — the original "
+                + "file was saved as \(backup.lastPathComponent) in "
+                + "~/Library/Application Support/Decanter before anything was changed."
+            DispatchQueue.main.async { self.bottleSalvageWarning = message }
+        }
     }
 
     /// Persist the bottle index atomically.

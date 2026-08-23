@@ -57,6 +57,26 @@ struct ContentView: View {
             Text("This permanently erases the Windows drive for this bottle — installed games and "
                + "their save files. This cannot be undone.")
         }
+        // F3 (bug-sweep): the salvage path in `loadBottles` worked but was invisible — reported
+        // only via NSLog, which nobody but Console.app ever sees. Same binding idiom as
+        // `pendingDeletion` above: driven by the model clearing to nil, not by local state.
+        .alert("Some bottles couldn't be loaded",
+              isPresented: Binding(get: { model.bottleSalvageWarning != nil },
+                                   set: { if !$0 { model.bottleSalvageWarning = nil } })) {
+            Button("OK") { model.bottleSalvageWarning = nil }
+        } message: {
+            Text(model.bottleSalvageWarning ?? "")
+        }
+        // F6 (bug-sweep): Play used to stay disabled for a flat 30s no matter what happened, then
+        // quietly re-enable — a launch that never produced anything looked identical to one that
+        // worked. Same binding idiom as the two alerts above.
+        .alert("Couldn't launch",
+              isPresented: Binding(get: { model.lastLaunchFailure != nil },
+                                   set: { if !$0 { model.lastLaunchFailure = nil } })) {
+            Button("OK") { model.lastLaunchFailure = nil }
+        } message: {
+            Text(model.lastLaunchFailure ?? "")
+        }
     }
 
     /// Two columns laid out by hand rather than by `NavigationSplitView`.

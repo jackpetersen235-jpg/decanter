@@ -9,6 +9,21 @@ struct ConfigurationView: View {
     @State private var switchingEngine = false
     @State private var engineError: String?
 
+    /// Bottles sharing `bottle`'s WINEPREFIX — Windows version, DPI and Retina all land in the
+    /// registry ONCE PER PREFIX (HKLM, or HKCU keys the prefix itself owns), not once per bottle,
+    /// so changing them here changes every bottle in this list too. Presented rather than hidden:
+    /// F1 was exactly this shown as though each bottle were isolated.
+    private var sharedWith: [Bottle] { model.otherBottlesSharingPrefix(with: bottle) }
+
+    @ViewBuilder
+    private func sharedCaption() -> some View {
+        if !sharedWith.isEmpty {
+            Text("This is a property of the PREFIX, not this bottle. Changing it also changes: "
+                 + sharedWith.map(\.name).joined(separator: ", "))
+                .font(.caption).foregroundStyle(.orange)
+        }
+    }
+
     var body: some View {
         Form {
             Section("Engine") {
@@ -62,10 +77,11 @@ struct ConfigurationView: View {
                 }
             }
 
-            Section("Windows") {
+            Section(sharedWith.isEmpty ? "Windows" : "Windows — shared with this prefix") {
                 Picker("Windows version", selection: $bottle.settings.windowsVersion) {
                     ForEach(WindowsVersion.allCases) { Text($0.label).tag($0) }
                 }
+                sharedCaption()
             }
 
             Section("Graphics") {
@@ -103,6 +119,7 @@ struct ConfigurationView: View {
                 Toggle("Retina / HiDPI mode", isOn: $bottle.settings.retinaMode)
                 Stepper("Screen DPI: \(bottle.settings.dpi)",
                         value: $bottle.settings.dpi, in: 96...240, step: 24)
+                sharedCaption()
             }
 
             Section("Performance") {

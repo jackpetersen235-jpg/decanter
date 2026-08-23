@@ -881,6 +881,137 @@ threw away its `Int`, making it a total no-op on a Mac without CrossOver) now re
 console sheet. `openConsole` had to stop being `private` for that — a detail worth keeping, since
 "private" was quietly the reason menu actions could not talk to the user at all.
 
+## Bug-sweep fix F4 — DXMT's "already installed" skip also skipped the override (2026-08-22)
+
+**Invariant restored: I6 — a setting the UI reports as active IS active on disk.** Configuration
+said "DXMT" for Peggle while the registry override was empty; the game was silently on WineD3D.
+
+**Root cause:** `installGraphicsDriver`'s `if already { continue }` treated "DLLs already match"
+and "override already correct" as one fact. They are two: WineD3D's branch (Configuration ▸
+Graphics ▸ Backend) clears the registry override but never touches the DLL files, so switching a
+bottle to WineD3D and back left DLLs matching (skip the copy — correct) while the override stayed
+cleared (also skipped — wrong, and nothing else in the codebase ever re-asserts it).
+
+**Reproduced live before fixing, not inferred:** ran `installGraphicsDriver` once to normalize
+Peggle's DLLs to the bundled DXMT payload, ccleared its `AppDefaults\Peggle.exe\DllOverrides` key
+by hand, re-ran the installer — DLLs matched (`already == true`), override stayed **absent**.
+
+**Fix:** DLL-copying and override-writing are now independent steps inside the loop; skipping one
+never skips the other. **Verified live after the fix**, override restored to
+`['d3d10core', 'd3d11', 'dxgi']`, DLLs left untouched (copy still correctly skipped), and Sekiro/
+JJBA's own overrides unchanged throughout — the per-bottle scoping from item 1 still holds.
+
+**Cost trade-off, accepted deliberately:** the override is now unconditionally re-asserted
+(`reg add`, a few subprocess spawns) on every call, even when nothing changed — this runs on every
+Steam launch. Deliberately NOT guarded behind a `reg query` check: this project already learned
+that `reg query` lies while wineserver is running (see "Peggle SOLVED" above), so an idempotent
+unconditional re-assert is the established safer pattern (`disableSteamAutoStart` does the same).
+
+**Not unit-tested — said plainly, not skipped quietly.** `installGraphicsDriver` does live
+filesystem I/O and shells out to `wine reg add`; there is no dependency-injection seam for
+`FileManager`/`Shell` in this codebase to mock against, so the fix is proven by the live
+before/after reproduction above rather than a `PrefixSharingTests`-style pure test.
+
+## Bug-sweep fix F6 — Play re-enabled after a flat 30s no matter what happened (2026-08-22)
+
+**Invariant restored: `launchingBottleIDs` means "we don't yet know if this launch worked."** It
+should clear the moment there's real evidence either way, and the user should be told when nothing
+ever showed up. You can tell it holds by: a normal launch re-enabling Play well under 30s (the
+first poll usually lands within a couple seconds), and a deliberately broken launch (bad
+direct-exe path, or a Steam that never comes up) leaving Play disabled until the ceiling, then
+showing a visible alert instead of silently re-enabling.
+
+**Root cause:** both launch paths (direct-exe and `steam.exe -applaunch`) held the guard behind an
+unconditional `Task.sleep(30s)` then cleared it — no early exit on success, no failure reported on
+timeout. A launch that failed instantly and one that worked instantly looked identical: Play just
+came back after 30s either way.
+
+**Fix:** added `clearLaunchGuard(for:ceiling:success:)`, which polls `success()` immediately, then
+every 2s up to the ceiling, clearing the guard the moment it returns true and publishing
+`lastLaunchFailure` (surfaced via a new alert in `ContentView.swift`, same binding idiom as
+`bottleSalvageWarning`) if the ceiling passes with nothing. Same poll-then-sleep shape as
+`waitForSteamLogon`. Success signal per path: the direct-exe path checks for a process named after
+the launched binary (`isProcessRunning(named:)`, same `comm=`-based match `isAnyGameRunning`
+already uses — not the buggy `command=` form this codebase fixed once already); the applaunch path
+checks `isSteamRunning()`. If Steam was already running before the call, that check is true on the
+very first poll and the guard clears near-instantly — correct, not a regression: an already-running
+Steam handles `-applaunch` almost immediately, and per-game process attribution through Steam isn't
+built here (see `isAnyGameRunning`'s known imprecision below), so "Steam is up" is the best cheap
+signal available for that path.
+
+**Verified, with an honest limit on how:** the poll loop's own mechanics (early-exit on success,
+ceiling on failure, no early exit before the ceiling) were verified by timing a standalone
+transcription of the exact same loop shape, run outside the app: already-true → 0.00s,
+true-after-~5s → 6.19s (next poll boundary, not the full 30s), never-true → 30.72s then stops. The
+`ps`/`pgrep` process-detection calls were sanity-checked against live system state (no Wine
+process running, native macOS Steam correctly does NOT false-positive `isSteamRunning()`'s
+`/steam\.exe` pattern, since it has no `.exe` in its path). **Not live-tested end-to-end through an
+actual bottle launch** — the direct-exe path's Steam-bootstrap branch alone waits up to 150s
+(`waitForSteamLogon`), and exercising it needs a bottle with Steam not already running; doing that
+against any of the real bottles risked exactly the kind of live-prefix disruption ruled out for
+this pass. Left unproven rather than forced.
+
+## Bug-sweep fix F7 — the auto-quit reaper could wait forever (2026-08-22)
+
+**Invariant restored: the reaper always eventually finishes and releases its guard**, and if it
+gives up, that's recorded somewhere instead of silently leaving Steam open forever with no trace.
+You can tell it holds by: the reaper task actually completing — not leaking — even when another
+bottle's game runs indefinitely, and a console line naming why it stopped without quitting Steam.
+
+**Root cause:** `reapSteamAfterGame`'s phase 2 (`while clearStreak < 3`) had no ceiling.
+`isAnyGameRunning()` is global, not per-prefix (same limitation flagged in the F1+F2+F8 write-up
+below), so a game running indefinitely in an unrelated bottle held this loop open forever. Because
+the whole `Task` never returned, the `defer { reapingBottleIDs.remove(bottle.id) }` at the top
+never ran either — `reapingBottleIDs` for that bottle stayed set for the rest of the session, and
+a launch of that same bottle that legitimately started Steam again (`weStartedSteam`) would find
+`reapingBottleIDs.contains(bottle.id)` already true and skip starting a fresh reaper for it.
+
+**Fix:** the loop now also exits once `elapsed >= giveUpAfter` (3600s / 1h — generous, so a
+genuinely long session in another bottle isn't cut short). On give-up it logs which bottle, how
+long it waited, and why (another game still reported running elsewhere), then returns without
+calling `quitSteam` — giving up must not risk killing something that might still matter, same
+"over-cautious is the safe direction" rule item 1 established for `quitSteamBlockReason`.
+`reapingBottleIDs` clearing is not a separate fix: it was always driven by the `defer`, and now
+that the `Task` is guaranteed to return, the `defer` is guaranteed to run.
+
+**Does this let `isAnyGameRunning()` be tightened?** No — checked directly. F7 only bounds how
+long phase 2 waits; it does nothing to give the check per-prefix attribution, which still needs a
+PID→WINEPREFIX mapping this codebase deliberately does not build (see the F1+F2+F8 write-up).
+Saying so plainly rather than implying otherwise: the existing "spotted, not fixed" entry for
+`isAnyGameRunning()`'s imprecision stands unchanged.
+
+**Verified via a standalone timing transcription of the same loop shape** (parameterized to run in
+seconds instead of an hour, same reasoning as F6's poll-loop check): a normal 3-consecutive-clear
+convergence lands at ~3s; a poll that never goes clear correctly gives up at the ceiling instead of
+spinning forever (8.37s against an 8s test ceiling — this is the exact case that hung before the
+fix); a flaky poll (running twice, then clear) correctly resets the streak rather than just
+counting total clear polls, converging at ~5s as expected. **Not exercised through an actual
+reaper run against a real bottle** — doing that means either waiting out the real hour-long
+ceiling or actually running a game to reap, and the loop-mechanics check above already proves the
+part that changed; the parts that didn't change (phase 1, phase 3's cloud-sync grace, phase 4) are
+untouched by this fix.
+
+## Spotted, not fixed — running list from the bug-sweep fix pass (2026-08-22)
+
+Things noticed while fixing an item on the list, deliberately NOT fixed because they weren't the
+item asked for. Add to this list rather than fixing inline; work them only when asked.
+
+- **Software-2D's OFF path never targets `popcapgame1.exe`.** The ON path adds it explicitly (the
+  DRM-wrapper case — see "Peggle SOLVED" above), but OFF only clears the bottle's own resolved exe.
+  Turning software rendering off for a Peggle bottle leaves the unwrapped process's override in
+  place. Found while fixing F8 (`applySoftware2D` in `AppModel.swift`).
+- **`quitSteamBlockReason` over-blocks on unrelated-prefix activity.** It can only ask "is ANY game
+  running on the whole machine" (`isAnyGameRunning()` — `ps -Ao comm=`, no WINEPREFIX attribution
+  anywhere in this codebase), not "is a game running in a bottle that shares THIS prefix". Concrete
+  case: Half Sword (its own separate prefix) is playing, `Steam-Wine11` is idle — Quit Steam on the
+  Peggle bottle still refuses, naming Sekiro/JJBA/Steam as at risk when none of them are doing
+  anything. Deliberately left as the safe direction (over-block, never under-block) rather than
+  built around — real per-prefix attribution needs mapping a PID to its WINEPREFIX, which nothing
+  here does and `ps` alone can't give without walking process environments, the exact class of
+  guess that has bitten this project three times already (comm-path splitting, the systray sweep,
+  the helper allowlist). See the comment at the `isAnyGameRunning()` call site in
+  `quitSteamBlockReason` for the same note in context.
+
 ## Verification habits that mattered
 
 - **Screenshots beat logs.** `screencapture -x` + Read. Logs said "0 errors" while the screen was
