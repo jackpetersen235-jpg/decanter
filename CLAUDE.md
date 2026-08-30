@@ -1316,3 +1316,55 @@ removed from `AppModel.swift` as originally scoped — investigate-only, not a p
 was quit cleanly (`--quit-steam`) after every run; `bottles.json` and the prefix were left exactly
 as found each time.
 
+
+## Settings-parity audit — external fixes brought into the app (2026-08-29)
+
+Jack asked directly: are the individual settings that make his games actually work captured in
+Decanter itself, or only in external fixes/shells applied to the game files? Worth asking — the
+answer was **mostly yes, with four real exceptions**, all now fixed.
+
+**Method**: compared what the two hand-tuned external launchers (`~/Applications/Sekiro.app`,
+`JJBA All-Star Battle.app`) actually set/write against what Decanter's own Play button does for
+the same bottles, line by line — not from memory, by reading both directly and diffing.
+
+**Already fully correct, confirmed not assumed**: the patched DXMT DLLs that fix the 26s stall
+(`docs/GAMING-STACK.md`'s "Sekiro stall cause SOLVED") are **byte-identical** (SHA-256) between
+the real game folder and Decanter's own bundled `Resources/DXMT` — the actual root-cause fix was
+never external, only its supporting config was.
+
+**Four real gaps found and fixed:**
+
+1. **`DXMT_CONFIG` was missing two validated keys** — `sampleNaNToZero`, `defuseFma` — present in
+   both external launchers, absent from `BottleSettings.derivedEnvironment`. Added unconditionally.
+2. **`metalFXFactor` defaulted to 2.0**; both external launchers use 1.5, arrived at through real
+   measurement in `sekiro-launcher.sh`'s own history (2.0 tested and reverted — 100% GPU load
+   pegged vs 36% at 1.5, similar frame rate; 1.5 is the only config ever observed completely
+   stall-free, 0/30.9 min). Fixed the default AND migrated the real `bottles.json` (all 5 bottles).
+3. **Borderless-fullscreen had NO code path at all.** Sekiro's actual display depends on a per-app
+   Wine virtual desktop (`HKCU\...\AppDefaults\sekiro.exe\Explorer`,
+   `HKCU\...\Explorer\Desktops`) that only existed because a one-time external script left it in
+   the shared prefix's registry — confirmed by reading `user.reg` directly before touching
+   anything. New `borderlessFullscreen` setting + `AppModel.applyBorderlessFullscreen`, applied
+   fresh on every launch (same "apply on launch, not a button nobody presses" pattern as
+   `applySoftware2D`). Deliberately skips the external launcher's `wineserver -k` — that kills
+   every wine process in the shared `Steam-Wine11` prefix, which three other bottles depend on.
+4. **Sekiro's OWN `GraphicsConfig.xml` (in `AppData/Roaming/Sekiro/`) can silently reset the fix
+   above** if its `Auto-detectBestRenderingSettings` is left on — also only ever patched by hand.
+   `patchSekiroGraphicsConfig`, Sekiro-specific on purpose (that game's own config path/schema,
+   not a generic Wine mechanism). UTF-16LE, no BOM — verified with a standalone round-trip
+   decode/re-encode (byte-identical) against the REAL file before writing any code against it.
+
+**Not changed, and why**: the external launchers `exec` the game binary directly for a single,
+correctly-iconed Dock tile; Decanter's Sekiro bottle still goes through `steam.exe -applaunch`.
+Cosmetic (generic Dock icon vs Sekiro's own), not functional — confirmed live in Phase 3 that the
+game launches correctly either way. Switching to direct-exe would change Sekiro's Steam
+integration (achievements, overlay) for a Dock-icon fix; left as a known, minor difference.
+
+**Verified live, every fix, against the real install** — not just built and assumed: `--play-test`
+against the real Sekiro bottle after each change, `sekiro.exe` confirmed genuinely running via
+`ps`, `user.reg` and `GraphicsConfig.xml` read directly afterward to confirm the actual on-disk
+state, not inferred from exit codes alone.
+
+JJBA was NOT given `borderlessFullscreen` — its own external launcher never sets that registry,
+meaning it doesn't need it; enabling it there would be an unvalidated change, unlike the other
+three fixes which all trace to something a real, working external setup already proved.
