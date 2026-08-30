@@ -19,14 +19,28 @@ say ""
 
 [ -d "$NEW" ] || fail "Can't find Decanter.app next to this file. Keep them in the same folder."
 
-# Where is the current one? Check the usual place, then ask Spotlight, so a Decanter living
-# somewhere unusual is updated in place rather than duplicated into /Applications.
+# F25 (bug-sweep): is this actually a Decanter.app, not just something with that name?
+# `mdfind`/`[ -d ]` alone found ~/Library/HTTPStorages/com.decanter.app (a directory, not an app)
+# and this repo's own build output on the machine this was fixed on — either would have been
+# `rm -rf`'d and replaced with the new app if it happened to sort first.
+is_decanter() { [ -x "$1/Contents/MacOS/Decanter" ]; }
+
+# Where is the current one? Check the usual places first, then ask Spotlight as a last resort —
+# F25: `mdfind | head -1` picks an ARBITRARY match (ordering isn't specified), and on the machine
+# this was fixed on it picked this repo's `build/Decanter.app` over the real install. Skip a
+# Trash copy, anything under this script's own folder, and anything under a repo's `build/`
+# directory — those are never the install a real user is running.
 OLD=""
-if [ -d "/Applications/Decanter.app" ]; then
-    OLD="/Applications/Decanter.app"
-else
-    FOUND=$(mdfind -name "Decanter.app" 2>/dev/null | grep -v "$PWD" | head -1)
-    [ -n "$FOUND" ] && [ -d "$FOUND" ] && OLD="$FOUND"
+for cand in "/Applications/Decanter.app" "$HOME/Applications/Decanter.app"; do
+    if is_decanter "$cand"; then OLD="$cand"; break; fi
+done
+if [ -z "$OLD" ]; then
+    while IFS= read -r cand; do
+        case "$cand" in
+            *"/.Trash/"*|*"/build/"*|"$PWD"*) continue ;;
+        esac
+        if is_decanter "$cand"; then OLD="$cand"; break; fi
+    done < <(mdfind -name "Decanter.app" 2>/dev/null)
 fi
 
 if [ -z "$OLD" ]; then
@@ -35,6 +49,9 @@ if [ -z "$OLD" ]; then
 else
     say "Found the current version at:"
     say "   $OLD"
+    # F25: an interactive double-click script can afford one keypress to make a wrong target
+    # visible while it's still recoverable, before anything is deleted.
+    read -r -p "Press return to continue, or close this window to cancel. " _
 fi
 
 # Quit it first. A running app cannot be replaced cleanly, and a half-replaced bundle is worse
@@ -54,7 +71,14 @@ rm -rf "$STAGE" 2>/dev/null
 say "Copying the new version…"
 cp -R "$NEW" "$STAGE" || fail "Couldn't copy the new version into place."
 
-rm -rf "$OLD" 2>/dev/null
+# F25: the delete's failure used to be silenced and unchecked (`set -e` is deliberately absent
+# here — see top of file — so nothing stopped the script on its own). If `rm -rf` failed, `$OLD`
+# would still exist as a directory, `mv` would then move `$STAGE` INSIDE it rather than replacing
+# it, `mv` would still succeed so `|| fail` never fired, and the final `-x` check below would
+# still pass because the OLD bundle was untouched — reporting "✅ Updated" having updated nothing,
+# with a nested copy left inside the bundle.
+rm -rf "$OLD" || fail "Couldn't remove the old version — is it running, or owned by another user?"
+[ -e "$OLD" ] && fail "The old version is still in place; not swapping."
 mv "$STAGE" "$OLD" || fail "Couldn't swap the new version into place."
 
 # Clear the download quarantine and re-sign, so it opens normally — no right-click ▸ Open,
