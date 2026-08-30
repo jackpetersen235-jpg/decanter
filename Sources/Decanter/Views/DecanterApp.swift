@@ -61,6 +61,25 @@ struct DecanterApp: App {
                 Button("Setup Assistant…") {
                     NotificationCenter.default.post(name: .setupAssistantRequested, object: nil)
                 }
+                Divider()
+                // Phase 4 of the pre-release debug plan: after release, a bug happens on a
+                // machine nobody here will ever touch, reported by someone who cannot describe
+                // it. This is what makes --diagnose/--verify's questions reachable without a
+                // terminal — one click, one zip, ready to attach to an email.
+                Button("Export Diagnostics…") {
+                    let console = model.openConsole(title: "Export Diagnostics")
+                    console.append("Gathering engine, bottle and log info…")
+                    Task {
+                        do {
+                            let zipURL = try await DiagnosticsExporter.exportAndReveal(model: model)
+                            console.append("Saved to \(zipURL.lastPathComponent) on the Desktop.")
+                            console.finish(0)
+                        } catch {
+                            console.append("Failed: \(error.localizedDescription)")
+                            console.finish(1)
+                        }
+                    }
+                }
             }
         }
 

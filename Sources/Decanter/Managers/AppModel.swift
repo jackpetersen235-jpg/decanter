@@ -305,6 +305,24 @@ final class AppModel: ObservableObject {
             FileHandle.standardError.write(out.data(using: .utf8)!)
             exit(0)
         }
+        // Headless exercise of the "Export Diagnostics…" menu item, so the bundle it produces
+        // can be verified without driving the GUI. Does NOT reveal in Finder (that call is
+        // `@MainActor` AppKit and has no place to go headless) — just builds the zip and prints
+        // where it landed.
+        //   Decanter.app/Contents/MacOS/Decanter --export-diagnostics
+        if CommandLine.arguments.contains("--export-diagnostics") {
+            Task {
+                do {
+                    let zipURL = try await DiagnosticsExporter.export(model: self)
+                    FileHandle.standardError.write("exported: \(zipURL.path)\n".data(using: .utf8)!)
+                    exit(0)
+                } catch {
+                    FileHandle.standardError.write(
+                        "FAILED: \(error.localizedDescription)\n".data(using: .utf8)!)
+                    exit(1)
+                }
+            }
+        }
         // Full health check: is the RIGHT engine installed, and is everything loaded?
         //
         // Deeper than `doctor.sh` can go from the shell, because it uses the app's own probes —

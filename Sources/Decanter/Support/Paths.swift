@@ -95,9 +95,16 @@ enum Paths {
     /// The DLLs that make up the per-game graphics override.
     static let dxmtDLLs = ["d3d11.dll", "dxgi.dll", "d3d10core.dll"]
 
+    /// Rolling console history, so a crash or a force-quit doesn't take the only record of what
+    /// just happened with it. Part of the pre-release debug plan's Phase 4 — before this, every
+    /// `TaskConsole`'s text lived only in memory and died with the sheet that showed it, so a
+    /// remote bug report was always "it failed" with nothing behind it.
+    static var logsRoot: URL { appSupport.appendingPathComponent("Logs", isDirectory: true) }
+    static var consoleLog: URL { logsRoot.appendingPathComponent("console.log") }
+
     /// Create the directory skeleton if it does not yet exist.
     static func ensureDirectories() {
-        for dir in [appSupport, bottlesRoot, downloads] {
+        for dir in [appSupport, bottlesRoot, downloads, logsRoot] {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
     }

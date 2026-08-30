@@ -25,6 +25,9 @@ final class TaskConsole: ObservableObject, Identifiable {
         let trimmed = chunk.hasSuffix("\n") ? String(chunk.dropLast()) : chunk
         guard !trimmed.isEmpty else { return }
         text += trimmed + "\n"
+        // Persist to disk too — see ConsoleLog's doc comment for why. Every line this app's
+        // consoles ever show goes through here, so this is the one place to hook it.
+        ConsoleLog.append(trimmed, from: title)
         if text.count > Self.maxCharacters {
             // Drop the oldest ~25% and resync to a line boundary so the view never shows a
             // half-line at the top.
