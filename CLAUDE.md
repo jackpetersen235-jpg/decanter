@@ -1368,3 +1368,28 @@ state, not inferred from exit codes alone.
 JJBA was NOT given `borderlessFullscreen` — its own external launcher never sets that registry,
 meaning it doesn't need it; enabling it there would be an unvalidated change, unlike the other
 three fixes which all trace to something a real, working external setup already proved.
+
+### Fifth gap, found checking the remaining games (2026-08-29) — Half Sword had no external
+launcher, so this one was found by reading Decanter's own code against the real prefix directly,
+not by diffing against a working reference. Worse than "wrong exe targeted": `installGraphicsDriver`
+was a complete NO-OP for this bottle, silently, on every single launch. Root cause:
+`detectedSteamGames` scans ONE level deep; `resolvedGame` (GameScanner's `largestExecutable`)
+searches several levels down. Half Sword is Unreal Engine — real binary nested at
+`HalfSwordUE5/Binaries/Win64/HalfSwordUE5-Win64-Shipping.exe`, a tiny `HalfSwordUE5.exe` redirector
+at the top (what Steam actually launches) — so the two functions report different exe names for
+the same game, and `installGraphicsDriver`'s scoping filter silently returned an EMPTY set. Fixed
+with a fallback (use `resolvedGame`'s own folder+exe when the filter finds nothing) plus
+`AppModel.unrealRedirectorTarget`, a general (not Half-Sword-specific) helper that finds the
+top-level redirector for any game following this extremely common Unreal packaging layout, so
+DXMT's DLLs/override land beside the process that actually makes the Direct3D calls.
+
+Verification itself hit a real gotcha worth keeping: the first live test showed no change at all,
+which looked like the fix hadn't worked. It had — a Steam session left running from EARLIER,
+UNRELATED testing (a different bottle) made the already-known-global `isSteamRunning()` short-
+circuit Half Sword's launch before it ever reached `installGraphicsDriver`. Stopping that Steam
+session and re-testing clean showed the real effect: fresh DXMT DLLs in the nested folder, a new
+registry entry for the real binary, and the already-correct redirector entry left untouched.
+
+Peggle and Sekiro/JJBA were checked too and don't have this bug — all three have their real exe
+directly in the game's top-level folder, no nested Unreal-style Win64 folder to mismatch against.
+Half Sword is the one Unreal Engine title in the library; this fix generalizes to any future one.
