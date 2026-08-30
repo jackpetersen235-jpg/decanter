@@ -1076,10 +1076,12 @@ away for a launch-time saving nobody has measured as a problem.
 Things noticed while fixing an item on the list, deliberately NOT fixed because they weren't the
 item asked for. Add to this list rather than fixing inline; work them only when asked.
 
-- **Software-2D's OFF path never targets `popcapgame1.exe`.** The ON path adds it explicitly (the
-  DRM-wrapper case — see "Peggle SOLVED" above), but OFF only clears the bottle's own resolved exe.
-  Turning software rendering off for a Peggle bottle leaves the unwrapped process's override in
-  place. Found while fixing F8 (`applySoftware2D` in `AppModel.swift`).
+- ✅ **FIXED (2026-08-29, pre-release debug plan Phase 5 re-triage).** ~~Software-2D's OFF path
+  never targets `popcapgame1.exe`.~~ This list was stale — the fix had already landed during the
+  same debug plan's Phase 0 bug-sweep pass and was never removed here. `applySoftware2D`'s OFF
+  branch now handles `popcapgame1.exe` symmetrically with the ON path, conservatively: it clears
+  the override only when no OTHER bottle sharing the prefix still has software2D on. See the doc
+  comment at the call site in `AppModel.swift` for the full reasoning.
 - **`quitSteamBlockReason` over-blocks on unrelated-prefix activity.** It can only ask "is ANY game
   running on the whole machine" (`isAnyGameRunning()` — `ps -Ao comm=`, no WINEPREFIX attribution
   anywhere in this codebase), not "is a game running in a bottle that shares THIS prefix". Concrete
