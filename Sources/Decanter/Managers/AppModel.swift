@@ -444,29 +444,31 @@ final class AppModel: ObservableObject {
         defer { isSettingUp = false }
 
         guard await ensureRosetta() else {                       // 1. Rosetta
-            return "Rosetta 2 installation failed or was declined."
+            return FailureCode.rosetta.tag("Rosetta 2 installation failed or was declined.")
         }
 
         if !hasUsableEngine {                                    // 2. Engine
-            guard await installEngine() else { return "The Windows engine failed to install." }
+            guard await installEngine() else {
+                return FailureCode.engineInstall.tag("The Windows engine failed to install.")
+            }
             adoptDecanterEngine()
         }
         guard hasUsableEngine else {
-            return "No usable Windows engine is available after installation."
+            return FailureCode.engineMissing.tag("No usable Windows engine is available after installation.")
         }
 
         // A bottle built on an engine that can't run Steam does not count as done — see
         // `hasUsableEngine`. Such a user needs a NEW bottle, not a skipped step.
         if !bottles.contains(where: { installation(for: $0)?.isSteamCapable == true }) {  // 3. Bottle
             guard await createBottleForSetup(name: "Games") != nil else {
-                return "Couldn't create a game bottle."
+                return FailureCode.bottleCreate.tag("Couldn't create a game bottle.")
             }
         }
 
         if let bottle = bottles.first(where: { installation(for: $0)?.isSteamCapable == true }),
            !bottle.isSteamInstalled {                            // 4. Steam
             guard await performSteamInstall(in: bottle, console: nil) else {
-                return "Steam installation failed."
+                return FailureCode.steamInstall.tag("Steam installation failed.")
             }
         }
         return nil
@@ -2530,8 +2532,9 @@ final class AppModel: ObservableObject {
             }
             launchingBottleIDs.remove(bottle.id)
             if !launched {
-                lastLaunchFailure = "\(bottle.name) didn't start. Check that Steam is installed "
-                    + "and logged in, then try again."
+                lastLaunchFailure = FailureCode.launch.tag(
+                    "\(bottle.name) didn't start. Check that Steam is installed "
+                    + "and logged in, then try again.")
             }
         }
     }
@@ -2729,9 +2732,10 @@ final class AppModel: ObservableObject {
         // function's own salvage path exists to prevent; it just didn't cover this specific exit.
         guard let raw = try? JSONSerialization.jsonObject(with: data) as? [Any] else {
             NSLog("Decanter: bottles.json unreadable (not a JSON array) — nothing to salvage. Original saved to \(backup.lastPathComponent)")
-            let message = "Your bottle list couldn't be read at all and had to be reset. "
+            let message = FailureCode.salvage.tag(
+                "Your bottle list couldn't be read at all and had to be reset. "
                 + "Nothing was deleted — the original file was saved as \(backup.lastPathComponent) "
-                + "in ~/Library/Application Support/Decanter before anything was changed."
+                + "in ~/Library/Application Support/Decanter before anything was changed.")
             // Same deferral as the partial-salvage case below — `loadBottles` runs inside
             // `AppModel.init()`, before ContentView exists to observe the false→true transition.
             DispatchQueue.main.async { self.bottleSalvageWarning = message }
@@ -2763,10 +2767,11 @@ final class AppModel: ObservableObject {
         // appeared. `DispatchQueue.main.async` pushes the write to the tick after `init()`
         // returns, by which point ContentView exists and is observing, so the transition is real.
         if dropped > 0 {
-            let message = "\(dropped) bottle\(dropped == 1 ? "" : "s") couldn't be read "
+            let message = FailureCode.salvage.tag(
+                "\(dropped) bottle\(dropped == 1 ? "" : "s") couldn't be read "
                 + "and \(dropped == 1 ? "was" : "were") skipped. Nothing was deleted — the original "
                 + "file was saved as \(backup.lastPathComponent) in "
-                + "~/Library/Application Support/Decanter before anything was changed."
+                + "~/Library/Application Support/Decanter before anything was changed.")
             DispatchQueue.main.async { self.bottleSalvageWarning = message }
         }
     }
@@ -2794,9 +2799,10 @@ final class AppModel: ObservableObject {
             try data.write(to: Paths.bottlesIndex, options: .atomic)
         } catch {
             NSLog("Decanter: FAILED to save bottles.json — \(error.localizedDescription)")
-            lastSaveFailure = "Your changes couldn't be saved: \(error.localizedDescription). "
+            lastSaveFailure = FailureCode.save.tag(
+                "Your changes couldn't be saved: \(error.localizedDescription). "
                 + "Check that ~/Library/Application Support/Decanter is writable and has free "
-                + "space, then try again."
+                + "space, then try again.")
         }
     }
 

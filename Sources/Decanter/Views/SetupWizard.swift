@@ -200,9 +200,10 @@ struct SetupWizard: View {
         if !model.isRosettaInstalled {
             let ok = await model.ensureRosetta()
             if !ok {
-                failureMessage = "Couldn't install Apple's Rosetta translation layer. "
+                failureMessage = FailureCode.rosetta.tag(
+                    "Couldn't install Apple's Rosetta translation layer. "
                     + "Open Terminal and run:  softwareupdate --install-rosetta --agree-to-license  "
-                    + "then press the button again."
+                    + "then press the button again.")
                 return
             }
         }
@@ -212,7 +213,7 @@ struct SetupWizard: View {
             await installer.install()
             model.adoptDecanterEngine()          // rescan alone leaves a stale saved default
             if case .failed(let message) = installer.phase {
-                failureMessage = "Couldn't set up the Windows engine: \(message)"
+                failureMessage = FailureCode.engineInstall.tag("Couldn't set up the Windows engine: \(message)")
                 return
             }
         }
@@ -221,14 +222,15 @@ struct SetupWizard: View {
         if let w = installer.warning { warningMessage = w }
 
         guard model.hasUsableEngine else {
-            failureMessage = "No Windows engine is available. Please check your internet connection and try again."
+            failureMessage = FailureCode.engineMissing.tag(
+                "No Windows engine is available. Please check your internet connection and try again.")
             return
         }
 
         // 3. Bottle — created quietly (no scary wineboot log for a first-timer).
         if !isDone(.bottle) {
             if await model.createBottleForSetup(name: bottleName) == nil {
-                failureMessage = "Couldn't create the game environment. Please try again."
+                failureMessage = FailureCode.bottleCreate.tag("Couldn't create the game environment. Please try again.")
                 return
             }
         }
@@ -243,9 +245,10 @@ struct SetupWizard: View {
             let steamOK = await model.performSteamInstall(in: bottle, console: nil)
             steamInstalling = false
             if !steamOK {
-                failureMessage = "Couldn't install Steam into the game environment. "
+                failureMessage = FailureCode.steamInstall.tag(
+                    "Couldn't install Steam into the game environment. "
                     + "Check your internet connection and press the button again — "
-                    + "anything already finished is skipped."
+                    + "anything already finished is skipped.")
                 return
             }
         }
