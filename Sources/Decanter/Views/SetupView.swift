@@ -91,10 +91,17 @@ struct SetupView: View {
 
     private func installationRow(_ installation: WineInstallation) -> some View {
         HStack {
+            // F9 (bug-sweep): `.onTapGesture` on a bare Image isn't exposed to VoiceOver as
+            // interactive at all, regardless of any label — worse than the icon-only-button gap
+            // elsewhere, since there was nothing here for a label to attach meaning to. Adding the
+            // label AND the button trait, not just the label.
             Image(systemName: model.defaultInstallationID == installation.id
                   ? "largecircle.fill.circle" : "circle")
                 .foregroundStyle(Color.accentColor)
                 .onTapGesture { model.defaultInstallationID = installation.id }
+                .accessibilityLabel(model.defaultInstallationID == installation.id
+                                    ? "Default Wine installation" : "Set as default Wine installation")
+                .accessibilityAddTraits(.isButton)
             VStack(alignment: .leading, spacing: 1) {
                 Text(installation.name).font(.body.weight(.medium))
                 Text(installation.version ?? installation.binDirectory.path)

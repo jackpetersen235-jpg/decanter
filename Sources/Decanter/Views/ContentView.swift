@@ -138,11 +138,16 @@ struct ContentView: View {
             // rather than restyled.
             HStack(spacing: 6) {
                 Spacer(minLength: 74)
+                // F9 (bug-sweep): icon-only buttons with zero accessibilityLabel anywhere in the
+                // Views layer. `.help()` sets a hover tooltip/VoiceOver hint, not the label VoiceOver
+                // announces first — without this, these read as "plus button" / "gearshape button",
+                // the glyph, not what pressing it does.
                 Button { showingCreate = true } label: {
                     Image(systemName: "plus").frame(width: 22, height: 22)
                 }
                 .buttonStyle(.plain)
                 .help("Create a new bottle")
+                .accessibilityLabel("Create a new bottle")
                 .disabled(model.defaultInstallation == nil)
 
                 Button { showingSetup = true } label: {
@@ -150,6 +155,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Wine installations & system checks")
+                .accessibilityLabel("Wine installations and system checks")
             }
             .padding(.horizontal, 10)
             .padding(.top, 8)
