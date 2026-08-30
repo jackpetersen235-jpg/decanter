@@ -310,7 +310,17 @@ struct BottleSettings: Codable, Equatable {
         case .d3dmetal:
             if metalFX { env["D3DM_ENABLE_METALFX"] = "1" }
         case .wined3d:
-            env["WINEDLLOVERRIDES"] = "d3d9,d3d10core,d3d11,dxgi=b"
+            // F14 (bug-sweep): this used to set a prefix-wide WINEDLLOVERRIDES here. That env var
+            // becomes part of THIS bottle's Steam launch environment (see Wine.swift), and Steam's
+            // environment is inherited by every `-applaunch` game afterward — so a WineD3D bottle
+            // starting Steam silently forced builtin d3d9/d3d10core/d3d11/dxgi onto every OTHER
+            // bottle sharing that Steam session, e.g. quietly disabling a DXMT bottle's MetalFX.
+            // Proven redundant for its own bottle first: a scratch-prefix experiment with zero
+            // overrides configured showed Wine loads builtin by default anyway, ignoring a
+            // same-directory native DLL. `installGraphicsDriver`'s `.wined3d` case now writes an
+            // explicit per-exe "builtin" override instead — same mechanism the other three
+            // backends already use, no prefix-wide lever needed at all.
+            break
         }
 
         env["MTL_HUD_ENABLED"] = metalHUD ? "1" : "0"

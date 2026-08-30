@@ -24,6 +24,27 @@ struct ConfigurationView: View {
         }
     }
 
+    /// F14 (bug-sweep): `sharedCaption()` above covers settings that land in the registry — always
+    /// and permanently shared across every bottle on this prefix. MetalFX, its upscale factor, the
+    /// Metal HUD, thread sync, and "advertise AVX" are a DIFFERENT kind of shared: they're baked
+    /// into whichever bottle's `Play` starts Steam, then inherited by every `-applaunch` game
+    /// through that same Steam session until it quits — not a permanent prefix property, but not
+    /// safely "this bottle's own setting" either. Before this fix, `sharedCaption()` sat at the
+    /// bottom of a section covering both kinds of setting, which read as though it covered
+    /// everything above it — accidentally right for some rows, silently wrong for others. This
+    /// caption is worded for the session-scoped mechanism specifically, and sits immediately after
+    /// the controls it actually describes, not shared with the registry caption's placement.
+    @ViewBuilder
+    private func envSharedCaption() -> some View {
+        if !sharedWith.isEmpty {
+            Text("This takes effect through Steam's own launch environment, not the registry — "
+                 + "whichever bottle starts Steam decides it for every game launched through that "
+                 + "same Steam session, until Steam quits. Also affects: "
+                 + sharedWith.map(\.name).joined(separator: ", "))
+                .font(.caption).foregroundStyle(.orange)
+        }
+    }
+
     var body: some View {
         Form {
             Section("Engine") {
@@ -105,6 +126,7 @@ struct ConfigurationView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Toggle("Metal performance HUD", isOn: $bottle.settings.metalHUD)
+                    envSharedCaption()
                 }
                 if bottle.settings.graphics == .dxvk {
                     Toggle("DXVK HUD (fps/frametimes)", isOn: $bottle.settings.dxvkHUD)
@@ -150,6 +172,7 @@ struct ConfigurationView: View {
                 Toggle("Advertise AVX to Rosetta", isOn: $bottle.settings.advertiseAVX)
                 Text("Several Game Porting Toolkit titles require AVX support to launch.")
                     .font(.caption).foregroundStyle(.secondary)
+                envSharedCaption()
                 Toggle("Verbose Wine logging", isOn: $bottle.settings.verboseLogging)
             }
 

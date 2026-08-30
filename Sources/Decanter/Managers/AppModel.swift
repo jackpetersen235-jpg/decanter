@@ -1194,34 +1194,46 @@ final class AppModel: ObservableObject {
             break                                   // handled below
 
         case .wined3d:
-            // Wine's own implementation — the point is the ABSENCE of an override. Remove any this
-            // bottle previously installed, or "WineD3D" would just mean "whatever was left behind".
-            var cleared = 0
+            // F14 (bug-sweep): this used to just DELETE the per-exe override and rely on Wine's
+            // override-absent default, which happens to be builtin for these DLLs (proven by a
+            // scratch-prefix experiment: a same-directory native DLL was ignored with no override
+            // configured at all). That's what `BottleSettings.derivedEnvironment`'s old
+            // `WINEDLLOVERRIDES=...=b` was compensating for — except it did it PREFIX-WIDE, via the
+            // environment of whatever process this bottle used to start Steam. Since Steam's own
+            // launch environment is inherited by every `-applaunch` game afterward (see
+            // Wine.swift's `derivedEnvironment` merge), that env var leaked WineD3D's builtin-only
+            // override onto every OTHER bottle sharing the same Steam session — silently disabling
+            // DXMT for a game like Sekiro if Peggle (set to WineD3D) happened to start Steam first.
+            //
+            // The fix is to make WineD3D symmetric with the other three backends: write an
+            // EXPLICIT per-exe override instead of relying on absence-of-override, exactly like
+            // DXMT does below. `derivedEnvironment` no longer sets the global env var at all.
+            var applied = 0
             let env = Wine.environment(for: bottle, using: installation)
             for game in scoped {
                 // NOTE THE TRAILING BACKSLASH. Written without it this concatenates to
                 // `…\AppDefaultsPeggle.exe\DllOverrides` — a key that does not exist, so every
-                // `reg delete` "succeeds" against nothing and the overrides stay put. That exact
-                // typo shipped once already in the software-2D writer; both were introduced by a
-                // heredoc eating the final backslash, and both looked correct in review.
+                // write "succeeds" against the wrong key. That exact typo shipped once already in
+                // the software-2D writer; both were introduced by a heredoc eating the final
+                // backslash, and both looked correct in review.
                 let key = #"HKCU\Software\Wine\AppDefaults\"# + game.exe + #"\DllOverrides"#
-                var removedAll = true
+                var appliedAll = true
                 for dll in ["d3d11", "dxgi", "d3d10core"] {
-                    // Check the result. `reg delete` on an absent value returns non-zero, which is
-                    // fine, but a failure that means something else must not pass as success — the
-                    // whole reason this bug survived is that nobody looked.
+                    // Check the result — a failure that passes as success is the whole reason the
+                    // registry-vs-DLL-files bug (F4) survived as long as it did.
                     let r = try? await Shell.run(installation.loader,
-                                                 arguments: ["reg", "delete", key, "/v", dll, "/f"],
+                                                 arguments: ["reg", "add", key, "/v", dll,
+                                                            "/t", "REG_SZ", "/d", "builtin", "/f"],
                                                  environment: env)
-                    if r == nil { removedAll = false }
+                    if r?.succeeded != true { appliedAll = false }
                 }
-                if !removedAll {
-                    console?.append("Could not clear overrides for \(game.exe).")
+                if !appliedAll {
+                    console?.append("Could not set overrides for \(game.exe).")
                 }
-                cleared += 1
+                applied += 1
             }
-            console?.append("WineD3D selected — removed per-game graphics overrides for \(cleared) game(s).")
-            return cleared
+            console?.append("WineD3D selected — set per-game graphics overrides for \(applied) game(s).")
+            return applied
 
         case .dxvk:
             // NOT SHIPPED COMPLETE. The engine carries `DXVK/x64/{d3d11,d3d10core}.dll` and **no
