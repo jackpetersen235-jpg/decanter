@@ -243,6 +243,47 @@ final class AppModel: ObservableObject {
                 exit(bootstrapped ? 0 : 1)
             }
         }
+        // Headless exercise of the exact SAME entry point Play calls on a real click —
+        // `launchSteam(in:)` — so "does this bottle launch correctly" can be verified without
+        // driving the GUI. Built for the pre-release debug plan's Phase 3: a launch-correctness
+        // check, not a gameplay check. It never presses further than confirming the launch itself
+        // succeeded.
+        //
+        // Observes exactly what a user staring at the Play button sees, not a bottle-specific
+        // process-name guess: `launchingBottleIDs` clearing is "Opening…" going away,
+        // `lastLaunchFailure` becoming non-nil is the visible failure banner. This is deliberately
+        // generic across every launch shape in this codebase (a plain Steam launcher, an
+        // `-applaunch` game, a direct-exe game) without needing to special-case any of them here —
+        // and it sidesteps the Peggle DRM-wrapper trap entirely (CLAUDE.md: polling for a
+        // resolved exe like `Peggle.exe` can report "didn't start" WHILE THE GAME IS RUNNING,
+        // because it unpacks and exits). The actual game process, once confirmed launched, is left
+        // for the caller to inspect and stop — this flag does not touch it.
+        //   Decanter.app/Contents/MacOS/Decanter --play-test "<bottle name>" [ceilingSeconds]
+        if let i = CommandLine.arguments.firstIndex(of: "--play-test"),
+           i + 1 < CommandLine.arguments.count {
+            let name = CommandLine.arguments[i + 1]
+            let ceiling = CommandLine.arguments.count > i + 2
+                ? (Int(CommandLine.arguments[i + 2]) ?? 60) : 60
+            Task {
+                guard let bottle = bottles.first(where: { $0.name == name }) else {
+                    FileHandle.standardError.write("no such bottle: \(name)\n".data(using: .utf8)!)
+                    exit(1)
+                }
+                // Clear any stale failure from a previous session — otherwise a leftover value
+                // would make THIS run look like it failed before it even started.
+                lastLaunchFailure = nil
+                launchSteam(in: bottle)
+                for _ in 0..<(ceiling / 2) {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    if !launchingBottleIDs.contains(bottle.id) { break }
+                }
+                let stillOpening = launchingBottleIDs.contains(bottle.id)
+                let failure = lastLaunchFailure
+                let report = "stillOpening=\(stillOpening) failure=\(failure ?? "none")\n"
+                FileHandle.standardError.write(report.data(using: .utf8)!)
+                exit((stillOpening || failure != nil) ? 1 : 0)
+            }
+        }
         // The `--trace-steam-launch` diagnostic used for the 2026-08-26 cold-login-stall
         // investigation (WINEDEBUG=+winsock, then +ntdll, against the real Steam-Wine11 prefix)
         // was intentionally temporary and has been removed. Findings are recorded in CLAUDE.md.
@@ -1972,10 +2013,36 @@ final class AppModel: ObservableObject {
                     // reason; this brings the app in line with it.
                     await waitForSteamLogon(in: bottle, timeout: 150)
                 }
-                launchQuietly(bottle: bottle, arguments: [direct], extraEnvironment: steamAppEnvironment(for: bottle))
+                // ⚠️ ALSO FOUND live during the same Phase 3 pass, from an actual JJBA launch: with
+                // no `currentDirectory` set, the child process inherits DECANTER'S OWN working
+                // directory, not the game's. Reproduced concretely — ASBR.exe wrote its keybinding
+                // `config.ini` into this repo's checkout, because that happened to be this
+                // session's cwd when Decanter itself was launched from Terminal. A user who instead
+                // opens Decanter normally (Finder/Dock/Spotlight) gets whatever cwd macOS hands a
+                // GUI-launched app, not the game's folder either — so the failure mode for a real
+                // user is a config/save write landing somewhere wrong or failing outright, not a
+                // stray file in a repo. `resolveStoredExecutable` already computes the right real
+                // folder for `resolvedGame(for:)` above; this just wires the same folder through to
+                // the actual launch, which never used it.
+                let gameFolder = Self.resolveStoredExecutable(direct, driveC: bottle.driveC)?
+                    .deletingLastPathComponent()
+                launchQuietly(bottle: bottle, arguments: [direct],
+                              extraEnvironment: steamAppEnvironment(for: bottle),
+                              currentDirectory: gameFolder)
                 suppressWineSystray(isGameLauncher: true)
                 reapSteamAfterGame(in: bottle, weStartedSteam: weStartedSteam)
-                let exeName = URL(fileURLWithPath: direct).lastPathComponent
+                // ⚠️ FOUND live during the pre-release debug plan's Phase 3 (2026-08-29):
+                // `URL(fileURLWithPath: direct).lastPathComponent` only recognizes `/` as a path
+                // separator — `direct` is a WINDOWS path (`C:\...\ASBR.exe`), so on a Mac with no
+                // `/` in it anywhere, `lastPathComponent` returned the ENTIRE path unchanged. That
+                // got compared against `isProcessRunning`'s bare `ps` process name and could never
+                // match, so this branch reported `lastLaunchFailure` for EVERY direct-exe launch,
+                // permanently — deterministic, not a timing race. Reproduced live: launched JJBA,
+                // confirmed `ASBR.exe` genuinely running via `ps`, and Decanter reported "didn't
+                // start" anyway. Same class of gap as `isAnyGameRunning`'s documented `comm`-
+                // splitting gotcha (CLAUDE.md) — just never applied to this call site. Fixed with
+                // the same split-on-both-separators helper `isProcessRunning` already uses below.
+                let exeName = windowsPathLastComponent(direct)
                 clearLaunchGuard(for: bottle) { await self.isProcessRunning(named: exeName) }
                 return
             }
@@ -2346,12 +2413,19 @@ final class AppModel: ObservableObject {
 
     /// Launch a long-lived program without popping a console sheet. Used for games/Steam, where
     /// the user just wants the app to open — not a log window.
+    /// `currentDirectory` defaults to nil, meaning the launched process inherits DECANTER'S OWN
+    /// working directory — not the game's. That default is deliberately unsafe for anything that
+    /// might write relative to "here" (a config file, a save, a log) and callers that launch a
+    /// game process directly should pass the game's real folder explicitly. See the direct-exe
+    /// call site below for the bug this gap caused.
     private func launchQuietly(bottle: Bottle, arguments: [String],
-                               extraEnvironment: [String: String] = [:]) {
+                               extraEnvironment: [String: String] = [:],
+                               currentDirectory: URL? = nil) {
         guard let installation = installation(for: bottle) else { return }
         var env = Wine.environment(for: bottle, using: installation)
         for (k, v) in extraEnvironment { env[k] = v }
         _ = try? Shell.stream(installation.loader, arguments: arguments, environment: env,
+                              currentDirectory: currentDirectory,
                               onOutput: { _ in }, onExit: { _ in })
     }
 
@@ -2436,10 +2510,19 @@ final class AppModel: ObservableObject {
                                                  arguments: ["-Ao", "comm="]) else { return false }
         let target = exeName.lowercased()
         return result.stdout.split(separator: "\n").contains { line in
-            let name = String(line.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last ?? "")
-                .lowercased()
-            return name == target
+            windowsPathLastComponent(String(line)).lowercased() == target
         }
+    }
+
+    /// The final path component of a path that may use WINDOWS separators (`\`) —
+    /// `URL(fileURLWithPath:).lastPathComponent` only recognizes `/`, so on a Mac it treats an
+    /// entire backslash-only path (e.g. `C:\Program Files\Steam\...\ASBR.exe`) as ONE component,
+    /// unchanged. Same split rule `isAnyGameRunning` already uses (CLAUDE.md gotcha), factored
+    /// out here after it turned out `isProcessRunning`'s caller needed it too — see the doc
+    /// comment where `exeName` is derived from a direct-exe bottle's `directExecutable` for the
+    /// bug this fixes.
+    private func windowsPathLastComponent(_ path: String) -> String {
+        String(path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last ?? Substring(path))
     }
 
     private func steamAppEnvironment(for bottle: Bottle) -> [String: String] {
@@ -2517,8 +2600,7 @@ final class AppModel: ObservableObject {
         // menu-bar sweep never ran, and the engine switch always refused with "Quit Steam and any
         // running game first".
         return result.stdout.split(separator: "\n").contains { line in
-            let name = String(line.split(whereSeparator: { $0 == "/" || $0 == "\\" })
-                .last ?? "").lowercased()
+            let name = windowsPathLastComponent(String(line)).lowercased()
             return name.hasSuffix(".exe") && !helpers.contains(name)
         }
     }
