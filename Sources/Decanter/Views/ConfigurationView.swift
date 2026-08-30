@@ -138,6 +138,13 @@ struct ConfigurationView: View {
                      + "entirely. Measured on Peggle Deluxe: 18 fps → 90 fps. Leave OFF for 3D games.")
                     .font(.caption).foregroundStyle(.secondary)
 
+                Toggle("Borderless fullscreen", isOn: $bottle.settings.borderlessFullscreen)
+                Text("Runs the game in a real window sized to fill your screen, instead of "
+                     + "whatever window mode it starts in — Cmd+Tab and the Dock still work. Turn "
+                     + "this on for a game that doesn't fill the screen on its own or looks wrong "
+                     + "in its normal fullscreen mode.")
+                    .font(.caption).foregroundStyle(.secondary)
+
                 Toggle("Retina / HiDPI mode", isOn: $bottle.settings.retinaMode)
                 Stepper("Screen DPI: \(bottle.settings.dpi)",
                         value: $bottle.settings.dpi, in: 96...240, step: 24)

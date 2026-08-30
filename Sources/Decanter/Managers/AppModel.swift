@@ -1370,6 +1370,62 @@ final class AppModel: ObservableObject {
                               console: console)
     }
 
+    /// Same shape and same reason as `ensureSoftware2D` immediately above — a per-game registry
+    /// setting the game must already have when it launches has to be written ON LAUNCH, applied
+    /// fresh every time (not once, by hand) so a changed display or resolution is picked up
+    /// automatically.
+    func ensureBorderlessFullscreen(for bottle: Bottle) async {
+        guard let installation = installation(for: bottle) else { return }
+        let console = TaskConsole(title: "Fullscreen")
+        await applyBorderlessFullscreen(bottle, installation: installation,
+                                        env: Wine.environment(for: bottle, using: installation),
+                                        console: console)
+    }
+
+    /// Configures a per-app Wine virtual desktop for `bottle`'s resolved game, sized to the main
+    /// screen's own point resolution — a borderless window that fills the screen (Direct
+    /// presentation) while remaining a real window, so Cmd+Tab and the Dock still work. See
+    /// `BottleSettings.borderlessFullscreen`'s doc comment for how this gap was found.
+    ///
+    /// Scoped to ONE executable, never prefix-wide: the leading `reg delete` clears any GLOBAL
+    /// `HKCU\Software\Wine\Explorer\Desktop` value defensively, so this can never put Steam itself
+    /// (or a sibling bottle sharing this prefix) into windowed/virtual-desktop mode by accident.
+    ///
+    /// Deliberately does NOT run `wineserver -k` the way the external launcher this was found
+    /// against does — that kills every wine process in the PREFIX, and `Steam-Wine11` is shared
+    /// by three other bottles that could be mid-session. The registry write still takes effect on
+    /// THIS launch's own fresh process; forcing an immediate reload for every bottle sharing the
+    /// prefix is not worth that risk.
+    private func applyBorderlessFullscreen(_ bottle: Bottle, installation: WineInstallation,
+                                           env: [String: String], console: TaskConsole) async {
+        guard bottle.settings.borderlessFullscreen,
+              let exe = resolvedGame(for: bottle)?.executable.lastPathComponent
+        else { return }
+
+        let size = NSScreen.main?.frame.size ?? CGSize(width: 1920, height: 1080)
+        let resolution = "\(Int(size.width))x\(Int(size.height))"
+
+        _ = try? await Shell.run(installation.loader,
+                                 arguments: ["reg", "delete", #"HKCU\Software\Wine\Explorer"#,
+                                            "/v", "Desktop", "/f"],
+                                 environment: env)
+        let appKey = #"HKCU\Software\Wine\AppDefaults\"# + exe + #"\Explorer"#
+        let r1 = try? await Shell.run(installation.loader,
+                                      arguments: ["reg", "add", appKey, "/v", "Desktop",
+                                                 "/t", "REG_SZ", "/d", "Default", "/f"],
+                                      environment: env)
+        let r2 = try? await Shell.run(installation.loader,
+                                      arguments: ["reg", "add",
+                                                 #"HKCU\Software\Wine\Explorer\Desktops"#,
+                                                 "/v", "Default", "/t", "REG_SZ", "/d", resolution, "/f"],
+                                      environment: env)
+        if r1?.succeeded == true && r2?.succeeded == true {
+            console.append("Borderless fullscreen configured for \(exe) at \(resolution).")
+        } else {
+            console.append("Could not configure borderless fullscreen for \(exe).")
+        }
+    }
+
     /// Copy the bundled DXMT DLLs into each detected game and register the per-game DLL overrides.
     ///
     /// PER-GAME, NEVER PREFIX-WIDE. A prefix-wide d3d11/dxgi override routes Steam's own CEF UI
@@ -2066,6 +2122,7 @@ final class AppModel: ObservableObject {
 
             // Safe here: the launch is claimed, so a second click short-circuits above.
             await ensureSoftware2D(for: bottle)
+            await ensureBorderlessFullscreen(for: bottle)
 
             // Make sure anything newly installed has the patched graphics driver BEFORE it runs.
             // Doing it here rather than only in the wizard is what removes the last manual step: a

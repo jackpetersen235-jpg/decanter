@@ -147,7 +147,15 @@ struct BottleSettings: Codable, Equatable {
     /// (input × factor = output). It does NOT reduce what the game renders — on its own it is a
     /// quality feature that costs an extra pass and buys zero frames. To gain performance you must
     /// ALSO lower the game's internal resolution and let MetalFX rebuild it to the display size.
-    var metalFXFactor: Double = 2.0
+    ///
+    /// 1.5, not 2.0 — found during a settings-parity audit (2026-08-29): the two hand-tuned
+    /// external launchers (Sekiro.app, JJBA All-Star Battle.app) both use 1.5, arrived at through
+    /// real measurement recorded in Scripts/sekiro/sekiro-launcher.sh's history — a 2.0 factor
+    /// was tested and reverted (GPU load 100% busy pegged vs 36% at 1.5, similar frame rate) and
+    /// 1.5 is the only configuration ever observed completely stall-free in that testing (0
+    /// stalls in 30.9 min). A bottle created through Decanter's own New Bottle sheet was
+    /// defaulting to the untested, worse value.
+    var metalFXFactor: Double = 1.5
     var dxvkHUD: Bool = false         // DXVK_HUD — DXVK's own overlay
     var advertiseAVX: Bool = true     // ROSETTA_ADVERTISE_AVX — several GPTk games require AVX
 
@@ -166,6 +174,19 @@ struct BottleSettings: Codable, Equatable {
     /// Applied per-executable, never prefix-wide — three bottles here share `Steam-Wine11`, and
     /// denying 3D to Sekiro would be catastrophic.
     var software2D: Bool = false
+
+    /// Runs the resolved game in a per-app Wine virtual desktop sized to the screen's own point
+    /// resolution — a borderless window that fills the screen (Direct presentation, ~60fps) while
+    /// staying a real window, so Cmd+Tab and the Dock still work. Scoped to one executable, never
+    /// prefix-wide, so Steam and sibling bottles sharing this prefix stay rootless/normal.
+    ///
+    /// FOUND missing entirely during a settings-parity audit (2026-08-29): the real, working
+    /// Sekiro setup depends on exactly this registry state, but nothing in Decanter's own code had
+    /// ever written it — it "worked" through Decanter's own Play button purely because a one-time
+    /// external script had left the registry key behind in the shared prefix. A fresh bottle, a
+    /// fresh customer, or a recreated prefix would get none of it. See
+    /// `AppModel.applyBorderlessFullscreen`.
+    var borderlessFullscreen: Bool = false
 
     var retinaMode: Bool = false      // HiDPI rendering inside the prefix
     var dpi: Int = 96                 // LogPixels
@@ -241,10 +262,11 @@ struct BottleSettings: Codable, Equatable {
         graphics        = v(.graphics, .dxmt)
         metalHUD        = v(.metalHUD, false)
         metalFX         = v(.metalFX, false)
-        metalFXFactor   = v(.metalFXFactor, 2.0)
+        metalFXFactor   = v(.metalFXFactor, 1.5)
         dxvkHUD         = v(.dxvkHUD, false)
         advertiseAVX    = v(.advertiseAVX, true)
         software2D      = v(.software2D, false)
+        borderlessFullscreen = v(.borderlessFullscreen, false)
         retinaMode      = v(.retinaMode, false)
         dpi             = v(.dpi, 96)
         verboseLogging  = v(.verboseLogging, false)
@@ -289,7 +311,17 @@ struct BottleSettings: Codable, Equatable {
             // order produces the same performance. (Diagnosed 2026-07-18: launching Sekiro while
             // a Decanter-started Steam was up produced load freezes + stutter for exactly this
             // reason.) Verified real DXMT key — see GAMING-STACK.md §5.
-            var cfg = ["d3d11.preferredMaxFrameRate=60", "d3d11.ignoreMapFlagNoWait=True"]
+            //
+            // ⚠️ FOUND missing during a settings-parity audit (2026-08-29): `sampleNaNToZero` and
+            // `defuseFma` were present in BOTH hand-tuned external launchers
+            // (~/Applications/Sekiro.app, JJBA All-Star Battle.app) but never made it into this,
+            // the actual app's own config — meaning a game launched through Decanter's own Play
+            // button ran without them. Both are validated, unconditional DXMT correctness flags
+            // (shader NaN handling and fused-multiply-add behaviour), not situational like
+            // `metalSpatialUpscaleFactor` below — the external launchers set them regardless of
+            // MetalFX being on. Added unconditionally here for the same reason.
+            var cfg = ["d3d11.preferredMaxFrameRate=60", "d3d11.ignoreMapFlagNoWait=True",
+                      "d3d11.sampleNaNToZero=True", "d3d11.defuseFma=True"]
             if metalFX {
                 cfg.append("d3d11.metalSpatialUpscaleFactor=\(String(format: "%.1f", metalFXFactor))")
             }
