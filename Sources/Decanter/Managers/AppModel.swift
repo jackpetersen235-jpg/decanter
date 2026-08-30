@@ -152,6 +152,57 @@ final class AppModel: ObservableObject {
                 exit(0)
             }
         }
+        // Headless exercise of the exact SAME entry point the sidebar calls on a real click, so
+        // warm-start Steam (userSelectedBottle) can be verified end-to-end without driving the GUI
+        // and without handing anyone a manual step to run:
+        //   Decanter.app/Contents/MacOS/Decanter --warm-start-test "<bottle name>"
+        if let i = CommandLine.arguments.firstIndex(of: "--warm-start-test"),
+           i + 1 < CommandLine.arguments.count {
+            let name = CommandLine.arguments[i + 1]
+            Task {
+                guard let bottle = bottles.first(where: { $0.name == name }) else {
+                    FileHandle.standardError.write("no such bottle: \(name)\n".data(using: .utf8)!)
+                    exit(1)
+                }
+                let prefixKey = PrefixSharing.key(for: bottle.url)
+                userSelectedBottle(bottle.id)
+                // Poll rather than sleep a fixed guess: the debounce is 400ms, the logon wait can
+                // run up to 150s. Bail out once neither the warming set nor the task map still
+                // reference this prefix — i.e. the warm-start (if any) has actually finished.
+                for _ in 0..<80 {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    if !warmingPrefixKeys.contains(prefixKey) && warmStartTasks[prefixKey] == nil {
+                        break
+                    }
+                }
+                let steamRunning = await isSteamRunning()
+                let report = "warmed=\(warmStartedPrefixKeys.contains(prefixKey)) "
+                    + "steamRunning=\(steamRunning)\n"
+                FileHandle.standardError.write(report.data(using: .utf8)!)
+                exit(0)
+            }
+        }
+        // The `--trace-steam-launch` diagnostic used for the 2026-08-26 cold-login-stall
+        // investigation (WINEDEBUG=+winsock, then +ntdll, against the real Steam-Wine11 prefix)
+        // was intentionally temporary and has been removed. Findings are recorded in CLAUDE.md.
+        // F5 (bug-sweep): list what's reclaimable in Bottles/ and ShaderCache/. LIST ONLY —
+        // prints candidates with sizes and a reason each; deletes nothing. The user runs any `rm`
+        // themselves. Two hard exclusions, both because "unreferenced by bottles.json" is not a
+        // safe definition of orphan on this machine:
+        //   - `ShaderCache/Sekiro` and `/ASBR` are live via hand-made launchers
+        //     (~/Applications/Sekiro.app, /JJBA All-Star Battle.app) that set
+        //     DXMT_SHADER_CACHE_PATH directly and are structurally invisible to Decanter's own
+        //     model — this is why the launcher scan below exists at all.
+        //   - `Backups/` (~17 GB on this machine) holds the rollback material
+        //     RESTORE-*.sh depends on (see F21) — reclaiming it is how that script's failure mode
+        //     becomes self-inflicted. Never scanned, not merely filtered: it's not in scope for
+        //     this flag to look at, the same way OrphanReclaim never walks the filesystem itself.
+        //   Decanter.app/Contents/MacOS/Decanter --reclaim
+        if CommandLine.arguments.contains("--reclaim") {
+            let out = reclaimReport()
+            FileHandle.standardError.write(out.data(using: .utf8)!)
+            exit(0)
+        }
         // Full health check: is the RIGHT engine installed, and is everything loaded?
         //
         // Deeper than `doctor.sh` can go from the shell, because it uses the app's own probes —
@@ -976,6 +1027,82 @@ final class AppModel: ObservableObject {
 
     /// Make the prefix's registry match `software2D` before launching.
     ///
+    /// F5 (bug-sweep): build the printable report for `--reclaim`. Gathers what's actually on
+    /// disk, what bottles.json references, and what `~/Applications/*.app` launchers reference,
+    /// then hands the classification to `OrphanReclaim` — this function does I/O, `OrphanReclaim`
+    /// does none, so the "is this actually orphaned" logic stays unit-testable.
+    private func reclaimReport() -> String {
+        let fm = FileManager.default
+        func names(in dir: URL) -> [String] {
+            (try? fm.contentsOfDirectory(atPath: dir.path))?
+                .filter { !$0.hasPrefix(".") } ?? []
+        }
+        func size(_ url: URL) -> Int {
+            guard let e = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey],
+                                        options: [.skipsHiddenFiles]) else { return 0 }
+            var total = 0
+            for case let u as URL in e {
+                total += (try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            }
+            return total
+        }
+        func human(_ bytes: Int) -> String {
+            ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+        }
+
+        // Every hand-made launcher's shader-cache path, so a directory unreferenced by
+        // bottles.json but referenced HERE is correctly kept, not reported reclaimable.
+        var referencedByLaunchers = Set<String>()
+        let appsDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+        if let apps = try? fm.contentsOfDirectory(at: appsDir, includingPropertiesForKeys: nil) {
+            for app in apps where app.pathExtension == "app" {
+                let macOSDir = app.appendingPathComponent("Contents/MacOS")
+                guard let bins = try? fm.contentsOfDirectory(at: macOSDir, includingPropertiesForKeys: nil) else { continue }
+                for bin in bins {
+                    guard let text = try? String(contentsOf: bin, encoding: .utf8) else { continue }
+                    for line in text.split(separator: "\n") where line.contains("ShaderCache/") {
+                        if let range = line.range(of: "ShaderCache/") {
+                            let rest = line[range.upperBound...]
+                            let name = rest.prefix { $0 != "\"" && $0 != "/" && $0 != "'" }
+                            if !name.isEmpty { referencedByLaunchers.insert(String(name)) }
+                        }
+                    }
+                }
+            }
+        }
+
+        let referencedByBottles = Set(bottles.map { $0.url.lastPathComponent })
+        let bottleOrphans = OrphanReclaim.orphanedBottleDirs(
+            present: names(in: Paths.bottlesRoot), referencedByBottles: referencedByBottles)
+        let cacheOrphans = OrphanReclaim.orphanedShaderCacheDirs(
+            present: names(in: Paths.shaderCacheRoot), referencedByBottles: referencedByBottles,
+            referencedByLaunchers: referencedByLaunchers)
+
+        var out = "\n=== Decanter reclaim report — LIST ONLY, nothing deleted ===\n\n"
+        out += "Backups/ was not scanned — it holds RESTORE-*.sh's rollback material and is "
+             + "never in scope for this report.\n"
+        if referencedByLaunchers.isEmpty {
+            out += "No ~/Applications launcher shader-cache references found.\n"
+        } else {
+            out += "Launcher-referenced shader caches (excluded): \(referencedByLaunchers.sorted().joined(separator: ", "))\n"
+        }
+
+        out += "\nBOTTLES/ (\(bottleOrphans.count) reclaimable)\n"
+        for item in bottleOrphans {
+            let bytes = size(Paths.bottlesRoot.appendingPathComponent(item.name))
+            out += "  \(item.name)  —  \(human(bytes))  —  \(item.reason)\n"
+        }
+
+        out += "\nSHADERCACHE/ (\(cacheOrphans.count) reclaimable)\n"
+        for item in cacheOrphans {
+            let bytes = size(Paths.shaderCacheRoot.appendingPathComponent(item.name))
+            out += "  \(item.name)  —  \(human(bytes))  —  \(item.reason)\n"
+        }
+        out += "\nNothing was deleted. Review the list above and remove anything yourself if you "
+             + "want the space back.\n"
+        return out
+    }
+
     /// ⚠️ THE SETTING USED TO DO NOTHING UNLESS YOU PRESSED "Apply to Prefix". `applySoftware2D`
     /// was reachable only from `applyRegistry`, so toggling it on and pressing Play changed
     /// nothing at all — reported as "I turned the 2D game thing on and it's still slow", and it
@@ -1172,7 +1299,15 @@ final class AppModel: ObservableObject {
         let ourRoot = Paths.bottlesRoot.standardizedFileURL.path
         let target = bottle.url.standardizedFileURL.path
         let isOurs = target.hasPrefix(ourRoot + "/")
-        let stillReferenced = bottles.contains { $0.url.standardizedFileURL == bottle.url.standardizedFileURL }
+        // F18 (bug-sweep): this used to compare `.standardizedFileURL ==`, which is case-SENSITIVE
+        // — APFS is case-insensitive by default, so two bottles whose stored `url` differed only in
+        // case (e.g. an imported CrossOver bottle) would both point at the SAME real directory while
+        // comparing as different, and this guard would delete a prefix a sibling bottle still used.
+        // `PrefixSharing` exists precisely to be the one place that answers "which bottles share
+        // this prefix" — this was a second, less correct opinion. `bottle` was already removed from
+        // `bottles` above, so `group` (not `others`) is right here: anything it finds IS a different
+        // bottle on the same prefix.
+        let stillReferenced = !PrefixSharing.group(of: bottle, in: bottles).isEmpty
         guard isOurs, !stillReferenced else { return }
         try? FileManager.default.removeItem(at: bottle.url)
     }
@@ -1264,7 +1399,13 @@ final class AppModel: ObservableObject {
     @discardableResult
     private func addImportedBottle(name: String, prefix: URL, wineBin: URL?, steamArgs: String? = nil) -> Bottle.ID? {
         // Idempotent: same name + same prefix means we already imported it.
-        if bottles.contains(where: { $0.name == name && $0.url == prefix }) { return nil }
+        //
+        // F18 (bug-sweep): raw `URL ==`, not even standardized, is case-sensitive — the same
+        // comparator gap as the delete guard above, lower stakes here (a spurious duplicate bottle
+        // registered, not data loss) but the same missing PrefixSharing comparator.
+        if bottles.contains(where: { $0.name == name && PrefixSharing.key(for: $0.url) == PrefixSharing.key(for: prefix) }) {
+            return nil
+        }
         var bottle = Bottle(name: name, url: prefix)
         bottle.wineBinDirectory = wineBin
         bottle.isInitialized = true                 // already set up by CrossOver
@@ -1512,10 +1653,86 @@ final class AppModel: ObservableObject {
     /// clear guidance rather than silently continuing into a broken state.
     func ensureRosetta() async -> Bool {
         if SystemChecks.isRosettaInstalled { isRosettaInstalled = true; return true }
+        // F22 (bug-sweep): missing explicit timeout, so this inherited F16's 30s default — a
+        // several-hundred-MB download-plus-install that does not finish in 30s. On a machine that
+        // ALREADY has Rosetta (every dev machine this was built on) the guard above short-circuits
+        // and this call never even runs, which is exactly why it shipped unnoticed: it only fires
+        // on a clean Mac, on someone's actual first run.
         _ = try? await Shell.run(URL(fileURLWithPath: "/usr/sbin/softwareupdate"),
-                                 arguments: ["--install-rosetta", "--agree-to-license"])
+                                 arguments: ["--install-rosetta", "--agree-to-license"], timeout: 600)
         isRosettaInstalled = SystemChecks.isRosettaInstalled
         return isRosettaInstalled
+    }
+
+    // MARK: Warm-start — bring Steam up while the user is still choosing a game
+
+    /// Prefix keys (via `PrefixSharing.key`) with a warm-start currently in flight. Published so
+    /// the UI can show "Preparing Steam…" — never used to gate Play, which must stay pressable and
+    /// simply join the in-flight warm-up (see `launchSteam`) rather than wait on this.
+    @Published var warmingPrefixKeys: Set<String> = []
+
+    /// The actual in-flight task per prefix, so `launchSteam` can AWAIT it instead of racing it.
+    /// Keyed separately from `warmingPrefixKeys` because the dictionary must survive exactly as
+    /// long as the task itself; the published Set exists only for the UI to read.
+    private var warmStartTasks: [String: Task<Void, Never>] = [:]
+
+    /// Prefixes whose Steam THIS warm-start brought up, and which no game has claimed for reaping
+    /// yet. Consumed (removed) the moment a real `launchSteam` call picks it up, so a warm start
+    /// hands off reaping responsibility to the first real game session and no other bottle
+    /// mistakenly inherits it later.
+    private var warmStartedPrefixKeys: Set<String> = []
+
+    /// The pending debounce timer between a selection change and actually committing to a Steam
+    /// boot. Arrow-keying through the sidebar must not spawn a warm-start per row.
+    private var pendingWarmStartTask: Task<Void, Never>?
+
+    /// Call this from the sidebar's OWN selection binding — never assign `selectedBottleID`
+    /// directly and expect this to fire. `selectedBottleID` is `@Published` and reassigned
+    /// programmatically in several places (after a delete, after a create, after CrossOver import)
+    /// that are not user intent; a plain `.onChange(of: selectedBottleID)` would warm-start Steam
+    /// after every one of those, including right after the bottle it just warmed was deleted. This
+    /// is the one place "the user actually chose this" is asserted.
+    func userSelectedBottle(_ id: Bottle.ID?) {
+        selectedBottleID = id
+        pendingWarmStartTask?.cancel()
+        guard let id, let bottle = bottles.first(where: { $0.id == id }),
+              bottle.settings.steamArguments.contains("-applaunch") else { return }
+        let prefixKey = PrefixSharing.key(for: bottle.url)
+        pendingWarmStartTask = Task {
+            // Debounce: give arrow-key browsing a moment to settle before committing to a boot
+            // that can run 30+ seconds. Cancelled outright by the next call to this function, so
+            // moving off this row before the debounce elapses starts nothing.
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            await warmStartSteam(for: bottle, prefixKey: prefixKey)
+        }
+    }
+
+    /// Start Steam for `bottle`'s prefix in the background and wait for it to log on, so it's
+    /// ready before the user presses Play. Never starts a SECOND client — the exact F27 regression
+    /// ("missing its steam interface") came from a launch landing on top of one already in flight.
+    private func warmStartSteam(for bottle: Bottle, prefixKey: String) async {
+        guard warmStartTasks[prefixKey] == nil else { return }   // already warming this prefix
+        let task = Task {
+            guard await !isSteamRunning() else { return }   // already up — nothing to warm
+            warmingPrefixKeys.insert(prefixKey)
+            defer { warmingPrefixKeys.remove(prefixKey); warmStartTasks[prefixKey] = nil }
+
+            let flags = bottle.isSteamBootstrapped
+                ? "-silent -no-cef-sandbox -skipinitialbootstrap"
+                : "-no-cef-sandbox"
+            let steamArgs = [bottle.steamExecutable.path] + Steam.launchArguments(from: flags)
+            launchQuietly(bottle: bottle, arguments: steamArgs)
+            if await waitForSteamLogon(in: bottle, timeout: 150) {
+                // Only claim ownership if logon actually landed. A timed-out warm-start still left
+                // a Steam process running, but we can't vouch for its state — better to let the
+                // eventual `launchSteam` call re-derive `startedSteamForGame` fresh than to claim
+                // reaping responsibility for something that never proved it came up correctly.
+                warmStartedPrefixKeys.insert(prefixKey)
+            }
+        }
+        warmStartTasks[prefixKey] = task
+        await task.value
     }
 
     /// Launch the Steam client already installed in the bottle.
@@ -1612,10 +1829,36 @@ final class AppModel: ObservableObject {
                 steamArgs.removeAll { $0 == "-skipinitialbootstrap" }
             }
             let args = [bottle.steamExecutable.path] + steamArgs
+
+            // Join, don't race, a warm-start for this same prefix (see `userSelectedBottle`).
+            // Without this, `startedSteamForGame` below could sample Steam mid-launch — the
+            // process may not exist yet, briefly, right as the warm-start's own `launchQuietly`
+            // call is executing — and Play would start a SECOND Steam client on top of it. That
+            // collision is exactly the F27 regression ("missing its steam interface").
+            let prefixKey = PrefixSharing.key(for: bottle.url)
+            if let warmTask = warmStartTasks[prefixKey] {
+                await warmTask.value
+            }
             // Did WE bring Steam up? Only then may we shut it down when the game exits — a Steam
             // the user already had open is theirs. Checked BEFORE launching, or the answer is
             // always "yes" a moment later.
-            let startedSteamForGame = await !isSteamRunning()
+            //
+            // A warm-start that successfully logged this prefix on counts as "we brought it up"
+            // too, even though a different code path did it — Decanter still owns the lifecycle,
+            // and reaping must not silently stop happening just because Steam was already running
+            // by the time Play was pressed. Consumed (removed), not just read: only the game
+            // session that actually claims it inherits reaping, so a later Play on a sibling
+            // bottle sharing this prefix doesn't ALSO try to reap the same Steam a second time.
+            //
+            // Kept SEPARATE from the cold-boot logon wait below on purpose: `steamWasAlreadyUp` is
+            // what that wait must gate on. A warm-started Steam is already logged on by the time
+            // Play is pressed, so `waitForSteamLogon` would find no NEW "Logged On," line to see —
+            // it would wait out the full 150s timeout for an event that already happened, instead
+            // of returning immediately. `startedSteamForGame` folds the warm-start flag in for
+            // reaping; the wait condition below deliberately does not.
+            let steamWasAlreadyUp = await isSteamRunning()
+            let weWarmStartedThisPrefix = warmStartedPrefixKeys.remove(prefixKey) != nil
+            let startedSteamForGame = !steamWasAlreadyUp || weWarmStartedThisPrefix
             // Quiet: no console sheet pops over Decanter (which made the first click look like a
             // no-op). Steam just opens on its own.
             launchQuietly(bottle: bottle, arguments: args)
@@ -1626,10 +1869,61 @@ final class AppModel: ObservableObject {
             if isGameLauncher {
                 reapSteamAfterGame(in: bottle, weStartedSteam: startedSteamForGame)
             }
+
+            // F27 (bug-sweep, reported directly by Jack: "I'll click play and it won't work and
+            // then when the button turns blue again when I click it peggle loads").
+            //
+            // ⚠️ CORRECTED 2026-08-25, after a live regression Jack hit on the first version of
+            // this fix. The original diagnosis here claimed the cold-boot `-applaunch` gets
+            // DROPPED, and "fixed" it by re-issuing the same launch command after
+            // `waitForSteamLogon` succeeded. Steam's own `console_log.txt` proves that diagnosis
+            // wrong: the `-applaunch` is NOT dropped — Steam processes its own command line ~2s
+            // after logon and drives the FULL `GameAction` sequence through `CreatingProcess` on
+            // its own. The real bug was only ever `clearLaunchGuard` below, which checked
+            // `isSteamRunning()` — true the instant the process exists, not once logged in — so
+            // Play re-enabled after ~2s and told Jack the launch had finished when Steam was still
+            // ~35s into a cold boot. Jack clicking again mid-boot is what looked like "the launch
+            // needed two clicks"; the launch itself was already going to work on its own.
+            //
+            // The re-issue made this WORSE: a `launchQuietly` call while the first Steam client is
+            // still initializing does not forward-and-exit against the running client the way a
+            // click against an IDLE client does — the log shows a SECOND FULL Steam client
+            // (`Client version` / `Loaded SDL` / `ComputeStartupMode`) starting during
+            // `CreatingProcess`, colliding with the in-flight `GameAction`, and the sequence never
+            // reaching `Completed`. Peggle opened "missing its steam interface." The 17
+            // historical successful re-deliveries this section used to cite as evidence of safety
+            // were ALL against an idle, already-started Steam — a fundamentally different
+            // situation from landing mid-launch, and citing them as proof this was safe was wrong.
+            //
+            // Fix, corrected: WAIT for logon, and do nothing else. Steam takes it from there.
+            //
+            // Gated on `steamWasAlreadyUp`, NOT `startedSteamForGame` — see the comment where
+            // `startedSteamForGame` is computed above. A warm-started prefix is already logged on
+            // by now, so there is nothing new to wait for; only a genuinely fresh cold boot (Steam
+            // not running at the moment this call checked, warm-start or no) needs this wait.
+            if isGameLauncher, !steamWasAlreadyUp {
+                _ = await waitForSteamLogon(in: bottle, timeout: 150)
+            }
+
             // Hold the guard until Steam is confirmed up. If Steam was already running before this
             // call, `isSteamRunning()` is true on the very first check, so the guard clears almost
             // immediately — correct, since -applaunch on an already-running Steam is near-instant
-            // and there's nothing more we can wait for (see clearLaunchGuard).
+            // and there's nothing more we can wait for (see clearLaunchGuard). On a cold boot, the
+            // logon wait above already ran to completion first, so this only ever adds the usual
+            // fast confirmation on top, not a second long wait.
+            //
+            // F11 (bug-sweep): the practical effect is that `lastLaunchFailure` structurally CANNOT
+            // fire on this path when Steam is already running — which is the common case, since
+            // this is "how nearly every game starts" per the comment above. A game that silently
+            // fails to start (not installed, or the steam_api64 race the direct-exe branch's
+            // comment above documents) reports nothing here.
+            //
+            // DO NOT fix this by polling for the launched game's own exe instead of Steam. The
+            // resolved exe can be a DRM WRAPPER that unpacks a different process and exits — Peggle
+            // launches as `Peggle.exe`, which unpacks `popcapgame1.exe` and quits (see "Peggle
+            // SOLVED" in CLAUDE.md). Polling for `Peggle.exe` would report "didn't start" WHILE
+            // PEGGLE IS RUNNING. A false failure on a working launch is worse than this silence.
+            // There is no cheap, safe success signal for this path; documenting the gap is the fix.
             clearLaunchGuard(for: bottle) { await self.isSteamRunning() }
         }
     }

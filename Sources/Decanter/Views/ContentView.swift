@@ -148,7 +148,15 @@ struct ContentView: View {
 
             // .plain, not .sidebar: the sidebar list style reintroduces its own vibrancy, which
             // is the exact thing this layout exists to get rid of.
-            List(selection: $model.selectedBottleID) {
+            //
+            // Routed through `userSelectedBottle`, not a direct binding to `selectedBottleID` —
+            // this is the ONE place a selection change means the user actually chose a bottle.
+            // `selectedBottleID` itself is reassigned programmatically in several other places
+            // (after a delete, a create, a CrossOver import); a plain `$model.selectedBottleID`
+            // binding here couldn't tell those apart from a real click, and warm-starting Steam
+            // after a delete reassigns selection is exactly the trap that ruled that out.
+            List(selection: Binding(get: { model.selectedBottleID },
+                                    set: { model.userSelectedBottle($0) })) {
                 Section("Bottles") {
                     ForEach(model.bottles) { bottle in
                         BottleRow(bottle: bottle)

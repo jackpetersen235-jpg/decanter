@@ -49,6 +49,17 @@ enum PrefixSharing {
             .standardizedFileURL.path.lowercased()
     }
 
+    /// The name-level counterpart to `key(for:)`, for call sites that only have a bare directory
+    /// NAME (not a full `URL`) to compare — e.g. a listing of what's actually on disk under
+    /// `Bottles/` or `ShaderCache/`. `key(for:)` doesn't fit those calls, which is exactly why they
+    /// kept reaching for raw string equality instead: this makes case folding the obvious move
+    /// there too, not just the URL path. F24 (bug-sweep) — this exact bug (case-sensitive name
+    /// comparison on a case-insensitive filesystem) has now shipped three times: `deleteBottle`'s
+    /// guard (F18), the CrossOver duplicate-import check (F18, lesser instance), and
+    /// `OrphanReclaim`'s reclaim-candidate filter (F24) — the one function whose entire output is a
+    /// delete list.
+    static func nameKey(_ name: String) -> String { name.lowercased() }
+
     /// Every bottle whose prefix matches `bottle`'s, INCLUDING `bottle` itself.
     /// Order is stable (input order preserved) so UI text built from this does not reshuffle
     /// between renders.

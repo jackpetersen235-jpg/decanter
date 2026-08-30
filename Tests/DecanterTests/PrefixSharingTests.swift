@@ -108,4 +108,39 @@ final class PrefixSharingTests: XCTestCase {
         XCTAssertFalse(PrefixSharing.software2DWanted(forExe: "popcapgame1.exe",
                                                        in: [a], resolve: resolve))
     }
+
+    // MARK: F18 — the delete guard's own comparator
+
+    /// Pins the exact logic `deleteBottle` now uses. Before F18, that guard compared
+    /// `.standardizedFileURL ==` directly — case-SENSITIVE, so on the default case-insensitive
+    /// APFS volume, two bottles whose stored `url` differed only in case would both point at the
+    /// SAME real directory while comparing as different, and the guard would delete a prefix a
+    /// sibling bottle still used. This is the safe proof of the fix: a unit test, not a live
+    /// bottle — the failure mode being guarded against is deleting a real, possibly multi-GB
+    /// prefix, which is not something to reproduce for real.
+    ///
+    /// `bottles` here deliberately excludes the bottle being "deleted" — `deleteBottle` removes it
+    /// from the array BEFORE this check runs, so `group(of:in:)`, not `others`, is the right call:
+    /// anything `group` still finds is necessarily a different bottle.
+    func testDeleteGuardCatchesACaseDifferingSiblingOnTheSamePrefix() {
+        let beingDeleted = bottle("Sekiro (duplicate)", "/Bottles/Steam-Wine11")
+        let survivor = bottle("Sekiro", "/Bottles/STEAM-WINE11")   // same real dir, different case
+        let remainingBottles = [survivor]                          // beingDeleted already removed
+
+        let stillReferenced = !PrefixSharing.group(of: beingDeleted, in: remainingBottles).isEmpty
+
+        XCTAssertTrue(stillReferenced, "a case-differing sibling on the same prefix must still "
+                     + "count as a reference — this is what stops the guard from deleting a "
+                     + "prefix another bottle still uses")
+    }
+
+    func testDeleteGuardAllowsDeletionWhenNoSiblingRemains() {
+        let beingDeleted = bottle("Old Bottle", "/Bottles/Retired")
+        let remainingBottles = [bottle("Unrelated", "/Bottles/Steam-Wine11")]
+
+        let stillReferenced = !PrefixSharing.group(of: beingDeleted, in: remainingBottles).isEmpty
+
+        XCTAssertFalse(stillReferenced, "an unrelated bottle on a different prefix must not block "
+                      + "deletion — the guard should only trip for a genuine shared prefix")
+    }
 }

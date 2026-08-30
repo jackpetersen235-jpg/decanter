@@ -262,6 +262,16 @@ struct BottleDetailView: View {
                         // One shared sampling region for the whole row. Without it each glass
                         // button samples independently and they render as flat capsules.
                         .glassGroup()
+                        // Warm-start (selection-triggered background Steam boot, see
+                        // `userSelectedBottle`): says what's happening rather than looking idle
+                        // while a ~30s cold boot runs unseen — showing "ready" before logon
+                        // actually completes is the F27 complaint in a new costume. Play itself
+                        // stays enabled throughout; pressing it joins the warm-up rather than
+                        // waiting on this text to clear.
+                        if model.warmingPrefixKeys.contains(PrefixSharing.key(for: bottle.url)) {
+                            Label("Preparing Steam…", systemImage: "hourglass")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         if let gfxResult {
                             Text(gfxResult).font(.caption).foregroundStyle(.secondary)
                         }
