@@ -72,7 +72,7 @@ The app is its own diagnostic tool. All of these run without the GUI and print t
 |---|---|
 | `--diagnose` | Per-bottle engine, Steam presence, bootstrap state |
 | `--scan-games` | What the New Bottle picker will offer, with sizes and app ids |
-| `--build-game-apps` | Which bottles resolve to a game, and to which executable |
+| `--verify` | Per-bottle: prefix present, Steam state, and which executable it resolves to |
 | `--quit-steam` | Escape hatch for a Steam that will not quit; reports success per bottle |
 | `--install-steam "<bottle>"` | Provision Steam into one named bottle |
 | `--install-engine` / `--run-setup` | Re-run first-run setup steps |
@@ -179,8 +179,10 @@ fast-sync (msync) is not active. GPU at 80% during a match is loaded but fine.
 Check in this order:
 
 1. `--diagnose` → is the bottle initialised, is Steam bootstrapped?
-2. `--build-game-apps` → does the bottle resolve to a game, and to **which executable**? UE titles
-   ship a small shim beside the real binary; if it resolved to a 0.3 MB `.exe`, that is the bug.
+2. `--verify` → does the bottle resolve to a game, and to **which executable**? UE titles ship a
+   small shim beside the real binary; if it resolved to a 0.3 MB `.exe`, that is the bug.
+   (`--build-game-apps` no longer exists — the generated-launcher feature it served was removed
+   2026-08-12. Don't chase it if an older guide mentions it.)
 3. `connection_log.txt` → did Steam actually log in? A game started before `steam_api64` can reach
    the client dies silently with nothing in any log.
 4. Anti-cheat. If the game uses Easy Anti-Cheat / EOS, **stop**. There is no path on macOS — Epic

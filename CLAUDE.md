@@ -94,8 +94,12 @@ A newcomer with **no Wine and no Rosetta** can press one button and end up at St
   the base bundle ~317 MB **then overlays upstream wine 10 + msync** ~160 MB, via `WineInstaller`,
   into `~/Library/Application Support/Decanter/Wine/`)
   → `createBottleForSetup()` (quiet, no console) → `performSteamInstall(console:nil)`.
-- Headless test hooks: `Decanter --install-engine` and `Decanter --run-setup`. Both verified
-  end-to-end on 2026-07-17 (engine downloads at ~2 MB/s; bottle + Steam auto-created).
+- Headless test hooks: `Decanter --install-engine` and `Decanter --run-setup`. The 2026-07-17
+  end-to-end check (engine downloads at ~2 MB/s; bottle + Steam auto-created) observed SIDE
+  EFFECTS, not a reported result — until F15 (bug-sweep, 2026-08-23), neither flag ever printed
+  anything or set an exit code, success or failure, so a failed run would have looked identical.
+  Both now `exit(0)` on success and `exit(1)` with a reason on stderr, like every other headless
+  flag in this dispatch.
 - The app owns its own engine (`Paths.wineEngine*`, discovered first in `Wine.swift`), so it does
   **not** depend on Whisky/Mythic/CrossOver being installed. That's what makes the friend build work.
 
@@ -219,6 +223,15 @@ Strips quarantine + AppleDouble clutter, re-signs ad-hoc, writes a plain-languag
   An *invalid* signature is worse than none — `codesign --remove-signature` is fine for local apps.
 - **`grep -rl` silently fails on these Mach-O trees.** Use `strings <file> | grep`. A tree-wide
   grep returned 0 hits for a term that `strings` found 27 times — nearly caused a wrong conclusion.
+- **Testing a fix through `build/Decanter.app` after only running `swift build` tests the
+  PREVIOUS build.** `swift build` updates `.build/debug/Decanter` only; the `.app` bundle is a
+  separate copy that only `Scripts/make_app.sh` (or `package-for-friend.sh`, which calls it)
+  refreshes. Same shape as the `generatorVersion` trap above — a file that outlives the app that
+  wrote it goes stale. Bit a live F14 verification during the F11-F16 bug-sweep pass (2026-08-23):
+  a `.wined3d` fix looked broken (registry key present, values empty; a run that should've been
+  capped at 30s by F16 instead ran ~90s) purely because the `.app` being exercised was still the
+  pre-fix, pre-F16 build. `strings build/Decanter.app/Contents/MacOS/Decanter | grep <a string
+  only the new code contains>` is the fast way to check which build you're actually running.
 - Backups/snapshots: use **`cp -Rc`** (APFS clone). 16 GB cloned in 1.4 s with ~0 disk used.
 - **`probeFastSync` must match `WINEMSYNC`, not bare `msync`.** Every ntdll has the POSIX
   `_msync()` *syscall symbol* in its symbol table, so a raw-byte scan for `msync` false-positives
@@ -991,6 +1004,58 @@ ceiling or actually running a game to reap, and the loop-mechanics check above a
 part that changed; the parts that didn't change (phase 1, phase 3's cloud-sync grace, phase 4) are
 untouched by this fix.
 
+## Bug-sweep fix F18 — the delete guard used the comparator PrefixSharing exists to replace (2026-08-23)
+
+**Invariant restored: deleting a bottle's files never touches a prefix another bottle still
+uses**, on this filesystem's actual case rules, not an idealized case-sensitive one.
+
+**Root cause:** `deleteBottle`'s "is this prefix still referenced by another bottle" check compared
+`.standardizedFileURL ==` directly — case-SENSITIVE. APFS is case-insensitive by default, so two
+bottles whose stored `url` differed only in case (plausible for an imported CrossOver bottle) would
+both resolve to the SAME real directory while comparing as unequal. The guard would then delete a
+prefix a sibling bottle still used — on this machine, `Steam-Wine11`, 25 GB, four bottles, real save
+data, via `try?`, which wouldn't even report what happened. `PrefixSharing` exists specifically to
+be the one place that answers "which bottles share this prefix" (see F1+F2+F8 above); this was a
+second, less correct opinion answering the same question.
+
+**Fix:** `stillReferenced` now uses `!PrefixSharing.group(of: bottle, in: bottles).isEmpty`. `bottle`
+is already removed from `bottles` by this point in the function, so `group` (not `others`) is
+correct — anything it still finds is necessarily a different bottle. A lesser instance of the same
+gap, `addImportedBottle`'s duplicate-import check (raw `URL ==`, not even standardized), got the
+same comparator — lower stakes there (a spurious duplicate bottle, not data loss).
+
+**Verified via a unit test, deliberately not a live bottle** — the failure mode being fixed is
+deleting a real, possibly multi-GB prefix, which is not something to reproduce for real.
+`testDeleteGuardCatchesACaseDifferingSiblingOnTheSamePrefix` pins the exact expression the guard now
+uses against two bottles differing only by case; `testDeleteGuardAllowsDeletionWhenNoSiblingRemains`
+pins the negative case. Both pass. The underlying case-folding mechanism itself was already proven
+in `testCaseIsFoldedForTheDefaultCaseInsensitiveVolume` (F1+F2+F8, above) — reverting `key(for:)` to
+bare `url.path` was shown to make that the one test that fails.
+
+**This bug class shipped a THIRD time (F24, 2026-08-25), in code written the same day as F18** —
+`OrphanReclaim`'s reclaim-candidate filter, the one function whose entire output is a delete list.
+Same root cause each time: `PrefixSharing.key(for:)` takes a full `URL`, so a call site holding a
+bare directory NAME (not a URL) doesn't look like it applies, and reaches for raw string equality
+instead. Closed by adding `PrefixSharing.nameKey(_:)` — the name-level counterpart, literally
+`.lowercased()` — so a bare-name call site has an obvious canonical form to reach for instead of
+rolling its own. If a fourth instance shows up, it should mean someone skipped `nameKey`, not that
+another one needs writing.
+
+## F10 — closed as WONTFIX (2026-08-23)
+
+F10 (low severity): `installGraphicsDriver` unconditionally re-asserts the DXMT registry override
+on every Steam launch, even when nothing changed — a few subprocess spawns' worth of cost per
+launch. The obvious-looking optimization is "skip the write when the current registry state
+already matches." **Deliberately not built.** Checking "does it already match" means reading the
+registry via `reg query`, and this project already proved `reg query` lies while wineserver is
+running (see the DXMT/Peggle history above). A stale "already matches" read would skip the write,
+leaving the override absent on disk while the UI still reports DXMT active — that is F4, the bug
+this same fix pass already found and fixed, reintroduced by the optimization meant to speed it up.
+
+The few seconds per launch buy a real guarantee: the override the UI claims is active IS active on
+disk, every time, without depending on a `reg query` this project can't trust. Not worth trading
+away for a launch-time saving nobody has measured as a problem.
+
 ## Spotted, not fixed — running list from the bug-sweep fix pass (2026-08-22)
 
 Things noticed while fixing an item on the list, deliberately NOT fixed because they weren't the
@@ -1012,6 +1077,107 @@ item asked for. Add to this list rather than fixing inline; work them only when 
   the helper allowlist). See the comment at the `isAnyGameRunning()` call site in
   `quitSteamBlockReason` for the same note in context.
 
+  **Re-investigated, not just re-stated, 2026-08-23** when this item was released from the
+  deferred list: tried `lsof +D <prefix path>` as a legitimate, non-guessing alternative to
+  walking process environments — directory-scoped open-file-handle enumeration, not comm-path
+  parsing. Result: unreliable even for a KNOWN currently-running Decanter process (22.5h uptime,
+  confirmed alive via `ps`) — `lsof +D` scoped to the whole Application Support tree found zero
+  open handles for it. Building safety-critical "is it safe to kill this" logic on a technique
+  that misses a process known to be running would be worse than the current over-block. The
+  constraint is confirmed unchanged, not assumed unchanged — still closed as WONTFIX, same
+  reasoning as F10.
+
+## Bug-sweep fix F27 — cold-boot Play looked broken because the guard released too early, not
+because the launch failed (2026-08-25)
+
+**Invariant restored: `launchingBottleIDs` reflects reality** — Play re-enables when Steam is
+actually ready to receive input, not the instant its process merely exists.
+
+Reported directly by Jack, in his own words: *"when I try and play peggle I'll click play and it
+won't work and then when the button turns blue again when I click it peggle loads."* Peggle carries
+`-applaunch`, so it takes the game-launcher branch (`AppModel.swift`, the `steamArgs`/`args` block).
+
+**This item went through two diagnoses. The first one was wrong, shipped a regression Jack hit
+directly, and is recorded below deliberately — not edited away — because the failure mode is worth
+keeping.**
+
+### First diagnosis (WRONG) — "the cold-boot applaunch gets dropped"
+
+The claim: `-applaunch` fired once during Steam's cold bootstrap is consumed/lost before the client
+is ready, so the game never starts on click 1; click 2 works because it re-delivers the command to
+a now-logged-in Steam. The "fix": wait for logon, then re-issue the identical `launchQuietly` call.
+
+This looked well-supported. Steam's own `console_log.txt` was checked directly (not taken on
+faith) and showed a real, total correlation: every historical applaunch-bearing `ExecCommandLine`
+in the log was immediately followed by `GameAction LaunchApp`, including two click-pairs seconds
+apart. That is real data. **The causal story built on top of it was wrong anyway** — a plausible
+narrative fitted to genuine data is still not verified, and this project has hit that exact trap
+before (the Aug-8 corrupt-file provenance error earlier in this file is the same shape). The
+correlation was consistent with "cold boot silently drops the applaunch, second click delivers it"
+AND equally consistent with "cold boot delivers the applaunch fine on its own, second click just
+landed during the ~35s window and the log shows two deliveries" — the log alone could not
+distinguish these, and the first explanation was accepted without ruling out the second.
+
+**Jack ran the fix cold and hit a new failure**: Peggle opened "missing its steam interface."
+`console_log.txt` from that run showed why — the FIRST `ExecCommandLine` (Steam processing its own
+command line ~2s after logon) drove the complete `GameAction` sequence through `CreatingProcess` on
+its own. The applaunch was never dropped. Then, ~4 seconds later, mid-`CreatingProcess`, the
+re-issued `launchQuietly` call landed — and instead of forwarding to the running client the way a
+click against an IDLE client does, it started a SECOND FULL Steam client (`Client version` /
+`Loaded SDL` / `ComputeStartupMode` appear again in the log) that collided with the in-flight
+launch. The sequence never reached `Completed`.
+
+### Second diagnosis (verified against the collision log) — "the guard released before Steam was
+ready, so Jack clicked again mid-boot, and now the fix's own retry can land mid-launch and break it"
+
+The applaunch is not dropped, only *delayed* — a cold boot takes ~30-40s to reach the point where
+Steam processes its own command line and starts the game unassisted. The only real bug was ever
+`clearLaunchGuard`, which checked `isSteamRunning()` — true the instant the process exists, long
+before logon — so Play re-enabled after ~2s and told Jack the launch was done while Steam was still
+deep in a cold boot. Clicking again during that window is what looked like "needed two clicks";
+the original click was already going to work on its own, given time. The 17 historical successful
+re-deliveries cited as evidence the retry was "safe" were ALL against an idle, already-started
+client — landing mid-launch, as the collision proved, is a different situation entirely, and citing
+them as proof of safety was itself part of the same over-fitted narrative.
+
+**Fix, corrected: wait for logon, and do nothing else.**
+
+```swift
+if isGameLauncher, startedSteamForGame {
+    _ = await waitForSteamLogon(in: bottle, timeout: 150)
+}
+```
+
+No re-issue. Steam handles the actual launch once it's logged in; the guard now simply holds until
+that point instead of releasing early and inviting a second click that can land at the worst
+possible moment.
+
+**Status:** the corrected fix is code-verified (build clean, 27/27 tests) and grounded in the
+collision log from Jack's own failed test — but the post-fix behavior (does a single cold-boot
+click now work end to end) still needs Jack's own retest, same as before. Nothing from the prefix
+was left running after his test.
+
+**The lesson, stated plainly rather than just fixed and moved past**: a total correlation in real
+log data is not the same as a verified causal mechanism. The first diagnosis was falsifiable — "does
+Steam drive its own command line to completion after logon, or not" — and that question was never
+actually asked before a fix shipped on top of it. Ask the falsifying question before writing the
+fix, not after a live regression forces it.
+
+### "Had to click twice" — four separate causes, so far
+
+Same visible symptom, four unrelated root causes found across this project's history. Worth reading
+this list before re-diagnosing one that's already been found:
+
+1. **The console sheet popped over Decanter** on every launch, making the first click look like a
+   no-op even though it worked (see "Verification habits" era fix — game/Steam launches run quiet now).
+2. **Steam's `-silent` flag hides its own window** on a launcher bottle, same "looks like nothing
+   happened" effect — restricted to per-game bottles that also pass `-applaunch`.
+3. **Play used to rebuild the (now-removed) generated launcher** whenever it was missing or stale,
+   so a click sometimes launched the game and sometimes silently regenerated a bundle first — see
+   "Play LAUNCHES; it does not build" above. Historical: the whole generator is gone.
+4. **F27, above** — a cold Steam eats the first `-applaunch` before it can be serviced, and the
+   guard cleared on process-existence rather than logon, so the button looked ready before Steam was.
+
 ## Verification habits that mattered
 
 - **Screenshots beat logs.** `screencapture -x` + Read. Logs said "0 errors" while the screen was
@@ -1021,4 +1187,115 @@ item asked for. Add to this list rather than fixing inline; work them only when 
   Raise the wine process first (`System Events` → `set frontmost`), then capture.
 - Long-running launches must use `run_in_background: true`. A foreground command's timeout
   **SIGTERMs the whole process group** and killed a Steam download at 90%.
+
+## Warm-start Steam on bottle selection (2026-08-26)
+
+**Product fix, not a bug fix**: cold Steam login on this machine measures ~30-40s (see the "cold
+launch" investigation below); a WARM launch — Steam already up and logged in — measures ~3s
+(`console_log.txt`: applaunch at 21:15:07-ish → `GameAction ... Completed` within seconds). Rather
+than make the cold path faster, Steam now starts in the background the moment the user SELECTS a
+game-launcher bottle in the sidebar, so by the time they actually press Play it's usually already
+warm.
+
+**`selectedBottleID` is not a safe trigger on its own.** It's `@Published` and reassigned
+programmatically in several places that are not user intent — after a bottle is deleted, after one
+is created, after a CrossOver import. A naive `.onChange(of: selectedBottleID)` would warm-start
+Steam right after a delete reassigns selection to whatever bottle is now first in the list. Fixed
+by routing the sidebar's `List(selection:)` binding through a new `userSelectedBottle(_:)` entry
+point (`ContentView.swift`) instead of binding directly to the property — the programmatic
+assignments elsewhere are untouched and never call it.
+
+**Design, each point answering a specific failure mode:**
+- Scoped to `isGameLauncher` bottles only (`steamArguments` contains `-applaunch`) — a plain
+  launcher bottle or a direct-exe bottle gets nothing warmed.
+- No-op if Steam is already running. Never starts a second client — see F27 below for exactly what
+  that collision looks like.
+- Keyed on the PREFIX (`PrefixSharing.key(for:)`), not the bottle — four bottles share
+  `Steam-Wine11` here, and one warm Steam serves all of them.
+- Debounced 400ms before committing to a boot, and the debounce timer is cancelled outright by the
+  next selection — arrow-keying through the sidebar must not spawn a warm-start per row.
+- `launchSteam` JOINS an in-flight warm-start for the same prefix (`await warmStartTasks[key]?.value`)
+  rather than independently sampling `isSteamRunning()`, which could catch Steam mid-launch and
+  start a second client on top of it — the exact F27 regression, by a different trigger.
+- Reaping ownership transfers correctly: a warm-start that successfully logs on marks the prefix in
+  `warmStartedPrefixKeys`, and the first real `launchSteam` call for that prefix consumes
+  (removes) it, folding it into `startedSteamForGame` so `reapSteamAfterGame` still runs once the
+  game actually exits. Kept deliberately SEPARATE from the cold-boot logon-wait condition — a
+  warm-started Steam is already logged on, so re-running `waitForSteamLogon` for it would wait out
+  the full 150s timeout for a "Logged On," line that will never come again, since Steam only logs
+  on once.
+- No auto-warm on app launch — selection-triggered only, exactly as scoped.
+
+**Verified `observed`, fully automated, no manual steps** (Jack is hands-off; three earlier "still
+slow" reports elsewhere turned out to be measuring an unchanged config because a manual step never
+actually ran, so this was not repeated). Added `--warm-start-test "<bottle name>"`, a headless flag
+that calls the SAME `userSelectedBottle` entry point the sidebar calls, then polls for completion —
+same pattern as every other headless hook in this dispatch. Run cold, from a verified-empty prefix
+(`ps` showed zero wine/steam processes beforehand): `warmed=true steamRunning=true` in 43.97s.
+Independently confirmed against `connection_log.txt` (not just the tool's own self-report) — a
+genuine new `LogOn() called` → `Logged On` sequence appears exactly inside that window, and
+`console_log.txt` shows Steam running with the warm-start's own flags (`-silent -no-cef-sandbox
+-skipinitialbootstrap`, no `-applaunch`) and no `GameAction`/`LaunchApp` anywhere — confirming the
+warm-start brings Steam up WITHOUT launching the game, as designed. Cleaned up afterward via the
+app's own `--quit-steam`; confirmed zero wine/steam processes remained. `bottles.json` untouched
+(still the same 5 bottles). Build clean, 27/27 tests throughout.
+
+**Not yet observed**: whether pressing Play *after* a completed warm-start actually launches in
+~3s rather than ~30s end-to-end through the real GUI — the automated test above proves the
+warm-start mechanism itself works, not the full selection-then-Play sequence a real user
+experiences. No UI automation was available to drive that last step.
+
+## Investigation — the cold-boot 20.0s stall (2026-08-26, findings only, nothing changed)
+
+Cold Steam login on this machine measures ~30-40s; warm (already logged on) measures ~3s. The gap
+sits in a specific, exactly-repeating stall between two `CCMInterface::SetSteamID` lines in
+`connection_log.txt`, immediately before `LogOn() called`. **Measured at exactly 20.0s across
+FIVE separate cold-boot runs** (independently reproduced during this investigation, on top of the
+runs already on record before it):
+
+```
+[…20:57:03] SetSteamID […]
+[…20:57:23] SetSteamID […]     <- 20.0s, every time
+[…20:57:23] LogOn() called; not connected yet, scheduling connection.
+[…20:57:25] Logged On
+```
+
+A delay identical to the second across independent runs is a **timeout**, not variable work — that
+much was already established before this pass. What this pass adds:
+
+**LEAD RULED OUT, with direct evidence, not just re-tested:** `cef_log.txt` shows
+`WSALookupServiceBegin failed with: 8` / error 10045 (`WSAEOPNOTSUPP`) near the same time window,
+and `GAMING-STACK.md` independently documents `WSAEOPNOTSUPP` sockets in this prefix — a plausible
+lead. Traced the REAL `steam.exe` launch (bottle's actual `Wine.environment`, not a scratch prefix)
+with `WINEDEBUG=+winsock`, output timestamped on arrival so a stall would show as a gap in when
+trace chunks arrive. Result: **no gap anywhere** — 20,563 chunks over 54s, largest inter-chunk gap
+4.78s. `WSALookupServiceBeginW` does appear, but at only 3-4s into the run (nowhere near the stall
+window) and is logged `fixme:winsock:WSALookupServiceBeginW (...) Stub!` — Wine's implementation is
+an unimplemented stub that fails INSTANTLY, not a call that blocks for 20s. The correlation in
+`cef_log.txt` was real; the causal story built on it was not — same shape of mistake as F27's first
+diagnosis above, caught this time before anything was built on it rather than after.
+
+**Escalated to `+ntdll` per the original plan** (winsock was inconclusive, not confirmatory).
+Same result: no gap — 10,300 chunks over 55s, largest gap 1.0s. **Steam is actively making syscalls
+throughout the entire 20-second window, in both traced subsystems.** This is itself a finding: the
+stall is not a blocked/silent wait on anything winsock- or ntdll-level exposes — something is
+actively running (or spinning) for 20 seconds, not waiting on a timer.
+
+**New candidate, not confirmed**: the dominant pattern in the stall window (33-53s into the traced
+run) is several hundred `RtlRbInsertNodeEx` calls (building an ordered tree) interleaved with
+dozens of `RtlGUIDFromString` calls, `RtlCreateAcl`, and `NtQuerySystemInformation` — immediately
+preceded by a `wined3d_guess_card_vendor` line. This shape (GUID-keyed entries being inserted into
+a tree, at volume) is characteristic of enumerating a registry-based device/driver list — plausibly
+DirectInput/XInput controller enumeration, though **this is inferred from the call pattern, not
+confirmed against Steam's or Wine's source** — `WINEDEBUG` traces carry no symbols or call stack,
+so the exact high-level Windows API responsible cannot be named with certainty from this alone.
+`find_reg_tz_info`/`get_timezone_info` also appear heavily (438 calls) in the same window, a second
+candidate not yet distinguished from the first.
+
+**Nothing changed based on any of this**, per the investigation's own scope. Both traces (`+winsock`
+raw dump, `+ntdll` raw dump, plus a timestamped variant of each) were captured to scratch files
+during this session; the temporary `--trace-steam-launch` diagnostic used to produce them has been
+removed from `AppModel.swift` as originally scoped — investigate-only, not a permanent hook. Steam
+was quit cleanly (`--quit-steam`) after every run; `bottles.json` and the prefix were left exactly
+as found each time.
 
