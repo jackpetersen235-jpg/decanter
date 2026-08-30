@@ -77,6 +77,7 @@ The app is its own diagnostic tool. All of these run without the GUI and print t
 | `--install-steam "<bottle>"` | Provision Steam into one named bottle |
 | `--install-engine` / `--run-setup` | Re-run first-run setup steps |
 | `--bootstrap-steam-test "<bottle>" [timeoutS]` | Launch Steam and wait for `steamui.dll` to land (no login touched); reports `bootstrapped=true\|false`, quits Steam after |
+| `--play-test "<bottle>" [ceilingS]` | Press Play on a bottle exactly as a real click would, and reports whether it actually launched — `stillOpening`/`failure`, mirroring what the UI shows. Leaves the launched process running for you to inspect/stop |
 | `--engine offline\|online`, `--reset-online` | Engine profile switching |
 | `--install-gfx` | Per-game DXMT install, with detection output |
 
