@@ -79,6 +79,7 @@ The app is its own diagnostic tool. All of these run without the GUI and print t
 | `--bootstrap-steam-test "<bottle>" [timeoutS]` | Launch Steam and wait for `steamui.dll` to land (no login touched); reports `bootstrapped=true\|false`, quits Steam after |
 | `--play-test "<bottle>" [ceilingS]` | Press Play on a bottle exactly as a real click would, and reports whether it actually launched — `stillOpening`/`failure`, mirroring what the UI shows. Leaves the launched process running for you to inspect/stop |
 | `--export-diagnostics` | Builds the same zip "Export Diagnostics…" does (engine/bottle health, system info, console log tail, recent crash reports — home path redacted) and prints where it landed, without opening Finder |
+| `--selftest` | The regression net: full first run (setup → Steam bootstrap → verify → idempotent re-run), end to end, against a throwaway scratch install. Run this before every release build — "does first run still work" in one command instead of a manual DECANTER_HOME choreography |
 | `--engine offline\|online`, `--reset-online` | Engine profile switching |
 | `--install-gfx` | Per-game DXMT install, with detection output |
 

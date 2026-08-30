@@ -323,6 +323,37 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+        // Phase 5 of the pre-release debug plan: the regression net. "Does first run still work"
+        // used to mean a manual DECANTER_HOME choreography typed by hand each time — see the
+        // real one this was extracted from, in SelfTest.swift's doc comment. Run this before
+        // every release build.
+        //
+        // ⚠️ Needs NO Steam process running ANYWHERE on the Mac when you run it — `isSteamRunning`
+        // (used by `launchSteam`, which `--bootstrap-steam-test` goes through) does a global
+        // `pgrep -f steam.exe`, not scoped to any one prefix. Confirmed live during Phase 5: a
+        // real Steam session left running from earlier testing made the bootstrap step for a
+        // completely unrelated SCRATCH bottle silently short-circuit — `launchSteam` believed
+        // Steam was "already running" (true, just for the wrong bottle) and never launched the
+        // scratch one at all, so its own poll loop timed out waiting for a bootstrap that never
+        // started. Same class of gap as `isAnyGameRunning` (CLAUDE.md), already investigated and
+        // accepted as a deliberate limitation there — not something this flag works around.
+        //   Decanter.app/Contents/MacOS/Decanter --selftest
+        if CommandLine.arguments.contains("--selftest") {
+            Task {
+                let (ok, results, scratchDir) = await SelfTest.run()
+                var out = "\n=== Decanter self-test ===\n\n"
+                for step in results {
+                    out += "  \(step.ok ? "PASS" : "FAIL") \(step.name)"
+                    out += step.detail.isEmpty ? "\n" : "  —  \(step.detail)\n"
+                }
+                out += ok
+                    ? "\nAll steps passed.\n"
+                    : "\n\(results.filter { !$0.ok }.count) step(s) failed. "
+                      + "Scratch install left for inspection at \(scratchDir.path)\n"
+                FileHandle.standardError.write(out.data(using: .utf8)!)
+                exit(ok ? 0 : 1)
+            }
+        }
         // Full health check: is the RIGHT engine installed, and is everything loaded?
         //
         // Deeper than `doctor.sh` can go from the shell, because it uses the app's own probes —
