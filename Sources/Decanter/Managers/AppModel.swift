@@ -1478,6 +1478,24 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// If `game` sits at the standard Unreal Engine `<Module>/Binaries/Win64` (or `Win32`) path,
+    /// returns the top-level `<Module>.exe` redirector Steam actually launches — the target a
+    /// per-exe graphics fix (DXMT DLLs, registry overrides) needs to use INSTEAD of the nested
+    /// binary `largestExecutable` correctly identifies as "the game." Returns nil for any game
+    /// that doesn't match this exact, extremely common packaging layout.
+    nonisolated static func unrealRedirectorTarget(for game: (folder: URL, exe: String)) -> (folder: URL, exe: String)? {
+        let binariesDir = game.folder
+        let platform = binariesDir.lastPathComponent.lowercased()
+        guard platform == "win64" || platform == "win32",
+              binariesDir.deletingLastPathComponent().lastPathComponent.lowercased() == "binaries"
+        else { return nil }
+        let moduleDir = binariesDir.deletingLastPathComponent().deletingLastPathComponent()
+        let redirector = moduleDir.deletingLastPathComponent()
+            .appendingPathComponent("\(moduleDir.lastPathComponent).exe")
+        guard FileManager.default.fileExists(atPath: redirector.path) else { return nil }
+        return (folder: redirector.deletingLastPathComponent(), exe: redirector.lastPathComponent)
+    }
+
     /// Copy the bundled DXMT DLLs into each detected game and register the per-game DLL overrides.
     ///
     /// PER-GAME, NEVER PREFIX-WIDE. A prefix-wide d3d11/dxgi override routes Steam's own CEF UI
@@ -1502,12 +1520,50 @@ final class AppModel: ObservableObject {
         // A bottle that resolves a game touches ONLY that game. A launcher bottle (plain Steam,
         // resolves nothing) keeps the prefix-wide behaviour, which is what patches a whole fresh
         // Steam library in one go.
-        let scoped: [(folder: URL, exe: String)]
+        var scoped: [(folder: URL, exe: String)]
         if let mine = resolvedGame(for: bottle) {
-            let name = mine.executable.lastPathComponent.lowercased()
-            scoped = detectedSteamGames(in: bottle).filter { $0.exe.lowercased() == name }
+            let exeName = mine.executable.lastPathComponent
+            scoped = detectedSteamGames(in: bottle).filter { $0.exe.lowercased() == exeName.lowercased() }
+            // ⚠️ FOUND during a settings-parity audit (2026-08-29), and more fundamental than it
+            // looks: `detectedSteamGames` only scans ONE level deep
+            // (`steamapps/common/<Folder>/*.exe`), while `resolvedGame` (GameScanner's
+            // `largestExecutable`) searches several levels down — bounded, but real. For a game
+            // whose actual binary sits nested (every Unreal Engine title:
+            // `<Module>/Binaries/Win64/<Module>-Win64-Shipping.exe`), the two functions report
+            // DIFFERENT exe names for the SAME game, and the filter above silently returns EMPTY.
+            // Confirmed live on Half Sword: this made `installGraphicsDriver` a complete no-op for
+            // that bottle — not "targeting the wrong exe", literally doing nothing, ever. The
+            // working DXMT install there existed purely from a one-time hand-applied fix that
+            // Decanter's own code had no path to ever re-touch, verify, or reproduce.
+            //
+            // Falls back to `resolvedGame`'s own folder+exe directly when the filter finds
+            // nothing, instead of silently scoping to zero games.
+            if scoped.isEmpty {
+                scoped = [(folder: mine.executable.deletingLastPathComponent(), exe: exeName)]
+            }
         } else {
             scoped = detectedSteamGames(in: bottle)
+        }
+        // ⚠️ FOUND during a settings-parity audit (2026-08-29): standard Unreal Engine packaging
+        // ALWAYS creates both a tiny top-level `<Name>.exe` redirector — what Steam actually
+        // launches — and the real, huge engine binary nested at
+        // `<Name>/Binaries/Win64/<Name>-Win64-Shipping.exe`. GameScanner's `largestExecutable`
+        // correctly finds the nested binary for GAME IDENTIFICATION (it's the right answer to
+        // "what game is this"), but DXMT's intercept DLLs have to sit beside whichever PROCESS
+        // Direct3D calls actually happen in — the top-level redirector, not the one found by
+        // size. Half Sword's DXMT install was WORKING only because someone had, by hand, copied
+        // the DLLs and set the registry override on `HalfSwordUE5.exe` (confirmed live: the DLLs
+        // existed ONLY there, not beside the resolved `HalfSwordUE5-Win64-Shipping.exe`). A fresh
+        // Half Sword install, or any other Unreal Engine game added later, would have silently
+        // installed to the wrong location and never taken effect. General on purpose, not
+        // hardcoded to Half Sword — same fix for any game following this extremely common layout.
+        // `for game in scoped` snapshots the array at loop start (Swift arrays are value types),
+        // so appending to `scoped` inside the loop is safe — it does not extend this iteration.
+        for game in scoped {
+            if let wrapper = Self.unrealRedirectorTarget(for: game),
+               !scoped.contains(where: { $0.exe.lowercased() == wrapper.exe.lowercased() }) {
+                scoped.append(wrapper)
+            }
         }
 
         // HONOUR THE BACKEND THE USER PICKED.
