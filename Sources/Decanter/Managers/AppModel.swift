@@ -314,71 +314,7 @@ final class AppModel: ObservableObject {
         //   Decanter.app/Contents/MacOS/Decanter --verify
         if CommandLine.arguments.contains("--verify") {
           Task {
-            var out = "\n=== Decanter verification ===\n\n"
-            var problems: [String] = []
-            func line(_ ok: Bool, _ label: String, _ detail: String = "") {
-                out += "  \(ok ? "OK  " : "FAIL") \(label)\(detail.isEmpty ? "" : "  —  \(detail)")\n"
-                if !ok { problems.append(label) }
-            }
-
-            out += "SYSTEM\n"
-            line(isRosettaInstalled, "Rosetta 2 installed",
-                 isRosettaInstalled ? "" : "run: softwareupdate --install-rosetta")
-
-            out += "\nENGINE\n"
-            if let engine = defaultInstallation {
-                // Ask the engine directly rather than reading `engine.version`. That field is
-                // filled in ASYNCHRONOUSLY after discovery, so a synchronous check sees nil and
-                // reports a perfectly good engine as incomplete — which this hook did on its first
-                // run. A health check that invents problems is worse than no health check.
-                let reportedVersion = await Wine.version(of: engine)
-                line(true, "Engine found", "\(engine.name) \(reportedVersion ?? "version unknown")")
-                line(reportedVersion != nil, "Engine version readable",
-                     reportedVersion ?? "wine --version returned nothing; the engine may be incomplete")
-                line(engine.isSteamCapable, "New enough for Steam",
-                     engine.isSteamCapable ? "" : "too old — Steam will fail to start")
-                // The check that matters most and is invisible from outside.
-                line(engine.supportsFastSync, "Fast sync (msync) present",
-                     engine.supportsFastSync
-                        ? "this is the tuned build"
-                        : "WRONG BUILD — plays with frame spikes; reinstall via Setup Assistant")
-                line(FileManager.default.isExecutableFile(atPath: engine.loader.path),
-                     "wine binary is executable", engine.loader.path)
-            } else {
-                line(false, "Engine found", "none — run the Setup Assistant")
-            }
-            line(Paths.bundledDXMT != nil, "DXMT graphics payload bundled",
-                 Paths.bundledDXMT == nil ? "games will fall back to the slow renderer" : "")
-
-            out += "\nBOTTLES (\(bottles.count))\n"
-            if bottles.isEmpty { line(false, "At least one bottle", "none yet — press the setup button") }
-            for bottle in bottles {
-                out += "\n  [\(bottle.name)]\n"
-                // F20 (bug-sweep): `isInitialized` is a STORED property, set once at creation and
-                // never invalidated if the prefix later disappears (moved support dir, a partial
-                // restore, a hand-deleted prefix). Every other line in --verify probes live state;
-                // this one trusted persisted metadata inside the exact tool whose job is checking
-                // reality — and this is the tool this project's own docs point people to when
-                // already confused, so a wrong answer here costs more than its size. Print the live
-                // check FIRST so the root cause shows before any downstream Steam checks that would
-                // otherwise misattribute the failure.
-                let prefixExists = FileManager.default.fileExists(atPath: bottle.url.path)
-                line(prefixExists, "  prefix present", prefixExists ? "" : bottle.url.path)
-                line(bottle.isInitialized, "  prefix initialised")
-                line(bottle.isSteamInstalled, "  Steam installed")
-                line(bottle.isSteamBootstrapped, "  Steam client downloaded",
-                     bottle.isSteamBootstrapped ? "" : "launch Steam once and WAIT — it downloads itself")
-                if let game = resolvedGame(for: bottle) {
-                    line(FileManager.default.fileExists(atPath: game.executable.path),
-                         "  game executable present", game.executable.lastPathComponent)
-                } else {
-                    out += "       --  no game (this is a launcher bottle)\n"
-                }
-            }
-
-            out += problems.isEmpty
-                ? "\nEverything checks out.\n"
-                : "\n\(problems.count) problem(s): \(problems.map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: ", "))\n"
+            let (out, problems) = await verifyReport()
             FileHandle.standardError.write(out.data(using: .utf8)!)
             exit(problems.isEmpty ? 0 : 1)
           }
@@ -1188,6 +1124,86 @@ final class AppModel: ObservableObject {
         // waits for Steam, honours direct-exe bottles and installs the graphics driver first —
         // everything the generated script was doing.
         return bottle.id
+    }
+
+    /// Full health check: is the RIGHT engine installed, and is everything loaded? Deeper than
+    /// `doctor.sh` can go from the shell, because it uses the app's own probes — notably
+    /// `supportsFastSync`, which reads the ntdll for `WINEMSYNC`/`WINEESYNC` rather than trusting
+    /// a version number. A wine 10 without msync looks identical from outside and is the
+    /// difference between smooth play and frame spikes.
+    ///
+    /// Extracted from the inline `--verify` dispatch during Phase 4 of the pre-release debug plan
+    /// so "Export Diagnostics" can embed the exact same report a support session would ask for,
+    /// rather than reimplementing it — same reasoning as `reclaimReport()` existing as its own
+    /// function below. Returns the printable text and the list of failing labels (empty means
+    /// "everything checks out"); the caller decides what to do with either.
+    func verifyReport() async -> (text: String, problems: [String]) {
+        var out = "\n=== Decanter verification ===\n\n"
+        var problems: [String] = []
+        func line(_ ok: Bool, _ label: String, _ detail: String = "") {
+            out += "  \(ok ? "OK  " : "FAIL") \(label)\(detail.isEmpty ? "" : "  —  \(detail)")\n"
+            if !ok { problems.append(label) }
+        }
+
+        out += "SYSTEM\n"
+        line(isRosettaInstalled, "Rosetta 2 installed",
+             isRosettaInstalled ? "" : "run: softwareupdate --install-rosetta")
+
+        out += "\nENGINE\n"
+        if let engine = defaultInstallation {
+            // Ask the engine directly rather than reading `engine.version`. That field is
+            // filled in ASYNCHRONOUSLY after discovery, so a synchronous check sees nil and
+            // reports a perfectly good engine as incomplete — which this hook did on its first
+            // run. A health check that invents problems is worse than no health check.
+            let reportedVersion = await Wine.version(of: engine)
+            line(true, "Engine found", "\(engine.name) \(reportedVersion ?? "version unknown")")
+            line(reportedVersion != nil, "Engine version readable",
+                 reportedVersion ?? "wine --version returned nothing; the engine may be incomplete")
+            line(engine.isSteamCapable, "New enough for Steam",
+                 engine.isSteamCapable ? "" : "too old — Steam will fail to start")
+            // The check that matters most and is invisible from outside.
+            line(engine.supportsFastSync, "Fast sync (msync) present",
+                 engine.supportsFastSync
+                    ? "this is the tuned build"
+                    : "WRONG BUILD — plays with frame spikes; reinstall via Setup Assistant")
+            line(FileManager.default.isExecutableFile(atPath: engine.loader.path),
+                 "wine binary is executable", engine.loader.path)
+        } else {
+            line(false, "Engine found", "none — run the Setup Assistant")
+        }
+        line(Paths.bundledDXMT != nil, "DXMT graphics payload bundled",
+             Paths.bundledDXMT == nil ? "games will fall back to the slow renderer" : "")
+
+        out += "\nBOTTLES (\(bottles.count))\n"
+        if bottles.isEmpty { line(false, "At least one bottle", "none yet — press the setup button") }
+        for bottle in bottles {
+            out += "\n  [\(bottle.name)]\n"
+            // F20 (bug-sweep): `isInitialized` is a STORED property, set once at creation and
+            // never invalidated if the prefix later disappears (moved support dir, a partial
+            // restore, a hand-deleted prefix). Every other line in --verify probes live state;
+            // this one trusted persisted metadata inside the exact tool whose job is checking
+            // reality — and this is the tool this project's own docs point people to when
+            // already confused, so a wrong answer here costs more than its size. Print the live
+            // check FIRST so the root cause shows before any downstream Steam checks that would
+            // otherwise misattribute the failure.
+            let prefixExists = FileManager.default.fileExists(atPath: bottle.url.path)
+            line(prefixExists, "  prefix present", prefixExists ? "" : bottle.url.path)
+            line(bottle.isInitialized, "  prefix initialised")
+            line(bottle.isSteamInstalled, "  Steam installed")
+            line(bottle.isSteamBootstrapped, "  Steam client downloaded",
+                 bottle.isSteamBootstrapped ? "" : "launch Steam once and WAIT — it downloads itself")
+            if let game = resolvedGame(for: bottle) {
+                line(FileManager.default.fileExists(atPath: game.executable.path),
+                     "  game executable present", game.executable.lastPathComponent)
+            } else {
+                out += "       --  no game (this is a launcher bottle)\n"
+            }
+        }
+
+        out += problems.isEmpty
+            ? "\nEverything checks out.\n"
+            : "\n\(problems.count) problem(s): \(problems.map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: ", "))\n"
+        return (out, problems)
     }
 
     /// Make the prefix's registry match `software2D` before launching.
