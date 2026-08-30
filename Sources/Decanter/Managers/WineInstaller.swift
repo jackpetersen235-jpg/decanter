@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Downloads and installs the Wine engine Decanter needs, with no user knowledge required.
 ///
@@ -57,6 +58,32 @@ final class WineInstaller: ObservableObject {
     /// unsupported ABI mix — if graphics misbehave, this is the first thing to suspect.
     static let msyncEngineURL = URL(string:
         "https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS11Wine10.0_3.tar.xz")!
+
+    /// SHA-256 pins for both payloads above. COMMERCIAL-READINESS.md item 1: these are two
+    /// GitHub accounts we don't control, and "GitHub release assets are mutable by the publisher
+    /// — the bytes at that URL are not guaranteed to be the bytes you tested." A pin can't stop
+    /// an asset being silently replaced, but it turns that from a subtly broken engine nobody
+    /// notices until a game misbehaves into a loud, immediate, named failure. Computed 2026-08-29
+    /// by downloading both files fresh and hashing them directly (`shasum -a 256`) — not copied
+    /// from anywhere else. If a legitimate upstream update ever changes these files on purpose,
+    /// update both the URL/version comment above AND this hash together, deliberately.
+    private static let expectedLibrariesSHA256 =
+        "01f3a1b43b98065fe20c529c1023b61dd79a6d2ad93bba6040865f646481ccf3"
+    private static let expectedMsyncEngineSHA256 =
+        "088815f9e551cd236d4c5fc5178be5f65ae8927ec005f47c378ab617a84d9f0c"
+
+    /// Verifies a downloaded file's SHA-256 against a pinned value. Reads via `.mappedIfSafe` so a
+    /// ~300–500 MB file doesn't have to be copied fully into RAM just to hash it once.
+    private func verifyChecksum(of fileURL: URL, expected: String, label: String) throws {
+        let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+        let actual = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard actual == expected else {
+            throw InstallError.step(
+                "\(label) didn't match its expected checksum — the download may be corrupted, or "
+                + "the file at the source may have changed. Refusing to install it.\n"
+                + "  expected: \(expected)\n  got:      \(actual)")
+        }
+    }
 
     /// Decanter-owned install location (see Paths.wineEngine*), so we never depend on
     /// Whisky/Mythic/CrossOver being installed. Non-isolated: Wine.discover reads these.
@@ -142,6 +169,10 @@ final class WineInstaller: ObservableObject {
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             throw InstallError.step("Download failed (HTTP \(http.statusCode)).")
         }
+        // Verify BEFORE moving into place, on the temp file — a checksum mismatch must never
+        // leave anything at `destination` for a caller to mistake as a valid download.
+        try verifyChecksum(of: tempURL, expected: Self.expectedLibrariesSHA256,
+                          label: "The Windows engine download")
         try FileManager.default.moveItem(at: tempURL, to: destination)
         return destination
     }
@@ -208,6 +239,9 @@ final class WineInstaller: ObservableObject {
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             throw InstallError.step("msync engine download failed (HTTP \(http.statusCode)).")
         }
+        // Verify BEFORE unpacking — a mismatch here means don't graft it onto a working engine.
+        try verifyChecksum(of: tempURL, expected: Self.expectedMsyncEngineSHA256,
+                          label: "The msync engine overlay download")
         phase = .extracting
         let work = Paths.downloads.appendingPathComponent("msync-engine", isDirectory: true)
         try? fm.removeItem(at: work)
