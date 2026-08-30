@@ -24,16 +24,62 @@ private final class OutputCollector {
     var string: String { lock.lock(); defer { lock.unlock() }; return String(decoding: buffer, as: UTF8.self) }
 }
 
+/// Thread-safe "resume this continuation exactly once" gate, same shape as `OutputCollector`.
+///
+/// The deadline task and the natural `terminationHandler` in `Shell.run` can BOTH try to resume
+/// the same checked continuation — killing a process still ends in a real exit, which fires
+/// `terminationHandler` after the deadline task has already resumed with a timeout error.
+/// Resuming a checked continuation twice is a crash, not a warning. A plain captured `var` here
+/// would also trip Swift 6's strict-concurrency check, since it'd be mutated from two concurrent
+/// closures — wrapping it in a class with its own lock, like `OutputCollector` above, sidesteps
+/// both problems at once.
+private final class ResumeGuard {
+    private let lock = NSLock()
+    private var done = false
+    /// True the first time this is called; false on every call after.
+    func claim() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if done { return false }
+        done = true
+        return true
+    }
+}
+
+/// Thrown by `Shell.run` when a process outlives its deadline.
+struct ShellTimeoutError: LocalizedError {
+    let command: String
+    let seconds: TimeInterval
+    var errorDescription: String? {
+        "\(command) didn't exit within \(Int(seconds))s and was killed."
+    }
+}
+
 /// Thin wrapper around `Process` for launching Wine and related tools.
 enum Shell {
 
+    /// Default grace period between SIGTERM and SIGKILL once a command outlives `timeout`.
+    static let defaultKillGrace: TimeInterval = 3
+
     /// Run a command to completion, capturing all output. Suitable for short commands.
+    ///
+    /// F16 (bug-sweep): this used to have no timeout at all — its only resume path was
+    /// `process.terminationHandler`, so a process that never exits hung the awaiting `Task`
+    /// forever. Wedged Wine processes are a documented, recurring condition in this project (see
+    /// F7), not a hypothetical: with 23 call sites across the app, one wedged `wine reg query`
+    /// could freeze whatever UI action triggered it, indefinitely, with no way out but a force-quit.
+    /// `timeout` defaults to something generous for a quick wine subprocess; call sites that
+    /// legitimately run longer (tar extraction, the Steam installer) pass an explicit override.
+    /// `killGrace` is injectable purely so tests can exercise the SIGKILL path and the near-deadline
+    /// race without actually waiting out the production grace period — production call sites should
+    /// never need to pass it.
     @discardableResult
     static func run(
         _ executable: URL,
         arguments: [String],
         environment: [String: String]? = nil,
-        currentDirectory: URL? = nil
+        currentDirectory: URL? = nil,
+        timeout: TimeInterval = 30,
+        killGrace: TimeInterval = defaultKillGrace
     ) async throws -> CommandResult {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
@@ -52,6 +98,8 @@ enum Shell {
             outPipe.fileHandleForReading.readabilityHandler = { out.append($0.availableData) }
             errPipe.fileHandleForReading.readabilityHandler = { err.append($0.availableData) }
 
+            let resumeGuard = ResumeGuard()
+
             process.terminationHandler = { proc in
                 outPipe.fileHandleForReading.readabilityHandler = nil
                 errPipe.fileHandleForReading.readabilityHandler = nil
@@ -60,6 +108,7 @@ enum Shell {
                 // exited), so read whatever remains — this can't block.
                 if let rest = try? outPipe.fileHandleForReading.readToEnd() { out.append(rest) }
                 if let rest = try? errPipe.fileHandleForReading.readToEnd() { err.append(rest) }
+                guard resumeGuard.claim() else { return }
                 continuation.resume(returning: CommandResult(
                     exitCode: proc.terminationStatus,
                     stdout: out.string,
@@ -70,7 +119,27 @@ enum Shell {
             do {
                 try process.run()
             } catch {
+                guard resumeGuard.claim() else { return }
                 continuation.resume(throwing: error)
+                return
+            }
+
+            let pid = process.processIdentifier
+            let commandName = executable.lastPathComponent
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                guard process.isRunning else { return }
+                // Claim the continuation BEFORE sending any signal, not after killing. A process
+                // that dies promptly from SIGTERM (plain `sleep`, unlike something that traps it)
+                // can otherwise let the natural `terminationHandler` race ahead of this task's own
+                // grace-period sleep and resolve the continuation as a "successful" signal-killed
+                // CommandResult instead of a clear timeout error — found by the near-deadline test
+                // in ShellTests.swift, not assumed.
+                guard resumeGuard.claim() else { return }
+                process.terminate()                              // SIGTERM — ask nicely first
+                try? await Task.sleep(nanoseconds: UInt64(killGrace * 1_000_000_000))
+                if process.isRunning { kill(pid, SIGKILL) }       // it didn't listen
+                continuation.resume(throwing: ShellTimeoutError(command: commandName, seconds: timeout))
             }
         }
     }

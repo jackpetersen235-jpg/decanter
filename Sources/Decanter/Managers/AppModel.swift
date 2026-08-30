@@ -1490,9 +1490,11 @@ final class AppModel: ObservableObject {
             let installer = try await Steam.downloadInstaller { _ in }
             console?.append("Installing Steam into the bottle…")
             let env = Wine.environment(for: bottle, using: installation)
+            // Explicit longer timeout: a real installer run, not a quick reg query. See Shell.run's
+            // F16 doc comment.
             let result = try await Shell.run(installation.loader,
                                              arguments: Steam.installArguments(installerPath: installer),
-                                             environment: env)
+                                             environment: env, timeout: 180)
             if let console, !result.stderr.isEmpty { console.append(result.stderr) }
             let installed = bottle.isSteamInstalled
             console?.append(installed ? "Steam installed." : "Installer finished.")

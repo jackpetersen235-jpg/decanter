@@ -140,8 +140,11 @@ final class WineInstaller: ObservableObject {
         try? FileManager.default.removeItem(at: Self.librariesRoot)
         try FileManager.default.createDirectory(at: Self.installRoot, withIntermediateDirectories: true)
 
+        // Explicit longer timeout: this is unpacking ~480 MB, which can genuinely exceed the
+        // 30s default on a slow disk. See Shell.run's F16 doc comment.
         let result = try await Shell.run(URL(fileURLWithPath: "/usr/bin/tar"),
-                                         arguments: ["-xzf", tarball.path, "-C", Self.installRoot.path])
+                                         arguments: ["-xzf", tarball.path, "-C", Self.installRoot.path],
+                                         timeout: 180)
         guard result.succeeded else {
             throw InstallError.step("Could not unpack the engine.\n\(result.stderr)")
         }
@@ -194,7 +197,8 @@ final class WineInstaller: ObservableObject {
         defer { try? fm.removeItem(at: work); try? fm.removeItem(at: tempURL) }
 
         let untar = try await Shell.run(URL(fileURLWithPath: "/usr/bin/tar"),
-                                        arguments: ["-xJf", tempURL.path, "-C", work.path])
+                                        arguments: ["-xJf", tempURL.path, "-C", work.path],
+                                        timeout: 180)
         guard untar.succeeded else { throw InstallError.step("Could not unpack the msync engine.") }
 
         let bundle = work.appendingPathComponent("wswine.bundle", isDirectory: true)
