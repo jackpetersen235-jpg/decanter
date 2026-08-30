@@ -1424,6 +1424,58 @@ final class AppModel: ObservableObject {
         } else {
             console.append("Could not configure borderless fullscreen for \(exe).")
         }
+
+        if exe.lowercased() == "sekiro.exe" {
+            patchSekiroGraphicsConfig(bottle: bottle, width: Int(size.width), height: Int(size.height),
+                                      console: console)
+        }
+    }
+
+    /// Sekiro keeps its OWN fullscreen/resolution preference in a config file, separate from the
+    /// Wine-level virtual desktop `applyBorderlessFullscreen` sets up above — and its
+    /// "auto-detect best rendering settings" can silently reset the window mode/resolution back
+    /// to whatever IT thinks is best, undoing the Wine-level fix on the game's own next launch.
+    /// Same settings-parity audit finding: only ever fixed by hand, via a one-time external
+    /// script edit to this exact file — nothing in Decanter's own code knew this file existed.
+    ///
+    /// Sekiro-specific ON PURPOSE: this is that one game's own config path and XML schema, not a
+    /// generic Wine mechanism the way the registry keys above are — hence the exe-name check at
+    /// the call site rather than a general per-bottle setting.
+    ///
+    /// The file is UTF-16LE with no byte-order mark (verified directly on the real file before
+    /// writing any code against it — a round-trip decode/re-encode came back byte-identical).
+    /// Silently does nothing if the file doesn't exist yet — it's written by Sekiro's OWN first
+    /// run, so a bottle that has never launched the game has nothing to patch.
+    private func patchSekiroGraphicsConfig(bottle: Bottle, width: Int, height: Int, console: TaskConsole) {
+        let path = bottle.url.appendingPathComponent(
+            "drive_c/users/\(NSUserName())/AppData/Roaming/Sekiro/GraphicsConfig.xml")
+        guard let data = try? Data(contentsOf: path),
+              var text = String(data: data, encoding: .utf16LittleEndian)
+        else { return }
+
+        let wanted: [String: String] = [
+            "ScreenMode": "FULLSCREEN",
+            "Auto-detectBestRenderingSettings": "OFF",
+            "Resolution-FullScreenWidth": "\(width)",
+            "Resolution-FullScreenHeight": "\(height)",
+        ]
+        var changed = false
+        for (tag, value) in wanted {
+            guard let range = text.range(of: "<\(tag)>[^<]*</\(tag)>", options: .regularExpression)
+            else { continue }   // tag not present in this version of the file — leave it alone
+            let replacement = "<\(tag)>\(value)</\(tag)>"
+            if text[range] != replacement {
+                text.replaceSubrange(range, with: replacement)
+                changed = true
+            }
+        }
+        guard changed, let newData = text.data(using: .utf16LittleEndian) else { return }
+        do {
+            try newData.write(to: path)
+            console.append("Sekiro's own graphics config updated to match (\(width)×\(height), fullscreen).")
+        } catch {
+            console.append("Could not update Sekiro's graphics config: \(error.localizedDescription)")
+        }
     }
 
     /// Copy the bundled DXMT DLLs into each detected game and register the per-game DLL overrides.
