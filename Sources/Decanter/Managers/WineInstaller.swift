@@ -98,7 +98,17 @@ final class WineInstaller: ObservableObject {
             // user has to be TOLD, or "setup complete" is a lie about which engine they now have.
             do {
                 try await installMsyncEngine()
-                warning = nil
+                // F17 (bug-sweep): don't just trust that nothing threw. Assert the actual result
+                // with the same probe bottles are checked with (`probeFastSync` scans the freshly
+                // installed ntdll for WINEMSYNC/WINEESYNC) — the graft is now a checked fact, not
+                // an inference from "installMsyncEngine didn't throw."
+                if WineInstallation.probeFastSync(binDirectory: Self.binDirectory) {
+                    warning = nil
+                } else {
+                    warning = "The engine installed, but fast-sync (msync) isn't present in the "
+                        + "result. Games will run, but demanding ones may stutter. Re-run Setup "
+                        + "Assistant to retry."
+                }
             } catch {
                 warning = "The engine installed, but the fast-sync (msync) update didn't: "
                     + error.localizedDescription
@@ -178,8 +188,16 @@ final class WineInstaller: ObservableObject {
         let winemetalSO = unixDir.appendingPathComponent("winemetal.so")
         let dxmtDLL = Self.librariesRoot.appendingPathComponent("DXMT/x64/winemetal.dll")
 
-        // If the base bundle isn't shaped as expected, leave the working wine 11 engine alone.
-        guard fm.fileExists(atPath: winemetalSO.path) else { return }
+        // F17 (bug-sweep): this used to be a bare `return`, not a `throw`. The caller's `catch`
+        // block is what turns a failure into the user-visible "fast-sync didn't install" warning
+        // (review-finding-5's fix); a bare return skipped that entirely, so `warning = nil` ran
+        // regardless and setup reported success while the user silently got the frame-spike
+        // engine the overlay exists to replace. Same "non-fatal must still mean reported" rule,
+        // just bypassed by a different exit path than the one already covered.
+        guard fm.fileExists(atPath: winemetalSO.path) else {
+            throw InstallError.step("The base engine bundle is missing winemetal.so, so fast-sync "
+                + "could not be installed.")
+        }
 
         phase = .downloading(0)
         let progress = DownloadProgress { [weak self] fraction in

@@ -77,6 +77,15 @@ struct ContentView: View {
         } message: {
             Text(model.lastLaunchFailure ?? "")
         }
+        // F13 (bug-sweep): a failed save was NSLog-only, contradicting saveBottles's own doc
+        // comment. Same binding idiom as the three alerts above.
+        .alert("Couldn't save",
+              isPresented: Binding(get: { model.lastSaveFailure != nil },
+                                   set: { if !$0 { model.lastSaveFailure = nil } })) {
+            Button("OK") { model.lastSaveFailure = nil }
+        } message: {
+            Text(model.lastSaveFailure ?? "")
+        }
     }
 
     /// Two columns laid out by hand rather than by `NavigationSplitView`.

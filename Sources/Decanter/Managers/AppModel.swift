@@ -57,13 +57,26 @@ final class AppModel: ObservableObject {
         }
         // Headless engine install (used for testing the first-run path, and handy for support):
         //   Decanter.app/Contents/MacOS/Decanter --install-engine
+        //
+        // F15 (bug-sweep): this and --run-setup below used to never print, never exit, never set
+        // a status — the only two headless flags in this whole dispatch that didn't. A failure
+        // (no network, bad download) looked identical to success: nothing, forever.
         if CommandLine.arguments.contains("--install-engine") {
-            Task { await installEngine() }
+            Task {
+                let ok = await installEngine()
+                FileHandle.standardError.write("engine install: \(ok ? "ready" : "FAILED")\n".data(using: .utf8)!)
+                exit(ok ? 0 : 1)
+            }
         }
-        // Headless full guided setup — the same steps the wizard runs, for end-to-end testing:
+        // Headless full guided setup, for end-to-end testing without the GUI:
         //   Decanter.app/Contents/MacOS/Decanter --run-setup
         if CommandLine.arguments.contains("--run-setup") {
-            Task { await runGuidedSetup() }
+            Task {
+                let failure = await runGuidedSetup()
+                FileHandle.standardError.write(
+                    "setup: \(failure.map { "FAILED — \($0)" } ?? "complete")\n".data(using: .utf8)!)
+                exit(failure == nil ? 0 : 1)
+            }
         }
         // Headless engine-toggle check, so the offline/online switch can be verified without the
         // GUI:  Decanter.app/Contents/MacOS/Decanter --engine offline|online
@@ -357,30 +370,53 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// The complete first-run automation, factored out of the wizard view so it (a) survives any
-    /// view lifecycle and (b) is testable headlessly via `--run-setup`. Steps self-skip if done.
-    func runGuidedSetup() async {
+    /// The complete first-run automation, exercised headlessly via `--run-setup` for end-to-end
+    /// testing without the GUI. Steps self-skip if already done.
+    ///
+    /// NOT shared code with `SetupWizard.runAll()`, despite this function's steps mirroring the
+    /// wizard's — F15 (bug-sweep). The doc comment used to say this was "factored out of the
+    /// wizard view"; it never was. `SetupWizard` reimplements the same four steps independently,
+    /// with its own per-step UI (progress bars, checkmarks, tailored error text a first-time user
+    /// can act on), and the two had already drifted: the wizard gained per-step error reporting in
+    /// review-findings-4-6, this function didn't, until this same fix. Correcting the comment
+    /// rather than merging the two — this function exists purely for headless testing, and forcing
+    /// the wizard through it would risk its tuned first-run UX for no real gain.
+    ///
+    /// Returns nil on success, or a reason on failure — `--run-setup`'s dispatch used to discard
+    /// this entirely (four silent exits, never printed, never set an exit code, unlike every other
+    /// headless flag).
+    @discardableResult
+    func runGuidedSetup() async -> String? {
         isSettingUp = true
         defer { isSettingUp = false }
 
-        guard await ensureRosetta() else { return }              // 1. Rosetta
+        guard await ensureRosetta() else {                       // 1. Rosetta
+            return "Rosetta 2 installation failed or was declined."
+        }
 
         if !hasUsableEngine {                                    // 2. Engine
-            await installEngine()
+            guard await installEngine() else { return "The Windows engine failed to install." }
             adoptDecanterEngine()
         }
-        guard hasUsableEngine else { return }
+        guard hasUsableEngine else {
+            return "No usable Windows engine is available after installation."
+        }
 
         // A bottle built on an engine that can't run Steam does not count as done — see
         // `hasUsableEngine`. Such a user needs a NEW bottle, not a skipped step.
         if !bottles.contains(where: { installation(for: $0)?.isSteamCapable == true }) {  // 3. Bottle
-            _ = await createBottleForSetup(name: "Games")
+            guard await createBottleForSetup(name: "Games") != nil else {
+                return "Couldn't create a game bottle."
+            }
         }
 
         if let bottle = bottles.first(where: { installation(for: $0)?.isSteamCapable == true }),
            !bottle.isSteamInstalled {                            // 4. Steam
-            _ = await performSteamInstall(in: bottle, console: nil)
+            guard await performSteamInstall(in: bottle, console: nil) else {
+                return "Steam installation failed."
+            }
         }
+        return nil
     }
 
     // MARK: Derived
@@ -1565,8 +1601,13 @@ final class AppModel: ObservableObject {
     }
 
     /// Download + install Decanter's own Wine engine, streaming progress into a console.
-    /// Used by the setup wizard and by `--install-engine`.
-    func installEngine() async {
+    /// Used by `runGuidedSetup` and by `--install-engine`.
+    ///
+    /// Returns whether it actually succeeded — F15 (bug-sweep). This always knew the answer
+    /// (`installer.phase` below), it just never told its caller; `--install-engine` had no way to
+    /// report failure other than the console, which nobody headless is watching.
+    @discardableResult
+    func installEngine() async -> Bool {
         let console = openConsole(title: "Installing the Windows engine")
         console.append("Downloading the Windows engine (~317 MB)…")
         console.append("Then upgrading it to the msync build (faster; removes frame spikes)…")
@@ -1589,11 +1630,14 @@ final class AppModel: ObservableObject {
             console.append("Location: \(Paths.wineEngineBin.path)")
             rescanInstallations()
             console.finish(0)
+            return true
         case .failed(let message):
             console.append("Failed: \(message)")
             console.finish(1)
+            return false
         default:
             console.finish()
+            return false
         }
     }
 
@@ -2400,6 +2444,10 @@ final class AppModel: ObservableObject {
     /// is for the case that has not happened yet on this machine, not evidence that it has.
     @Published var bottleSalvageWarning: String?
 
+    /// F13 (bug-sweep) — surfaces a failed `saveBottles()` write, which used to be NSLog-only
+    /// despite that function's own doc comment saying failures shouldn't be silent.
+    @Published var lastSaveFailure: String?
+
     /// Load the bottle index, surviving a single corrupt or out-of-date entry.
     ///
     /// The naive version — decode `[Bottle]` and silently give up — turns a recoverable problem
@@ -2431,7 +2479,24 @@ final class AppModel: ObservableObject {
         try? data.write(to: backup)
 
         // Per-entry salvage: re-encode each element on its own and decode it in isolation.
-        guard let raw = try? JSONSerialization.jsonObject(with: data) as? [Any] else { return }
+        //
+        // F12 (bug-sweep): this guard used to `return` bare on failure — reached when the file
+        // isn't valid JSON at all (truncated by a force-quit or full disk) or decodes to something
+        // other than a top-level array. The backup above is still written, so nothing is lost, but
+        // `bottles` stays empty, the user lands on first-run setup with no explanation, and the
+        // very NEXT `saveBottles()` call overwrites the corrupt file with `[]` — silently, since
+        // nothing here ever told anyone the original was unreadable. That's the exact scenario this
+        // function's own salvage path exists to prevent; it just didn't cover this specific exit.
+        guard let raw = try? JSONSerialization.jsonObject(with: data) as? [Any] else {
+            NSLog("Decanter: bottles.json unreadable (not a JSON array) — nothing to salvage. Original saved to \(backup.lastPathComponent)")
+            let message = "Your bottle list couldn't be read at all and had to be reset. "
+                + "Nothing was deleted — the original file was saved as \(backup.lastPathComponent) "
+                + "in ~/Library/Application Support/Decanter before anything was changed."
+            // Same deferral as the partial-salvage case below — `loadBottles` runs inside
+            // `AppModel.init()`, before ContentView exists to observe the false→true transition.
+            DispatchQueue.main.async { self.bottleSalvageWarning = message }
+            return
+        }
         var salvaged: [Bottle] = []
         for element in raw {
             guard let itemData = try? JSONSerialization.data(withJSONObject: element),
@@ -2475,6 +2540,12 @@ final class AppModel: ObservableObject {
     ///
     /// Failures are logged rather than swallowed: silently not saving looks identical to saving,
     /// and the user only discovers it after losing work.
+    ///
+    /// F13 (bug-sweep): that sentence above described intent, not what the code did — the NSLog
+    /// below was the only signal, invisible outside Console.app. Same gap F12 just closed for
+    /// salvage, still open on save until now. `lastSaveFailure` reuses the exact plumbing built for
+    /// `bottleSalvageWarning`/`lastLaunchFailure`: called from a normal (already-main-actor) code
+    /// path, not `init()`, so it needs no dispatch deferral.
     private func saveBottles() {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -2483,6 +2554,9 @@ final class AppModel: ObservableObject {
             try data.write(to: Paths.bottlesIndex, options: .atomic)
         } catch {
             NSLog("Decanter: FAILED to save bottles.json — \(error.localizedDescription)")
+            lastSaveFailure = "Your changes couldn't be saved: \(error.localizedDescription). "
+                + "Check that ~/Library/Application Support/Decanter is writable and has free "
+                + "space, then try again."
         }
     }
 
