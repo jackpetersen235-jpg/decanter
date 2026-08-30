@@ -76,6 +76,7 @@ The app is its own diagnostic tool. All of these run without the GUI and print t
 | `--quit-steam` | Escape hatch for a Steam that will not quit; reports success per bottle |
 | `--install-steam "<bottle>"` | Provision Steam into one named bottle |
 | `--install-engine` / `--run-setup` | Re-run first-run setup steps |
+| `--bootstrap-steam-test "<bottle>" [timeoutS]` | Launch Steam and wait for `steamui.dll` to land (no login touched); reports `bootstrapped=true\|false`, quits Steam after |
 | `--engine offline\|online`, `--reset-online` | Engine profile switching |
 | `--install-gfx` | Per-game DXMT install, with detection output |
 

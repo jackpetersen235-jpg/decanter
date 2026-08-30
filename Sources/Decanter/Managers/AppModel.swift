@@ -195,6 +195,54 @@ final class AppModel: ObservableObject {
                 exit(0)
             }
         }
+        // Headless exercise of a plain Steam launch that waits for BOOTSTRAP — `steamui.dll`
+        // landing on disk — not login. `Bottle.isSteamBootstrapped` is a pure filesystem check
+        // (see its doc comment), so this needs no credentials and can run fully unattended: it
+        // may sit at Steam's own login screen when it returns, but never touches it. Built for
+        // the pre-release debug plan's Phase 2 "Steam bootstrap interrupted" row, which needed a
+        // way to reach that window at all — nothing else in this dispatch launches Steam and
+        // waits past the point `-skipinitialbootstrap` becomes safe to use.
+        //
+        // Goes through `launchSteam(in:)` itself, not a hand-rolled `wine steam.exe` invocation —
+        // the exact same args (including the fresh-install `-skipinitialbootstrap` guard), the
+        // exact same launch-guard and warm-start plumbing a real click would hit. Reproducing that
+        // by hand here would risk quietly drifting from what a user's click actually does, which
+        // is the same class of guessing this project's CLAUDE.md gotchas warn against repeatedly.
+        //   Decanter.app/Contents/MacOS/Decanter --bootstrap-steam-test "<bottle name>" [timeoutSeconds]
+        if let i = CommandLine.arguments.firstIndex(of: "--bootstrap-steam-test"),
+           i + 1 < CommandLine.arguments.count {
+            let name = CommandLine.arguments[i + 1]
+            let timeout = CommandLine.arguments.count > i + 2
+                ? (Int(CommandLine.arguments[i + 2]) ?? 300) : 300
+            Task {
+                guard let bottle = bottles.first(where: { $0.name == name }) else {
+                    FileHandle.standardError.write("no such bottle: \(name)\n".data(using: .utf8)!)
+                    exit(1)
+                }
+                guard bottle.isSteamInstalled else {
+                    FileHandle.standardError.write(
+                        "steam.exe not installed in bottle: \(name)\n".data(using: .utf8)!)
+                    exit(1)
+                }
+                if bottle.isSteamBootstrapped {
+                    FileHandle.standardError.write("already bootstrapped\n".data(using: .utf8)!)
+                    exit(0)
+                }
+                launchSteam(in: bottle)
+                for _ in 0..<(timeout / 2) {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    if bottle.isSteamBootstrapped { break }
+                }
+                let bootstrapped = bottle.isSteamBootstrapped
+                // Clean up regardless of outcome — a scratch DECANTER_HOME run typically gets
+                // deleted right after this, and a Steam left pointed at a now-vanished prefix is
+                // exactly the kind of stray process this project's own gotchas warn about.
+                _ = await quitSteam(in: bottle)
+                let report = "bootstrapped=\(bootstrapped)\n"
+                FileHandle.standardError.write(report.data(using: .utf8)!)
+                exit(bootstrapped ? 0 : 1)
+            }
+        }
         // The `--trace-steam-launch` diagnostic used for the 2026-08-26 cold-login-stall
         // investigation (WINEDEBUG=+winsock, then +ntdll, against the real Steam-Wine11 prefix)
         // was intentionally temporary and has been removed. Findings are recorded in CLAUDE.md.
