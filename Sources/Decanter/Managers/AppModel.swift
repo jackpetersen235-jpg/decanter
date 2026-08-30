@@ -461,9 +461,35 @@ final class AppModel: ObservableObject {
     /// "not known yet" as "fine" would let the same skip happen as a race. The cost of being
     /// wrong in this direction is one download of an engine that works; in the other direction
     /// it is a user with no path forward.
+    ///
+    /// ⚠️ FOUND during the pre-release debug plan's Phase 2 (2026-08-29): Decanter's own engine
+    /// used to count as usable the instant ANY wine binary existed at `Paths.wineEngineBin` —
+    /// true the moment the base bundle finishes extracting, a full minute or more before
+    /// `installMsyncEngine()`'s overlay step even starts. `runGuidedSetup`'s step 2 is
+    /// `if !hasUsableEngine { installEngine() }`, so an install interrupted between those two
+    /// steps (app quit, crash, sleep, a network drop) left a genuinely Steam-capable but UNTUNED
+    /// stock engine on disk — and every later re-run of Setup Assistant, headless or GUI, saw
+    /// `hasUsableEngine == true` and skipped step 2 ENTIRELY, forever. `--run-setup` reported
+    /// `exit 0` / "setup: complete" a second time over an engine with no msync and no DXMT graft
+    /// — the exact frame-spike engine this project spent real time solving, permanently, with no
+    /// warning anywhere `--run-setup`'s own output looks. `--verify` did catch it, but nothing
+    /// prompts a first-time user to run `--verify` after being told setup succeeded. Reproduced
+    /// live: killed a scratch `DECANTER_HOME` run right after the base-bundle tar extraction
+    /// finished, confirmed `wine-11.0`/no-msync/no-DXMT on disk, then watched a second
+    /// `--run-setup` report "complete" in 36s having done nothing but create the bottle and
+    /// install Steam — zero engine work.
+    ///
+    /// Fixed by checking the tuned build's actual signature for OUR OWN engine path, not just its
+    /// presence — the same probe the msync graft is already verified with (F17,
+    /// `WineInstaller.installMsyncEngine`). A stock base bundle is real, valid, Steam-capable wine
+    /// and this check would happily call it "usable" for anyone else's engine; it is specifically
+    /// disqualified here because THIS path is one we know we always overlay, so its absence means
+    /// our own install is incomplete, not that the engine is bad.
     var hasUsableEngine: Bool {
         guard let inst = defaultInstallation else { return false }
-        if inst.binDirectory.standardizedFileURL == Paths.wineEngineBin.standardizedFileURL { return true }
+        if inst.binDirectory.standardizedFileURL == Paths.wineEngineBin.standardizedFileURL {
+            return WineInstallation.probeFastSync(binDirectory: inst.binDirectory)
+        }
         guard inst.version != nil else { return false }
         return inst.isSteamCapable
     }
