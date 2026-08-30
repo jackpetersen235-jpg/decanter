@@ -81,10 +81,31 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            // COMMERCIAL-READINESS.md item 3: dragging the app to Trash used to leave every
+            // engine, bottle, shader cache and log behind — no clean removal at all. This is
+            // where that goes: itemised in `UninstallView`, sized up fresh each time the sheet
+            // opens (not cached — data changes between visits).
+            Section("Danger Zone") {
+                Button("Uninstall Decanter…") {
+                    uninstallItems = Uninstaller.plan()
+                    showingUninstall = true
+                }
+                .foregroundStyle(.red)
+                Text("Removes the Wine engine, every bottle (installed games and saves), shader "
+                    + "caches, downloads and logs. Decanter itself is not deleted.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         // Restrained: settings is well past eight rows, so it gets a solid fill — no atmosphere
         // behind the text and no gloss on rows.
         .themedBackground(restrained: true)
+        .sheet(isPresented: $showingUninstall) {
+            UninstallView(items: uninstallItems)
+        }
     }
+
+    @State private var showingUninstall = false
+    @State private var uninstallItems: [Uninstaller.Item] = []
 }

@@ -305,6 +305,28 @@ final class AppModel: ObservableObject {
             FileHandle.standardError.write(out.data(using: .utf8)!)
             exit(0)
         }
+        // LIST ONLY, same shape as --reclaim — prints what "Uninstall Decanter…" would remove
+        // and each item's size, deletes nothing. Deliberately no headless flag that actually
+        // executes an uninstall: this dispatch has no DECANTER_HOME safety net of its own, and a
+        // hidden CLI flag that can silently erase 25+ GB of real bottles on a mistyped command is
+        // a worse risk than the inconvenience of testing `Uninstaller.execute()` only against a
+        // scratch DECANTER_HOME in UninstallerTests.swift, where a mistake costs nothing.
+        //   Decanter.app/Contents/MacOS/Decanter --uninstall-plan
+        if CommandLine.arguments.contains("--uninstall-plan") {
+            let items = Uninstaller.plan()
+            var out = "\n=== Decanter uninstall plan — LIST ONLY, nothing removed ===\n\n"
+            if items.isEmpty {
+                out += "Nothing to remove — no Decanter data found.\n"
+            } else {
+                for item in items {
+                    out += "  \(item.label)  —  \(ByteCountFormatter.string(fromByteCount: Int64(item.bytes), countStyle: .file))\n"
+                }
+                let total = items.reduce(0) { $0 + $1.bytes }
+                out += "\nTotal: \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))\n"
+            }
+            FileHandle.standardError.write(out.data(using: .utf8)!)
+            exit(0)
+        }
         // Headless exercise of the "Export Diagnostics…" menu item, so the bundle it produces
         // can be verified without driving the GUI. Does NOT reveal in Finder (that call is
         // `@MainActor` AppKit and has no place to go headless) — just builds the zip and prints
