@@ -1,0 +1,22 @@
+Copyright (c) 2026 Jack Petersen. All rights reserved.
+
+This software and its source code are the proprietary property of Jack Petersen.
+No part of this software may be reproduced, distributed, modified, or used to
+create derivative works, in whole or in part, in any form, without the prior
+written permission of Jack Petersen, except as expressly permitted by a
+separate license agreement (such as an end-user license agreement accompanying
+a purchased or downloaded copy of the application).
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+---
+
+This application downloads and installs a Windows compatibility engine
+(Wine and related components) at first run, distributed under their own
+separate open-source licenses. See THIRD-PARTY-NOTICES.md for details — none
+of this proprietary notice applies to that third-party software.
