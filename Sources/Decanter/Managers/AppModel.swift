@@ -265,6 +265,16 @@ final class AppModel: ObservableObject {
             if bottles.isEmpty { line(false, "At least one bottle", "none yet — press the setup button") }
             for bottle in bottles {
                 out += "\n  [\(bottle.name)]\n"
+                // F20 (bug-sweep): `isInitialized` is a STORED property, set once at creation and
+                // never invalidated if the prefix later disappears (moved support dir, a partial
+                // restore, a hand-deleted prefix). Every other line in --verify probes live state;
+                // this one trusted persisted metadata inside the exact tool whose job is checking
+                // reality — and this is the tool this project's own docs point people to when
+                // already confused, so a wrong answer here costs more than its size. Print the live
+                // check FIRST so the root cause shows before any downstream Steam checks that would
+                // otherwise misattribute the failure.
+                let prefixExists = FileManager.default.fileExists(atPath: bottle.url.path)
+                line(prefixExists, "  prefix present", prefixExists ? "" : bottle.url.path)
                 line(bottle.isInitialized, "  prefix initialised")
                 line(bottle.isSteamInstalled, "  Steam installed")
                 line(bottle.isSteamBootstrapped, "  Steam client downloaded",
@@ -640,8 +650,12 @@ final class AppModel: ObservableObject {
                 // bottles.json by hand.
                 console.append("")
                 console.append("Setup failed, so this bottle was removed. Nothing else was changed.")
-                console.append("If this keeps happening, run Scripts/doctor.sh — a missing engine "
-                               + "file is the usual cause.")
+                // F23 (bug-sweep): named the repo path, which doesn't exist in a friend-zip
+                // install — package-for-friend.sh ships this same script renamed to
+                // doctor.command. Name the tool, not a path only a git checkout has.
+                console.append("If this keeps happening, run Doctor (doctor.command, included "
+                               + "with Decanter — Scripts/doctor.sh in the repo) — a missing "
+                               + "engine file is the usual cause.")
                 self.deleteBottle(bottle, removeFiles: true)
                 console.finish(code)
             }
@@ -1563,6 +1577,30 @@ final class AppModel: ObservableObject {
                 }
                 let key = #"HKCU\Software\Wine\AppDefaults\"# + target + #"\Direct3D"#
                 console.append("Software 2D off for \(target)")
+                _ = try? await Shell.run(installation.loader,
+                                         arguments: ["reg", "delete", key, "/v", "renderer", "/f"],
+                                         environment: env)
+            }
+
+            // Deferred item, released 2026-08-23: the ON path adds `popcapgame1.exe` by name (the
+            // DRM-wrapper case — the unpacked process is the one that actually renders), but this
+            // OFF path never did, so turning software rendering off for a Peggle bottle left the
+            // unwrapped process's override in place. Widening this symmetrically.
+            //
+            // Can't reuse `software2DWanted` for this one the way the loop above does: that check
+            // works by asking whether a sibling's own RESOLVED exe (e.g. "Peggle.exe") wants the
+            // setting, but no bottle ever resolves to "popcapgame1.exe" itself — it only appears
+            // via the ProgramData scan the ON path does, which the resolve closure can't answer
+            // for. So this check is coarser and deliberately conservative: if ANY other bottle
+            // sharing this prefix has software2D on at all, leave popcapgame1.exe untouched rather
+            // than risk clearing an override some other PopCap bottle in the same prefix depends
+            // on. Same "over-cautious is the safe direction" rule as `quitSteamBlockReason`.
+            if PrefixSharing.others(of: bottle, in: bottles).contains(where: { $0.settings.software2D }) {
+                console.append("popcapgame1.exe left untouched — another bottle sharing this "
+                               + "prefix has software rendering on and may depend on it.")
+            } else {
+                let key = #"HKCU\Software\Wine\AppDefaults\popcapgame1.exe\Direct3D"#
+                console.append("Software 2D off for popcapgame1.exe")
                 _ = try? await Shell.run(installation.loader,
                                          arguments: ["reg", "delete", key, "/v", "renderer", "/f"],
                                          environment: env)
