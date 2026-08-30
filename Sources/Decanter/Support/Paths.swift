@@ -5,7 +5,30 @@ enum Paths {
     static let appName = "Decanter"
     static let bundleIdentifier = "com.decanter.app"
 
+    /// `appSupport`, but redirectable via `DECANTER_HOME` for headless testing.
+    ///
+    /// Every first-run and gameplay bug that has cost this project real time (see the
+    /// pre-release debug plan) shared one property: it couldn't fire on a machine already in the
+    /// state the buggy code was trying to reach. There was no way to be a fresh Mac without
+    /// risking the real 25 GB `Steam-Wine11` install — `homeDirectoryForCurrentUser` reads the
+    /// passwd entry and ignores `$HOME`, so faking a clean-home test by overriding `$HOME` alone
+    /// does not work (already documented in CLAUDE.md).
+    ///
+    /// `DECANTER_HOME`, when set, IS the app-support root directly — no "Decanter" subfolder is
+    /// appended, so the caller's scratch directory is exactly what gets populated and exactly
+    /// what a plain `rm -rf` clears between runs:
+    ///
+    ///   rm -rf /tmp/decanter-scratch
+    ///   DECANTER_HOME=/tmp/decanter-scratch build/Decanter.app/Contents/MacOS/Decanter --run-setup
+    ///
+    /// Every other path in this file derives from `appSupport`, so this one override is
+    /// sufficient — nothing else needed its own env check. Never read outside DEBUG/testing
+    /// contexts by intent; there is no separate production/debug gate because an unset env var
+    /// is already a no-op, and a real user's environment will never have this variable set.
     static var appSupport: URL {
+        if let override = ProcessInfo.processInfo.environment["DECANTER_HOME"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent(appName, isDirectory: true)
     }

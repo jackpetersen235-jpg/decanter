@@ -100,6 +100,21 @@ A newcomer with **no Wine and no Rosetta** can press one button and end up at St
   anything or set an exit code, success or failure, so a failed run would have looked identical.
   Both now `exit(0)` on success and `exit(1)` with a reason on stderr, like every other headless
   flag in this dispatch.
+- **These headless hooks can now target a scratch install instead of the real one.**
+  `Paths.appSupport` reads `DECANTER_HOME` when set and uses it AS the app-support root directly
+  (no `Decanter` subfolder appended) — every other path in `Paths.swift` derives from it, so this
+  one env var redirects `bottles.json`, `Bottles/`, the engine roots, everything:
+  `DECANTER_HOME=/tmp/scratch Decanter --run-setup`. Added for the pre-release debug plan's Phase 1
+  — every expensive bug in the F-numbered history above shared one property, it couldn't fire on a
+  machine already in the state the buggy code was trying to reach, and there was previously no way
+  to BE a fresh Mac without risking the real 25 GB `Steam-Wine11` install.
+  `homeDirectoryForCurrentUser` ignoring `$HOME` (gotcha below) is exactly why this needed its own
+  variable rather than reusing `$HOME`. Deliberately narrow: it does not redirect discovery of
+  things actually installed on the Mac (`Wine.swift`'s Whisky/CrossOver scan,
+  `importCrossOverBottles`, the `~/Applications` launcher scan in `reclaimReport`) — those still
+  read the real home on purpose, so a scratch run still reports what's really on the machine. See
+  `docs/DEBUGGING-GUIDE.md`'s "Testing any of the above against a scratch install" and
+  `Tests/DecanterTests/PathsTests.swift`.
 - The app owns its own engine (`Paths.wineEngine*`, discovered first in `Wine.swift`), so it does
   **not** depend on Whisky/Mythic/CrossOver being installed. That's what makes the friend build work.
 

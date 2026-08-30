@@ -82,6 +82,24 @@ The app is its own diagnostic tool. All of these run without the GUI and print t
 Path on a user's machine is usually `/Applications/Decanter.app/Contents/MacOS/Decanter`. Ask; do
 not assume they installed it there.
 
+### Testing any of the above against a scratch install, not a user's real one
+
+Every headless flag above reads and writes `~/Library/Application Support/Decanter` by default —
+the user's real bottles, real 25+ GB prefixes, real `bottles.json`. Set `DECANTER_HOME` to redirect
+all of it to a scratch directory instead, so a first-run test can't touch anything real:
+
+```bash
+rm -rf /tmp/decanter-scratch
+DECANTER_HOME=/tmp/decanter-scratch build/Decanter.app/Contents/MacOS/Decanter --run-setup
+```
+
+The override IS the app-support root directly (no `Decanter` subfolder appended), so the directory
+you name is exactly what gets populated and exactly what a plain `rm -rf` clears between runs.
+Every path in `Paths.swift` derives from `appSupport`, so this one variable redirects
+`bottles.json`, `Bottles/`, the engine roots, shader caches — everything. It does **not** redirect
+discovery of things actually installed on the Mac (Whisky, CrossOver, `~/Applications` launchers) —
+those still read the real home on purpose, so a scratch run still reports what's really there.
+
 ### Where the evidence lives
 
 ```
