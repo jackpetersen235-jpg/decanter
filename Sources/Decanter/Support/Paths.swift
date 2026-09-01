@@ -71,12 +71,22 @@ enum Paths {
     static var onlineEngineLibraries: URL { onlineEngineRoot.appendingPathComponent("Libraries", isDirectory: true) }
     static var onlineEngineBin: URL { onlineEngineLibraries.appendingPathComponent("Wine/bin", isDirectory: true) }
 
-    /// Persistent shader caches (DXMT), one per bottle. Survives launches so repeat
-    /// shader-compilation stutter fades the more a game is played.
+    /// Persistent shader caches (DXMT). Survives launches so repeat shader-compilation stutter
+    /// fades the more a game is played.
     static var shaderCacheRoot: URL { appSupport.appendingPathComponent("ShaderCache", isDirectory: true) }
 
-    static func shaderCache(for bottle: Bottle) -> URL {
-        shaderCacheRoot.appendingPathComponent(bottle.url.lastPathComponent, isDirectory: true)
+    /// `gameKey` scopes the cache to one GAME rather than one prefix — pass the resolved game's
+    /// own key (see `AppModel.shaderCacheGameKey`) whenever a specific game is actually being
+    /// launched. Several games can share one Wine prefix (Steam-Wine11 holds three on this
+    /// machine), and until this existed every one of them funneled into a single directory keyed
+    /// by the PREFIX's name, colliding their shader caches together and missing the warm,
+    /// already-built caches the hand-tuned external launchers (Sekiro.app, JJBA All-Star
+    /// Battle.app) had been keeping in `ShaderCache/Sekiro` / `ShaderCache/ASBR` — found during
+    /// the second settings-parity audit (2026-09-01). Falls back to the prefix name when no
+    /// specific game applies (a plain Steam launch, wineboot, a registry-only operation) — nothing
+    /// user-facing is rendering there, so prefix-level scoping is fine.
+    static func shaderCache(for bottle: Bottle, gameKey: String? = nil) -> URL {
+        shaderCacheRoot.appendingPathComponent(gameKey ?? bottle.url.lastPathComponent, isDirectory: true)
     }
 
     /// Patched DXMT DLLs shipped inside the app bundle (Resources/DXMT).
@@ -94,6 +104,17 @@ enum Paths {
 
     /// The DLLs that make up the per-game graphics override.
     static let dxmtDLLs = ["d3d11.dll", "dxgi.dll", "d3d10core.dll"]
+
+    /// The bundled `gpukeepalive` helper (Contents/MacOS/gpukeepalive) — see
+    /// `Sources/GPUKeepalive/main.swift` and `BottleSettings.gpuKeepAlive`. Same nil-when-absent
+    /// shape as `bundledDXMT`: a dev build run via `swift run` (no `make_app.sh` pass) has no
+    /// `Bundle.main.executableURL` sibling to find, and the feature should degrade to doing
+    /// nothing rather than crash looking for it.
+    static var bundledGPUKeepalive: URL? {
+        guard let dir = Bundle.main.executableURL?.deletingLastPathComponent() else { return nil }
+        let bin = dir.appendingPathComponent("gpukeepalive")
+        return FileManager.default.isExecutableFile(atPath: bin.path) ? bin : nil
+    }
 
     /// Rolling console history, so a crash or a force-quit doesn't take the only record of what
     /// just happened with it. Part of the pre-release debug plan's Phase 4 — before this, every

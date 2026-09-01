@@ -20,12 +20,17 @@ swift build -c "$CONFIG" "${ARCHS[@]}"
 
 BIN_DIR="$(swift build -c "$CONFIG" "${ARCHS[@]}" --show-bin-path)"
 BIN="$BIN_DIR/Decanter"
+KEEPALIVE_BIN="$BIN_DIR/GPUKeepalive"
 APP="$ROOT/build/Decanter.app"
 
 echo "▸ Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Decanter"
+# Bundled helper for BottleSettings.gpuKeepAlive — see Sources/GPUKeepalive/main.swift. Same
+# location Sekiro.app's own hand-tuned launcher uses (Contents/MacOS/gpukeepalive), so
+# Paths.bundledGPUKeepalive's lookup matches regardless of which app it's reading.
+[ -f "$KEEPALIVE_BIN" ] && cp "$KEEPALIVE_BIN" "$APP/Contents/MacOS/gpukeepalive"
 [ -f "$ROOT/Assets/AppIcon.icns" ] && cp "$ROOT/Assets/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 # Patched DXMT (see Assets/DXMT/VERSION.txt). Ships in the bundle so a fresh install can fix the
 # 26 s geometry-shader stall without the user building anything.

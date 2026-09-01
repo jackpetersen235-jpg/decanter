@@ -1325,7 +1325,16 @@ final class AppModel: ObservableObject {
             }
         }
 
-        let referencedByBottles = Set(bottles.map { $0.url.lastPathComponent })
+        // Both the PREFIX name (the old, only scoping) and each bottle's own resolved per-game
+        // key (see `shaderCacheOverride`) — a per-game cache dir Decanter creates for a title with
+        // no external hand-tuned launcher (Half Sword, Peggle, any future game) has no OTHER
+        // reference anywhere, and without this it would be reported reclaimable the very first
+        // time `--reclaim` ran after this feature shipped.
+        let referencedByBottles = Set(bottles.flatMap { bottle -> [String] in
+            var keys = [bottle.url.lastPathComponent]
+            if let gameKey = shaderCacheGameKey(for: bottle) { keys.append(gameKey) }
+            return keys
+        })
         let bottleOrphans = OrphanReclaim.orphanedBottleDirs(
             present: names(in: Paths.bottlesRoot), referencedByBottles: referencedByBottles)
         let cacheOrphans = OrphanReclaim.orphanedShaderCacheDirs(
@@ -1380,6 +1389,28 @@ final class AppModel: ObservableObject {
         await applyBorderlessFullscreen(bottle, installation: installation,
                                         env: Wine.environment(for: bottle, using: installation),
                                         console: console)
+    }
+
+    /// Launch the bundled GPU keep-alive helper for `bottle`'s resolved game, if
+    /// `BottleSettings.gpuKeepAlive` is on. No-op when the setting is off, no game resolves, the
+    /// bundle doesn't carry the helper (a dev build via `swift run`, not `Scripts/make_app.sh`),
+    /// or an instance is already running — `gpukeepalive` itself never checks whether another copy
+    /// is already active (that guard lived in the external launcher's shell script, as a plain
+    /// `pgrep -f gpukeepalive` before spawning); it has to happen here instead now.
+    ///
+    /// Fire-and-forget by design, matching `Sources/GPUKeepalive/main.swift`'s own "NO REAPER
+    /// HERE" choice: the helper self-manages its lifetime (exits once the watched exe has been
+    /// seen and gone away, or if it never appears within its own 10-minute grace period) — a
+    /// supervising reaper on the launcher side failed twice during the original investigation
+    /// (2026-07-19) and silently invalidated two validation sessions before anyone noticed.
+    private func launchGPUKeepAliveIfNeeded(for bottle: Bottle) async {
+        guard bottle.settings.gpuKeepAlive,
+              let helper = Paths.bundledGPUKeepalive,
+              let exeName = resolvedGame(for: bottle)?.executable.lastPathComponent
+        else { return }
+        guard await !isProcessRunning(named: "gpukeepalive") else { return }
+        _ = try? Shell.stream(helper, arguments: ["50000", exeName],
+                              onOutput: { _ in }, onExit: { _ in })
     }
 
     /// Configures a per-app Wine virtual desktop for `bottle`'s resolved game, sized to the main
@@ -2231,6 +2262,7 @@ final class AppModel: ObservableObject {
             // Safe here: the launch is claimed, so a second click short-circuits above.
             await ensureSoftware2D(for: bottle)
             await ensureBorderlessFullscreen(for: bottle)
+            await launchGPUKeepAliveIfNeeded(for: bottle)
 
             // Make sure anything newly installed has the patched graphics driver BEFORE it runs.
             // Doing it here rather than only in the wizard is what removes the last manual step: a
@@ -2280,10 +2312,12 @@ final class AppModel: ObservableObject {
                 // the actual launch, which never used it.
                 let gameFolder = Self.resolveStoredExecutable(direct, driveC: bottle.driveC)?
                     .deletingLastPathComponent()
+                var directExtraEnv = steamAppEnvironment(for: bottle)
+                for (k, v) in shaderCacheOverride(for: bottle) { directExtraEnv[k] = v }
                 launchQuietly(bottle: bottle, arguments: [direct],
-                              extraEnvironment: steamAppEnvironment(for: bottle),
+                              extraEnvironment: directExtraEnv,
                               currentDirectory: gameFolder)
-                suppressWineSystray(isGameLauncher: true)
+                suppressWineSystray(bottle: bottle, isGameLauncher: true)
                 reapSteamAfterGame(in: bottle, weStartedSteam: weStartedSteam)
                 // ⚠️ FOUND live during the pre-release debug plan's Phase 3 (2026-08-29):
                 // `URL(fileURLWithPath: direct).lastPathComponent` only recognizes `/` as a path
@@ -2350,8 +2384,12 @@ final class AppModel: ObservableObject {
             let startedSteamForGame = !steamWasAlreadyUp || weWarmStartedThisPrefix
             // Quiet: no console sheet pops over Decanter (which made the first click look like a
             // no-op). Steam just opens on its own.
-            launchQuietly(bottle: bottle, arguments: args)
-            suppressWineSystray(isGameLauncher: isGameLauncher)
+            //
+            // The shader-cache override is safe to pass even for a bare plain-Steam launch with no
+            // resolved game (`shaderCacheOverride` returns `[:]` in that case) — Steam's own CEF UI
+            // never touches DXMT, so there is nothing to scope either way.
+            launchQuietly(bottle: bottle, arguments: args, extraEnvironment: shaderCacheOverride(for: bottle))
+            suppressWineSystray(bottle: bottle, isGameLauncher: isGameLauncher)
             // Reap after the game exits — this path (`steam.exe -applaunch <id>`) is how nearly
             // every game starts, and it had no cleanup at all: only the direct-exe branch above
             // called this, so Steam was left running after Peggle, Sekiro or Half Sword quit.
@@ -2756,6 +2794,43 @@ final class AppModel: ObservableObject {
         return stopped
     }
 
+    /// Per-game shader-cache key: the resolved game's own executable name, extension stripped —
+    /// e.g. `sekiro.exe` → `sekiro`, `ASBR.exe` → `ASBR`. `nil` when `resolvedGame` can't identify
+    /// a single game for this bottle (a bare Steam-launcher bottle backing several manifests), in
+    /// which case the caller should leave the shader cache at its prefix-level default.
+    ///
+    /// This deliberately reuses `resolvedGame`'s own resolution (appID → manifest → installdir →
+    /// `GameScanner.largestExecutable`, or the direct-exe path) rather than re-parsing anything —
+    /// two resolvers disagreeing on a game's identity is exactly the class of bug F5's Half Sword
+    /// no-op was (see `unrealRedirectorTarget`'s doc comment).
+    private func shaderCacheGameKey(for bottle: Bottle) -> String? {
+        guard let name = resolvedGame(for: bottle)?.executable.lastPathComponent else { return nil }
+        guard name.lowercased().hasSuffix(".exe") else { return name }
+        return String(name.dropLast(4))
+    }
+
+    /// `DXMT_SHADER_CACHE_PATH` override, scoped to the bottle's resolved GAME rather than its
+    /// PREFIX — merge into `launchQuietly`'s `extraEnvironment` at any call site that launches a
+    /// specific game (never for a bare Steam warm-start/bootstrap, where nothing renders yet and
+    /// the prefix-level default from `Wine.environment` is harmless).
+    ///
+    /// FOUND missing entirely during the second settings-parity audit (2026-09-01): several games
+    /// can share one Wine prefix (Sekiro, JJBA and Peggle all share `Steam-Wine11` here), and
+    /// without this override every one of them funneled its shader cache into ONE directory keyed
+    /// by the PREFIX's name — silently colliding their caches together, and never touching the
+    /// separate, already-warm `ShaderCache/Sekiro` / `ShaderCache/ASBR` directories the hand-tuned
+    /// external launchers (Sekiro.app, JJBA All-Star Battle.app) had been building up over months
+    /// of real play. `shaderCacheGameKey` reusing the same exe-name convention those directories
+    /// already use means this repoints Decanter's own Play button at the SAME warm caches — on a
+    /// default (case-insensitive) APFS volume, `"sekiro"` and the existing `"Sekiro"` directory are
+    /// the same folder, so nothing has to migrate.
+    private func shaderCacheOverride(for bottle: Bottle) -> [String: String] {
+        guard let key = shaderCacheGameKey(for: bottle) else { return [:] }
+        let cache = Paths.shaderCache(for: bottle, gameKey: key)
+        try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        return ["DXMT_SHADER_CACHE_PATH": cache.path]
+    }
+
     /// Launch a long-lived program without popping a console sheet. Used for games/Steam, where
     /// the user just wants the app to open — not a log window.
     /// `currentDirectory` defaults to nil, meaning the launched process inherits DECANTER'S OWN
@@ -2881,8 +2956,45 @@ final class AppModel: ObservableObject {
         return ["SteamAppId": id, "SteamGameId": id]
     }
 
-    private func suppressWineSystray(isGameLauncher: Bool) {
-        guard !isGameLauncher else { return }
+    /// Remove Steam's macOS menu-bar (systray) icon a short while after a launch. Wine's
+    /// `explorer.exe` bridges a Windows systray icon to an `NSStatusItem` in the menu bar; killing
+    /// it drops the icon and explorer does not respawn — but the timing matters for a bottle using
+    /// `borderlessFullscreen` (see `applyBorderlessFullscreen`): its game runs in a per-app Wine
+    /// virtual desktop that explorer.exe itself hosts while it's being CREATED, so killing explorer
+    /// too early there prevents that window from ever forming (GAMING-STACK.md §7).
+    ///
+    /// This used to mean the sweep was skipped ENTIRELY for every game-launcher bottle — treating
+    /// "is this a game launcher" as the risky condition, when the actual risk is narrower: only
+    /// borderless-fullscreen bottles ever repurpose explorer as a window host. The result was a
+    /// stray Steam icon sitting in the menu bar for the whole play session on EVERY game launched
+    /// from Decanter's own Play button — found during the second settings-parity audit
+    /// (2026-09-01) by reading `Sekiro.app`'s hand-tuned launcher, which proved the actual safe
+    /// rule instead of just avoiding the problem: wait for the game's own exe to be running, wait
+    /// 18s more for its window to finish forming, THEN sweep — by then the window is owned by
+    /// `winemac.drv`, not explorer, and SURVIVES explorer being killed (verified live, 2026-07-19).
+    ///
+    /// A bottle NOT using borderless fullscreen never repurposes explorer in the first place
+    /// (JJBA/ASBR's own external launcher never waits before sweeping either — it has no sweep at
+    /// all), so it keeps the original, simpler timing below.
+    private func suppressWineSystray(bottle: Bottle, isGameLauncher: Bool) {
+        guard !isGameLauncher else {
+            guard bottle.settings.borderlessFullscreen,
+                  let exeName = resolvedGame(for: bottle)?.executable.lastPathComponent
+            else { return }
+            Task {
+                for _ in 0..<75 {                                    // up to 150s for the exe to appear
+                    if await isProcessRunning(named: exeName) { break }
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                }
+                try? await Task.sleep(nanoseconds: 18_000_000_000)   // let the fullscreen window finish forming
+                for _ in 0..<6 {                                      // then sweep ~24s for the tray icon
+                    _ = try? await Shell.run(URL(fileURLWithPath: "/usr/bin/pkill"),
+                                             arguments: ["-f", "explorer.exe"])
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                }
+            }
+            return
+        }
         Task {
             try? await Task.sleep(nanoseconds: 15_000_000_000)     // let the window come up first
             for _ in 0..<12 {                                       // then sweep ~48s for the tray icon

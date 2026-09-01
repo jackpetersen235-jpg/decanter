@@ -181,6 +181,14 @@ struct ConfigurationView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 envSharedCaption()
                 Toggle("Verbose Wine logging", isOn: $bottle.settings.verboseLogging)
+
+                Divider()
+                Toggle("GPU keep-alive", isOn: $bottle.settings.gpuKeepAlive)
+                Text("Works around a GPU firmware fault on some Apple Silicon Macs that causes "
+                     + "occasional multi-second whole-system freezes during play. Runs a small "
+                     + "background helper for as long as this game does. Only turn this on if "
+                     + "you've actually seen those freezes — it costs a continuous small GPU load.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Steam launch arguments") {

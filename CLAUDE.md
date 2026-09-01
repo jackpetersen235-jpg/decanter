@@ -1479,3 +1479,205 @@ All 32 new tests passed on the first run — the point of a characterization tes
 if it's actually describing what the code already does. 86/86 total, full suite. No production
 code changed in this phase; `Shell.run`, `Shell.stream`, `Wine.environment` and
 `BottleSettings.derivedEnvironment` are unmodified from before.
+
+## Second settings-parity audit — three features ported from Sekiro.app/JJBA into Decanter itself (2026-09-01)
+
+Re-ran the settings-parity audit against `Sekiro.app` and `JJBA All-Star Battle.app`'s actual
+launcher scripts (not just their env-var values, which the first audit already covered). Found
+three pieces of real, load-bearing logic that existed ONLY in the hand-tuned external launchers —
+Decanter's own Play button gave every one of these zero coverage. All three are now generic,
+per-bottle features, not Sekiro/JJBA special cases.
+
+**1. Per-game shader cache**, not per-prefix. `Wine.environment` keyed `DXMT_SHADER_CACHE_PATH` off
+the bottle's PREFIX name — Sekiro, JJBA and Peggle all share `Steam-Wine11`, so Decanter's Play
+button was funneling all three games' shader caches into one shared directory, never touching the
+already-warm `ShaderCache/Sekiro` / `ShaderCache/ASBR` the external launchers had been building for
+months. Fixed generically: `AppModel.shaderCacheGameKey(for:)` derives a per-game key from the
+resolved game's own exe name (`sekiro.exe` → `sekiro`, `ASBR.exe` → `ASBR`) — reusing the exe-name
+convention the external launchers already use means this lands on the SAME directories on a
+default case-insensitive APFS volume, no migration needed. `Paths.shaderCache(for:gameKey:)` takes
+the optional override; `AppModel.shaderCacheOverride(for:)` builds it and is merged into
+`launchQuietly`'s `extraEnvironment` at both real per-game launch call sites (direct-exe and
+`-applaunch`) — never at a bare Steam warm-start, where nothing is rendering yet.
+`reclaimReport()`'s `referencedByBottles` set was extended to include each bottle's own game key
+too, so a per-game cache dir with no external launcher pointing at it (Half Sword, Peggle, any
+future game) doesn't get flagged reclaimable the first time `--reclaim` runs post-fix. **Live
+verified**: launched Sekiro via `--play-test`; `ShaderCache/Sekiro/shaders_320.db-shm` picked up a
+fresh mtime from that exact session, `ShaderCache/Steam-Wine11` did not.
+
+**2. GPU firmware keep-alive**, wired into the app for the first time. `Sekiro.app` ships and runs
+`gpukeepalive` (see [[decanter-gpu-firmware-hang]]) — a small helper that submits a Metal blit
+every 50ms to hold this Mac's GPU out of a firmware power state it intermittently fails to resume
+from. `grep -r keepalive Sources/` turned up nothing: the workaround existed only in the external
+app, never in Decanter's own launch path. Added a second SwiftPM executable target
+(`Sources/GPUKeepalive/main.swift`, `Package.swift`), generalized to take its target exe name as a
+CLI argument instead of a hardcoded `sekiro.exe`; `Scripts/make_app.sh` now copies it to
+`Contents/MacOS/gpukeepalive` (same location the external app uses) and it rides the existing
+`--deep` codesign. New opt-in setting `BottleSettings.gpuKeepAlive` (default off — this works
+around a fault specific to this Mac's GPU firmware, not something to assume universal) surfaced in
+`ConfigurationView`'s Performance section; `AppModel.launchGPUKeepAliveIfNeeded` spawns it
+alongside `ensureBorderlessFullscreen`/`installGraphicsDriver` on every launch when the setting is
+on, gated by its own `isProcessRunning(named: "gpukeepalive")` check since the binary itself never
+guards against being started twice — that check lived in the external launcher's shell script
+(`pgrep -f gpukeepalive`) and had to move here. The real Sekiro bottle's stored setting was flipped
+to `true` to match the proven-safe external config; JJBA's was left off, matching its own external
+launcher (which never uses this — and per [[decanter-dxmt-stall-profiler]], ASBR never builds the
+large command buffers Sekiro's stalls are associated with anyway).
+
+⚠️ **Found and fixed a NEW bug during live verification, not present in the original hand-tuned
+launcher**: the helper's original `pgrep -f <exe>` detection matches a process's FULL COMMAND
+LINE. The original single-game launcher never hit this, but Decanter's `installGraphicsDriver`
+runs `wine reg add HKCU\...\sekiro.exe\...` for every resolved game sharing a prefix as part of a
+normal launch — and that registry-editing process's own argv literally contains `sekiro.exe` as a
+path component. First live test: `gpukeepalive` logged "sekiro.exe detected" within 0 seconds of
+starting (the registry sweep, not the game), then "exited" a few seconds later when that unrelated
+`wine reg add` call finished — stopping protection long before the real game ever started. Fixed
+by matching the same way `AppModel.isProcessRunning`/`isAnyGameRunning` do: `ps -Ao comm=` (the
+process's own name, which a `wine reg add` subprocess can't spoof) plus the established
+split-on-both-`/`-and-`\`-separators rule, instead of `pgrep -f`. **Live verified end to end**
+after the fix, via `open Decanter.app --args --play-test …` (needed instead of a plain backgrounded
+CLI invocation — a `--play-test` process launched as a background job of an already-completed
+shell command gets reaped along with it in this dev environment; Wine's own children survive that
+because wine detaches into its own session, but a plain launched helper doesn't): binary started
+correctly, gave no false positive through the registry sweep this time, correctly logged `sekiro.exe
+detected after 50s` when the real game appeared, survived its own launching process exiting
+normally (reparented to launchd, kept running), and left no orphaned process after `--quit-steam`.
+
+**3. Systray sweep for game-launcher bottles.** `AppModel.suppressWineSystray` unconditionally
+skipped ANY bottle with `isGameLauncher == true` — meaning Steam's stray menu-bar icon sat there
+for the ENTIRE play session on every game launched from Decanter's own Play button. The
+over-broad guard conflated "is this a game launcher" with the actual risk, which is narrower: only
+a `borderlessFullscreen` bottle repurposes `explorer.exe` as a per-app virtual-desktop window host
+while that window is forming, so only that specific case is unsafe to sweep early.
+`Sekiro.app`'s own launcher already proved the real safe rule (wait for the game's exe, wait 18s
+more for the window, THEN sweep — by then the window belongs to `winemac.drv`, not explorer, and
+survives explorer being killed). Ported that exact sequence, gated on
+`bottle.settings.borderlessFullscreen` specifically rather than `isGameLauncher` broadly — a
+game-launcher bottle NOT using borderless fullscreen (JJBA/ASBR; its own external launcher never
+sweeps explorer at all either) keeps the original, simpler immediate-ish timing. NOT independently
+live-verified this pass: `--play-test`'s own process exits (and kills its own in-flight Swift
+`Task`s, including this sweep) as soon as `isSteamRunning()` is true, which happens well before the
+sweep's 18s+24s window can complete — a limitation of the headless test hook, not something a real,
+persistently-running Decanter.app session would hit. Confidence here is by construction (identical
+shape to the already-proven non-game-launcher sweep, reusing already-tested `isProcessRunning`) and
+build-verified, not live-verified; worth a manual GUI check next time Sekiro is played normally.
+
+All three: `swift build` clean, full 86-test suite green, app bundle rebuilt via
+`Scripts/make_app.sh` (now building both the `Decanter` and `GPUKeepalive` targets, universal
+arm64+x86_64, both signed).
+
+## Second settings-parity audit — three more external-launcher features ported in (2026-09-01)
+
+Re-ran the settings-parity audit from 2026-08-29 specifically against `Sekiro.app` and
+`JJBA All-Star Battle.app`'s launcher scripts (`Contents/MacOS/Sekiro`, `Contents/MacOS/JJBA`),
+line by line, against `Wine.environment`/`AppModel`. Three real gaps found and fixed; a fourth
+thing noticed but deliberately not silently copied.
+
+### 1. Shader cache was scoped per-PREFIX, not per-GAME
+
+`Paths.shaderCache(for:)` keyed on `bottle.url.lastPathComponent` — the prefix name
+(`Steam-Wine11`) — so Sekiro, JJBA and Peggle (all three sharing that prefix) funneled their DXMT
+shader caches into ONE shared directory via Decanter's own Play button, never touching the
+separate `ShaderCache/Sekiro` / `ShaderCache/ASBR` directories the hand-tuned launchers had been
+building up over months of real play (and which `reclaimReport()` already special-cased as
+"launcher-referenced" — the asymmetry was already half-visible in that code, just never closed).
+
+Fixed generically, not Sekiro/JJBA-specific: `Paths.shaderCache(for:gameKey:)` now takes an
+optional per-game key; `AppModel.shaderCacheGameKey(for:)` derives it from the resolved game's own
+exe filename (extension stripped) via the SAME `resolvedGame(for:)` resolver everything else uses
+— no second source of truth for "what game is this." `shaderCacheOverride(for:)` builds the
+`DXMT_SHADER_CACHE_PATH` override and is merged into `launchQuietly`'s `extraEnvironment` at both
+real game-launch call sites (direct-exe and `-applaunch`). On a default (case-insensitive) APFS
+volume `"sekiro"` and the existing `"Sekiro"` directory are the same folder, so nothing had to
+migrate — confirmed live: launched Sekiro through Decanter, `ShaderCache/Sekiro/shaders_320.db-shm`
+picked up a fresh mtime, `ShaderCache/Steam-Wine11` did not move.
+
+Also fixed `reclaimReport()`'s `referencedByBottles` set to include each bottle's resolved
+per-game key alongside its prefix name — otherwise a per-game cache dir for a title with NO
+external launcher (Half Sword, Peggle, any future game) would have been reported reclaimable the
+first time `--reclaim` ran after this shipped.
+
+### 2. GPU firmware keep-alive existed only in the external launcher — now a real bundled feature
+
+`Sekiro.app` ships and runs `gpukeepalive` (was: `Scripts/sekiro/gpukeepalive.swift`, hardcoded to
+watch `sekiro\.exe`) — the fix for the ~7s whole-Mac GPU firmware freezes
+(`docs/GPU-HANG-FINDINGS.md`). Decanter's own Play button had zero code referencing it at all.
+
+Ported in as a real feature, not a Sekiro-only hack:
+- New SwiftPM executable target `GPUKeepalive` (`Sources/GPUKeepalive/main.swift`) — same source
+  shape as the original, generalized to take its target exe name as a CLI argument instead of a
+  hardcoded string, so any bottle can use it.
+- `Scripts/make_app.sh` builds and bundles it at `Contents/MacOS/gpukeepalive`, same location the
+  external launcher uses, universal (arm64 + x86_64) alongside the main binary.
+- `Paths.bundledGPUKeepalive` — nil-when-absent lookup, same shape as `bundledDXMT`, so a dev build
+  via `swift run` degrades to doing nothing instead of crashing.
+- `BottleSettings.gpuKeepAlive: Bool` (default `false`, decoded via the hand-written decoder like
+  every other field) — exposed as a "GPU keep-alive" toggle in `ConfigurationView`'s Performance
+  section. Opt-in per bottle: the fault is specific to this Mac's GPU firmware and the fix costs a
+  continuous small GPU load, so it isn't assumed universal.
+- `AppModel.launchGPUKeepAliveIfNeeded(for:)` spawns it alongside `ensureSoftware2D`/
+  `ensureBorderlessFullscreen` on every launch, guarded against double-spawning (the binary itself
+  has no such guard — that lived in the external launcher's own `pgrep` check before spawning, and
+  had to move here). Fire-and-forget, matching the binary's own "NO REAPER HERE" design — it exits
+  on its own once the watched exe has come and gone.
+- Enabled on the real `Sekiro` bottle's stored settings (`gpuKeepAlive: true`), matching the
+  external launcher's actual behavior. NOT enabled for JJBA — its own launcher never used this, and
+  the DXMT stall investigation measured JJBA never building the large command buffers Sekiro does
+  (`docs/DXMT-STALL-REPORT.md`), so there's no evidence it needs it.
+
+**Bug found and fixed during live verification, not just built:** the original script's own
+detection (`pgrep -f 'sekiro\.exe'`) matches a process's FULL COMMAND LINE. The very first
+end-to-end test showed it firing instantly, then stopping ~10s later — `installGraphicsDriver`
+runs `wine reg add HKCU\Software\Wine\AppDefaults\sekiro.exe\DllOverrides …` for every resolved
+game in the shared prefix as a normal part of every launch, and THAT process's own argv literally
+contains the string `sekiro.exe`. The external launcher never hit this because it launches exactly
+one game directly with no registry sweep first — a failure mode unique to Decanter's own
+multi-game-prefix architecture. Fixed to match `AppModel.isProcessRunning(named:)`'s approach
+instead: `ps -Ao comm=` (the process's own name, which a `wine reg add` shell can't spoof) with the
+same Windows-path-split-on-both-separators handling `isAnyGameRunning` already documents.
+
+**Live-verified, full lifecycle:** isolated test (fake target process) confirmed detect → protect →
+self-exit-on-target-gone. Real end-to-end test through `--play-test` (launched via `open`, fully
+detached, so it isn't torn down by this session's own shell job-control the way a backgrounded CLI
+invocation was — that earlier false negative was a testing-methodology artifact, not a product
+bug) confirmed: correct binary + args spawned automatically, no false "detected" from the registry
+sweep, real `sekiro.exe` correctly detected 50s later, and zero leftover `gpukeepalive` process
+after `--quit-steam` shut everything down.
+
+### 3. Systray sweep never ran at all for game-launcher bottles
+
+`suppressWineSystray` guarded with `guard !isGameLauncher else { return }` — Sekiro and JJBA both
+have `-applaunch` in `steamArguments`, so `isGameLauncher` is true for both and the sweep NEVER
+fired, full stop. The comment there treated "is this a game launcher" as the unsafe condition, but
+`Sekiro.app`'s own launcher proves the actual risky condition is narrower: only a bottle using
+`borderlessFullscreen` ever repurposes `explorer.exe` as a window host (the per-app virtual desktop
+trick), and even then only until the window finishes forming — wait for the exe, wait 18s more,
+THEN sweep, because by then the window is owned by `winemac.drv` and survives explorer dying
+(verified live in the external launcher, 2026-07-19).
+
+Generalized rather than special-cased: `suppressWineSystray(bottle:isGameLauncher:)` now checks
+`bottle.settings.borderlessFullscreen` specifically. True → the proven-safe delayed sweep (wait for
+`resolvedGame`'s exe via `isProcessRunning`, wait 18s, sweep 6× over 24s). False → unchanged,
+original simpler timing. JJBA (no borderless fullscreen) is unaffected either way — its own
+external launcher never swept at all, so nothing regresses for it.
+
+**Not fully live-verified**: confirming the actual `pkill` firing requires the sweep's Task to
+survive ~40-190s inside a live launch, and `--play-test`'s own headless mode exits (killing all its
+own in-flight Tasks, `Process`-spawned children like `gpukeepalive` excepted since those are
+separate OS processes) as soon as `isSteamRunning()` goes true — which happens well before the
+sweep can complete. Verified by code inspection and reuse of two already-proven mechanisms
+(`isProcessRunning`, the `pkill -f explorer.exe` step from the existing non-game-launcher sweep)
+rather than a full live run; flagging this explicitly rather than claiming more than was checked.
+
+### Noticed, not silently copied: a contradiction in Sekiro.app's own comments
+
+Its GPU-keep-alive section is headed "GPU KEEP-ALIVE DISABLED 2026-07-25 — it CAUSES the 26s
+stalls... to re-enable, uncomment the two lines below" — but those two lines are NOT commented out;
+the keep-alive is live in the shipped script. Cross-checked against
+[[decanter-sekiro-stall-cause]]: the 26s stalls were later (2026-07-28) root-caused to an unrelated
+DXMT geometry-shader bug, so re-enabling the keep-alive was very likely correct — the header
+comment just never got updated to say so. Surfaced to Jack rather than assumed; not something to
+silently trust either way.
+
+Build/tests after all three fixes: 86/86 passing, full suite; `Scripts/make_app.sh` produces a
+universal `Decanter.app` with both `Decanter` and `gpukeepalive` present and code-signed.

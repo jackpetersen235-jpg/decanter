@@ -188,6 +188,19 @@ struct BottleSettings: Codable, Equatable {
     /// `AppModel.applyBorderlessFullscreen`.
     var borderlessFullscreen: Bool = false
 
+    /// Runs a bundled helper (`Contents/MacOS/gpukeepalive`) alongside this bottle's resolved
+    /// game, submitting a tiny Metal blit every 50ms to hold this Mac's GPU out of the firmware
+    /// power state it intermittently fails to resume from — see `docs/GPU-HANG-FINDINGS.md` and
+    /// `AppModel.launchGPUKeepAliveIfNeeded`. The helper self-manages its own lifetime (exits when
+    /// the game exits, or if it never appears); Decanter only has to launch it.
+    ///
+    /// FOUND missing entirely during the second settings-parity audit (2026-09-01): the workaround
+    /// existed only inside the hand-tuned `Sekiro.app`, never in Decanter's own Play button, so a
+    /// game launched from here got zero protection against the ~7s whole-Mac firmware freezes.
+    /// Defaults OFF — the fault is specific to this Mac's GPU firmware and the fix costs a
+    /// continuous background submission, so it's opt-in per bottle rather than assumed universal.
+    var gpuKeepAlive: Bool = false
+
     var retinaMode: Bool = false      // HiDPI rendering inside the prefix
     var dpi: Int = 96                 // LogPixels
     var verboseLogging: Bool = false  // WINEDEBUG toggle
@@ -267,6 +280,7 @@ struct BottleSettings: Codable, Equatable {
         advertiseAVX    = v(.advertiseAVX, true)
         software2D      = v(.software2D, false)
         borderlessFullscreen = v(.borderlessFullscreen, false)
+        gpuKeepAlive    = v(.gpuKeepAlive, false)
         retinaMode      = v(.retinaMode, false)
         dpi             = v(.dpi, 96)
         verboseLogging  = v(.verboseLogging, false)
