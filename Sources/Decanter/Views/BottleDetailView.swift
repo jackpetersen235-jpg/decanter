@@ -69,7 +69,8 @@ struct BottleDetailView: View {
                     let ok = await model.quitSteam(in: bottle)
                     quitResult = ok
                         ? "Steam has been shut down."
-                        : "Steam did not shut down — try again, or restart your Mac."
+                        : (model.lastQuitSteamFailure
+                           ?? "Steam did not shut down — try again, or restart your Mac.")
                     quitting = false
                 }
             }

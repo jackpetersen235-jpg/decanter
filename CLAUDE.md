@@ -1393,3 +1393,53 @@ registry entry for the real binary, and the already-correct redirector entry lef
 Peggle and Sekiro/JJBA were checked too and don't have this bug — all three have their real exe
 directly in the game's top-level folder, no nested Unreal-style Win64 folder to mismatch against.
 Half Sword is the one Unreal Engine title in the library; this fix generalizes to any future one.
+
+## "Windows Steam isn't closing" — cross-generation orphans, and `quitSteam` finally says why (2026-09-01)
+
+Reported directly, live: **"windows steam isn't closing"**. `--quit-steam` stopped the main
+`steam.exe` process but left `winedevice.exe` and `steamservice.exe` behind — one of which ignored
+`SIGTERM` outright. `shutdownPrefix`'s straggler sweep was `argv`-matching against `ps` output,
+which only ever worked for processes whose command line happened to contain the macOS prefix
+path. Most Wine helper processes (`winedevice.exe`, `explorer.exe`, `steamservice.exe`, an orphaned
+`steamwebhelper.exe`) report only their **Windows** command line, so `argv` never contains the
+macOS path an `argv`-matching sweep needs — invisible to the old sweep by construction, not by bad
+luck.
+
+Worse than a blind spot in the sweep: `wineserver -k` only reaps processes tracked by the
+**current** wineserver generation. A straggler left behind by an **earlier** wineserver (already
+exited) is invisible to a fresh `wineserver -k` too, and outlives every "shut this prefix down"
+attempt that assumes one live wineserver is the whole story. That is the actual mechanism behind
+"Steam won't quit" — not a failure of `wineserver -k` itself (confirmed live: called with the
+correct `WINEPREFIX`, it DOES fully reap its own generation's children), but same-prefix stragglers
+from a wineserver generation that no longer exists to own them.
+
+Root-caused with `lsof -p <pid>`, which asks a SPECIFIC process what files it has open rather than
+guessing from `argv` — a different, more reliable operation than `lsof +D <prefix>` (tried once
+before, in the investigation that closed `quitSteamBlockReason`'s over-block as WONTFIX, and found
+to miss a process known to be running: scanning a directory for open handles is not the same
+operation as interrogating a process directly). Before writing anything that kills a process based
+on this, verified `lsof -p` attribution against 11 real processes across TWO SIMULTANEOUSLY running
+prefixes: zero misses, zero false matches, including every class the old sweep couldn't see.
+
+**The fix** — `processesBelongingToPrefix(_:)` (`AppModel.swift`) replaces the `argv`-matching
+sweep: scopes to Wine-shaped candidates first (a Windows-style command line, or a known Wine binary
+name) so it never runs `lsof` against every process on the Mac, then confirms each candidate via
+`lsof -p` against the prefix path. `terminateThenKillIfNeeded(_:)` sends `SIGTERM`, waits a 2s grace
+period, then `SIGKILL`s whatever ignored it — the same escalation shape `Shell.run`'s own timeout
+handling already used, and directly informed by `steamservice.exe` ignoring `SIGTERM` in the
+original live report.
+
+`quitSteam(in:)` used to return a bare `Bool` — a failure said nothing about what was still alive,
+so the user's only recourse was "try again, or restart your Mac" regardless of cause. It now
+populates `@Published var lastQuitSteamFailure: String?` (`[DEC-E09]`-tagged) on failure, reusing
+`processesBelongingToPrefix` a second time, scoped to the bottle's own prefix, to name exactly what
+survived — or, if nothing survived locally, to note that Steam is running in a *different* bottle's
+prefix, since `isSteamRunning()` is a global `ps` check (see `quitSteamBlockReason`'s doc comment).
+Surfaced in `BottleDetailView`'s Quit Steam confirmation result and in `--quit-steam`'s per-bottle
+CLI output.
+
+**Live-verified end to end**, not just built: launched Steam for real in the `Steam-Wine11` prefix
+via `--play-test`, confirmed `lsof -p` scoping against both `steam.exe` and `wineserver` before
+touching anything, ran `--quit-steam`, and confirmed every bottle reported `stopped` with a clean
+`ps` sweep afterward — zero Wine/Steam processes left running, zero stragglers. Full 54-test suite
+passes; app bundle rebuilt via `Scripts/make_app.sh`.

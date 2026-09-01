@@ -19,6 +19,7 @@ enum FailureCode: String {
     case launch = "DEC-E06"         // a game/Steam launch didn't produce anything
     case save = "DEC-E07"           // bottles.json failed to write
     case salvage = "DEC-E08"        // bottles.json was unreadable and had to be reset
+    case quit = "DEC-E09"           // Steam did not fully shut down after quitSteam
 
     /// Prepends the code to a message — the one place this formatting is decided, so a grep for
     /// "DEC-E" across every failure site (or a diagnostics export) finds the same shape everywhere.

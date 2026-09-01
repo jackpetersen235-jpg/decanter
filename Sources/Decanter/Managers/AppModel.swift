@@ -434,9 +434,9 @@ final class AppModel: ObservableObject {
                 var any = false
                 for bottle in bottles where bottle.isSteamInstalled {
                     let ok = await quitSteam(in: bottle)
-                    FileHandle.standardError.write(
-                        "  \(bottle.name.prefix(40)): \(ok ? "stopped" : "STILL RUNNING")\n"
-                            .data(using: .utf8)!)
+                    var line = "  \(bottle.name.prefix(40)): \(ok ? "stopped" : "STILL RUNNING")"
+                    if !ok, let detail = lastQuitSteamFailure { line += " — \(detail)" }
+                    FileHandle.standardError.write((line + "\n").data(using: .utf8)!)
                     any = true
                 }
                 if !any { FileHandle.standardError.write("no Steam bottles\n".data(using: .utf8)!) }
@@ -2448,6 +2448,68 @@ final class AppModel: ObservableObject {
         return activated
     }
 
+    /// Finds every process that belongs to `prefixPath` but that the OLD straggler sweep missed —
+    /// Wine helper processes (`winedevice.exe`, `explorer.exe`, `steamservice.exe`, an orphaned
+    /// `steamwebhelper.exe`) report ONLY Windows command lines, so `argv` never contains the macOS
+    /// prefix path an `argv`-matching sweep needs. Worse: `wineserver -k` only reaps processes
+    /// tracked by the CURRENT wineserver — a straggler left behind by an EARLIER wineserver
+    /// generation (already exited) is invisible to it too, and outlives every "shut this prefix
+    /// down" attempt that assumes one live wineserver is the whole story.
+    ///
+    /// FOUND live (2026-08-30): reported directly — "windows steam isn't closing". `--quit-steam`
+    /// stopped the main Steam process but left `winedevice.exe` and `steamservice.exe` running,
+    /// one of which ignored `SIGTERM` outright. Root-caused with `lsof -p`, which asks a SPECIFIC
+    /// process what it has open rather than guessing from `argv` — and unlike `lsof +D <prefix>`
+    /// (tried once before, in the investigation that closed `quitSteamBlockReason`'s over-block as
+    /// WONTFIX, and found to miss a process known to be running), `lsof -p <pid>` interrogates one
+    /// process directly rather than scanning a directory for open handles, which is a different,
+    /// more reliable operation. Verified against 11 real processes across TWO SIMULTANEOUSLY
+    /// running prefixes before trusting this for anything that kills processes: zero misses, zero
+    /// false matches, including every class the old sweep couldn't see.
+    ///
+    /// Scoped to Wine-shaped candidates only — a Windows command line, or a known Wine binary name
+    /// — so this never runs `lsof` against every process on the Mac; only the handful that could
+    /// plausibly belong to a prefix at all.
+    private func processesBelongingToPrefix(_ prefixPath: String) async -> [(pid: Int32, command: String)] {
+        guard let ps = try? await Shell.run(URL(fileURLWithPath: "/bin/ps"),
+                                            arguments: ["-Ao", "pid=,command="]) else { return [] }
+        let candidates: [(pid: Int32, command: String)] = ps.stdout
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .compactMap { rawLine in
+                let line = rawLine.trimmingCharacters(in: .whitespaces)
+                guard let spaceIdx = line.firstIndex(of: " ") else { return nil }
+                let pidPart = line[line.startIndex..<spaceIdx]
+                let command = String(line[line.index(after: spaceIdx)...])
+                let looksWineRelated = command.hasPrefix("C:") || command.hasPrefix("c:")
+                    || command.contains("wineserver") || command.hasSuffix("/wine")
+                    || command.contains("/wine ")
+                guard looksWineRelated, let pid = Int32(pidPart) else { return nil }
+                return (pid, command)
+            }
+
+        var matches: [(pid: Int32, command: String)] = []
+        for candidate in candidates {
+            guard let lsof = try? await Shell.run(URL(fileURLWithPath: "/usr/sbin/lsof"),
+                                                  arguments: ["-p", String(candidate.pid)], timeout: 10),
+                  lsof.stdout.contains(prefixPath)
+            else { continue }
+            matches.append(candidate)
+        }
+        return matches
+    }
+
+    /// Sends SIGTERM to every PID, waits a short grace period, then SIGKILLs whatever is still
+    /// alive. Same escalation shape as `Shell.run`'s own timeout handling — a process that ignores
+    /// a polite signal (confirmed to happen: `steamservice.exe` did, live, in the report this was
+    /// built from) still needs to actually go.
+    private func terminateThenKillIfNeeded(_ pids: [Int32]) async {
+        guard !pids.isEmpty else { return }
+        for pid in pids { kill(pid, SIGTERM) }
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        let stillAlive = pids.filter { kill($0, 0) == 0 }
+        for pid in stillAlive { kill(pid, SIGKILL) }
+    }
+
     /// Shut a bottle's prefix down cleanly with `wineserver -k`, then sweep the stragglers.
     ///
     /// `wineserver -k` FIRST is not optional. Killing wineserver directly orphans its children —
@@ -2472,18 +2534,13 @@ final class AppModel: ObservableObject {
         //      one of those names was a kill target. Same class as the pgrep self-matches, but
         //      destructive instead of merely wrong.
         // `wineserver -k` above is the real mechanism and handles Wine's own services; this only
-        // needs to catch stragglers, and now only ones demonstrably belonging to THIS prefix.
+        // needs to catch stragglers, and now only ones demonstrably belonging to THIS prefix —
+        // via `processesBelongingToPrefix`, not `argv`, which is what used to miss every Wine
+        // helper (see that function's doc comment for the live report this replaced).
         let prefixPath = bottle.url.standardizedFileURL.path
-        if let ps = try? await Shell.run(URL(fileURLWithPath: "/bin/ps"),
-                                         arguments: ["-Ao", "pid=,command="]) {
-            let pids = ps.stdout.split(separator: "\n").compactMap { line -> String? in
-                guard line.contains(prefixPath) else { return nil }
-                return line.trimmingCharacters(in: .whitespaces)
-                    .split(separator: " ", maxSplits: 1).first.map(String.init)
-            }
-            if !pids.isEmpty {
-                _ = try? await Shell.run(URL(fileURLWithPath: "/bin/kill"), arguments: ["-9"] + pids)
-            }
+        let stragglers = await processesBelongingToPrefix(prefixPath)
+        if !stragglers.isEmpty {
+            await terminateThenKillIfNeeded(stragglers.map(\.pid))
         }
         try? await Task.sleep(nanoseconds: 2_000_000_000)
     }
@@ -2653,15 +2710,49 @@ final class AppModel: ObservableObject {
              + "playing it instead."
     }
 
-    /// process has gone. Reports whether Steam is actually gone rather than assuming.
+    /// Failure detail for `quitSteam` — same shape as `lastLaunchFailure`/`lastSaveFailure`, so a
+    /// "Steam did not shut down" failure NAMES what's actually still alive instead of leaving the
+    /// user to guess and retry blind. Built on `processesBelongingToPrefix`, the same lsof-based
+    /// attribution `shutdownPrefix`'s straggler sweep uses — see that function's doc comment for
+    /// the live "windows steam isn't closing" report this whole mechanism traces back to.
+    @Published var lastQuitSteamFailure: String?
+
+    /// Ask Steam to quit, then confirm rather than assume: disable auto-start so it can't just
+    /// relaunch itself, shut the prefix down (twice — the first `wineserver -k` sometimes only
+    /// clears the initial refusal), and only report success once the Steam process has gone.
+    /// Reports whether Steam is actually gone rather than assuming.
     @discardableResult
     func quitSteam(in bottle: Bottle) async -> Bool {
         await disableSteamAutoStart(in: bottle)
         await shutdownPrefix(for: bottle)
         if await isSteamRunning() { await shutdownPrefix(for: bottle) }
         let stopped = await !isSteamRunning()
-        // The menu-bar icon outlives Steam; clear it now that nothing is running.
-        if stopped { reapOrphanedSystray() }
+        if stopped {
+            // The menu-bar icon outlives Steam; clear it now that nothing is running.
+            reapOrphanedSystray()
+            lastQuitSteamFailure = nil
+        } else {
+            let prefixPath = bottle.url.standardizedFileURL.path
+            let survivors = await processesBelongingToPrefix(prefixPath)
+            if survivors.isEmpty {
+                // Nothing left in THIS bottle's own prefix, yet `isSteamRunning()` — which is
+                // global, not per-prefix (see `quitSteamBlockReason`'s doc comment above) —
+                // still says yes. The only honest explanation is Steam running in a DIFFERENT
+                // bottle's prefix, not this one.
+                lastQuitSteamFailure = FailureCode.quit.tag(
+                    "Steam is still running, but not in \(bottle.name)'s prefix — check other "
+                    + "bottles that share a prefix with it.")
+            } else {
+                var names: [String] = []
+                for survivor in survivors {
+                    let name = windowsPathLastComponent(survivor.command)
+                    if !names.contains(name) { names.append(name) }
+                }
+                lastQuitSteamFailure = FailureCode.quit.tag(
+                    "Steam did not fully shut down — still running: \(names.joined(separator: ", "))."
+                    + " Try again, or restart your Mac.")
+            }
+        }
         return stopped
     }
 
