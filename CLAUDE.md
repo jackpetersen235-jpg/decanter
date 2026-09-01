@@ -1443,3 +1443,39 @@ via `--play-test`, confirmed `lsof -p` scoping against both `steam.exe` and `win
 touching anything, ran `--quit-steam`, and confirmed every bottle reported `stopped` with a clean
 `ps` sweep afterward — zero Wine/Steam processes left running, zero stragglers. Full 54-test suite
 passes; app bundle rebuilt via `Scripts/make_app.sh`.
+
+## Hardening plan Phase 2 — characterization tests for the chokepoints (2026-09-01)
+
+`Wine.environment` (12 call sites — every launch, every registry write) and `BottleSettings.derivedEnvironment`
+had **zero** direct tests before this, despite being the exact function whose missing keys
+(`sampleNaNToZero`, `defuseFma`) went unnoticed for weeks until the 2026-08-29 settings-parity
+audit caught them by hand, and the exact function whose F14 regression (a prefix-wide
+`WINEDLLOVERRIDES` leaking onto sibling bottles through Steam's inherited environment) shipped
+unnoticed too. These are **characterization tests**, not new behavior specs — the goal is pinning
+what these functions already do (each line expensively learned, several from a live game session)
+so the next change that alters output has to do so on purpose, not by accident.
+
+- [`BottleSettingsEnvironmentTests.swift`](Tests/DecanterTests/BottleSettingsEnvironmentTests.swift)
+  (15 tests) — pins `derivedEnvironment` key-by-key for every `SyncMode` and every
+  `GraphicsBackend`, including the exact `DXMT_CONFIG` string, and asserts `WINEDLLOVERRIDES` is
+  never set for ANY backend (F14 as a permanent guard, not just a comment). Pure value type, no I/O.
+- [`WineEnvironmentTests.swift`](Tests/DecanterTests/WineEnvironmentTests.swift) (13 tests) — pins
+  `Wine.environment`'s own contribution: `WINEPREFIX`/`WINELOADER`/`WINESERVER` vs. the CrossOver
+  `CX_ROOT`/`CX_BOTTLE` branch, `PATH` prepending, the conditional `DYLD_FALLBACK_LIBRARY_PATH`,
+  the shader-cache directory actually getting created on disk, `WINEDEBUG` toggling, and the
+  fast-sync stripping that runs — found worth pinning explicitly — **after** `derivedEnvironment`
+  is merged in, so it can strip even a user-supplied override. Runs against a scratch
+  `DECANTER_HOME` per test (`PathsTests`' pattern), never the real install.
+- [`ShellTests.swift`](Tests/DecanterTests/ShellTests.swift) gained the three gaps the plan called
+  out: a pipe-buffer deadlock proof (5 MB through a 64 KB kernel pipe buffer, confirming the
+  async-`readabilityHandler` drain doesn't wedge the way a naive blocking read would), a
+  non-existent-executable case (must fail immediately, not silently fall through to the 30s
+  timeout), and `currentDirectory` actually reaching the child process — for both `Shell.run` AND
+  `Shell.stream` separately, since they build their own `Process` independently and a fix to one
+  proves nothing about the other. `currentDirectory` was new as of the pre-release debug plan's
+  Phase 3 (the JJBA config-file-in-the-wrong-place bug) and had never been tested at all.
+
+All 32 new tests passed on the first run — the point of a characterization test is that it should,
+if it's actually describing what the code already does. 86/86 total, full suite. No production
+code changed in this phase; `Shell.run`, `Shell.stream`, `Wine.environment` and
+`BottleSettings.derivedEnvironment` are unmodified from before.
