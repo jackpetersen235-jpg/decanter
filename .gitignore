@@ -12,9 +12,10 @@ Assets/bbox.txt
 # macOS
 .DS_Store
 
-# Compiled diagnostic tools — rebuild with Scripts/sekiro/build-gpustall.sh,
-# or the clang line in the header comment of the corresponding .m file.
+# Compiled diagnostic tools — rebuild with Scripts/sekiro/build-gpustall.sh /
+# build-framestat.sh, or the clang line in the header comment of the corresponding .m file.
 Scripts/sekiro/libgpustall.dylib
+Scripts/sekiro/libframestat.dylib
 Scripts/sekiro/gpuwake
 
 # External-reviewer scratch/coordination notes — not project source, must not be committed.
