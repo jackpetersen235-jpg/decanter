@@ -138,11 +138,30 @@ struct ConfigurationView: View {
                      + "entirely. Measured on Peggle Deluxe: 18 fps → 90 fps. Leave OFF for 3D games.")
                     .font(.caption).foregroundStyle(.secondary)
 
-                Toggle("Borderless fullscreen", isOn: $bottle.settings.borderlessFullscreen)
+                // The two window modes are opposite trades, so turning one on turns the other off.
+                Toggle("Borderless fullscreen", isOn: Binding(
+                    get: { bottle.settings.borderlessFullscreen },
+                    set: { on in
+                        bottle.settings.borderlessFullscreen = on
+                        if on { bottle.settings.nativeWindow = false }
+                    }))
                 Text("Runs the game in a real window sized to fill your screen, instead of "
                      + "whatever window mode it starts in — Cmd+Tab and the Dock still work. Turn "
                      + "this on for a game that doesn't fill the screen on its own or looks wrong "
                      + "in its normal fullscreen mode.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Toggle("Real game window", isOn: Binding(
+                    get: { bottle.settings.nativeWindow },
+                    set: { on in
+                        bottle.settings.nativeWindow = on
+                        if on { bottle.settings.borderlessFullscreen = false }
+                    }))
+                Text("The game opens in an ordinary Mac window you can move, minimize, and take "
+                     + "fullscreen with the green button — and macOS Game Mode turns on while it's "
+                     + "fullscreen. Decanter starts the game itself instead of through Steam's Play "
+                     + "button (Steam still runs alongside). Experimental: Borderless fullscreen is "
+                     + "the mode frame pacing was tuned on.")
                     .font(.caption).foregroundStyle(.secondary)
 
                 Toggle("Retina / HiDPI mode", isOn: $bottle.settings.retinaMode)

@@ -1429,7 +1429,9 @@ final class AppModel: ObservableObject {
     /// prefix is not worth that risk.
     private func applyBorderlessFullscreen(_ bottle: Bottle, installation: WineInstallation,
                                            env: [String: String], console: TaskConsole) async {
-        guard bottle.settings.borderlessFullscreen,
+        // `nativeWindow` is the opposite trade (a real window instead of a borderless desktop);
+        // when a bottle has both on, it wins — `ensureNativeWindow` undoes what this would write.
+        guard bottle.settings.borderlessFullscreen, !bottle.settings.nativeWindow,
               let exe = resolvedGame(for: bottle)?.executable.lastPathComponent
         else { return }
 
@@ -1457,53 +1459,60 @@ final class AppModel: ObservableObject {
         }
 
         if exe.lowercased() == "sekiro.exe" {
-            patchSekiroGraphicsConfig(bottle: bottle, width: Int(size.width), height: Int(size.height),
-                                      console: console)
+            let width = Int(size.width), height = Int(size.height)
+            patchSekiroGraphicsConfig(bottle: bottle,
+                                      values: SekiroGraphicsConfig.fullscreenValues(width: width, height: height),
+                                      summary: "\(width)×\(height), fullscreen", console: console)
         }
     }
 
-    /// Sekiro keeps its OWN fullscreen/resolution preference in a config file, separate from the
-    /// Wine-level virtual desktop `applyBorderlessFullscreen` sets up above — and its
-    /// "auto-detect best rendering settings" can silently reset the window mode/resolution back
-    /// to whatever IT thinks is best, undoing the Wine-level fix on the game's own next launch.
+    /// Same shape as `ensureBorderlessFullscreen`: settings the game must already have when it
+    /// starts are written fresh on every launch. For a "Real game window" bottle that means:
+    ///   - remove the per-app virtual desktop a borderless session may have left on this exe —
+    ///     otherwise Wine puts the game straight back inside a borderless desktop window;
+    ///   - for Sekiro, switch its own config to windowed at the screen's FULLSCREEN content size.
+    ///     The game renders at its window size and the window does not grow when macOS takes it
+    ///     fullscreen, so any smaller size means black bars in fullscreen.
+    func ensureNativeWindow(for bottle: Bottle) async {
+        guard bottle.settings.nativeWindow,
+              let installation = installation(for: bottle),
+              let exe = resolvedGame(for: bottle)?.executable.lastPathComponent
+        else { return }
+        let console = TaskConsole(title: "Window")
+        let env = Wine.environment(for: bottle, using: installation)
+        let appKey = #"HKCU\Software\Wine\AppDefaults\"# + exe + #"\Explorer"#
+        // Fails harmlessly ("value not found") when there was no desktop to remove.
+        _ = try? await Shell.run(installation.loader,
+                                 arguments: ["reg", "delete", appKey, "/v", "Desktop", "/f"],
+                                 environment: env)
+
+        guard exe.lowercased() == "sekiro.exe" else { return }
+        guard let size = NativeWindow.currentFullscreenContentSize() else {
+            console.append("No screen found — left Sekiro's window size as it was.")
+            return
+        }
+        let width = Int(size.width), height = Int(size.height)
+        patchSekiroGraphicsConfig(bottle: bottle,
+                                  values: SekiroGraphicsConfig.windowedValues(width: width, height: height),
+                                  summary: "\(width)×\(height), windowed", console: console)
+    }
+
+    /// Sekiro keeps its OWN window mode and resolution in `GraphicsConfig.xml`, which outranks
+    /// anything Wine does with the window — see `SekiroGraphicsConfig` for the file's quirks.
     /// Same settings-parity audit finding: only ever fixed by hand, via a one-time external
     /// script edit to this exact file — nothing in Decanter's own code knew this file existed.
-    ///
-    /// Sekiro-specific ON PURPOSE: this is that one game's own config path and XML schema, not a
-    /// generic Wine mechanism the way the registry keys above are — hence the exe-name check at
-    /// the call site rather than a general per-bottle setting.
-    ///
-    /// The file is UTF-16LE with no byte-order mark (verified directly on the real file before
-    /// writing any code against it — a round-trip decode/re-encode came back byte-identical).
-    /// Silently does nothing if the file doesn't exist yet — it's written by Sekiro's OWN first
-    /// run, so a bottle that has never launched the game has nothing to patch.
-    private func patchSekiroGraphicsConfig(bottle: Bottle, width: Int, height: Int, console: TaskConsole) {
-        let path = bottle.url.appendingPathComponent(
-            "drive_c/users/\(NSUserName())/AppData/Roaming/Sekiro/GraphicsConfig.xml")
+    /// Silently does nothing if the file doesn't exist yet (the game's first run writes it).
+    private func patchSekiroGraphicsConfig(bottle: Bottle, values: [String: String],
+                                           summary: String, console: TaskConsole) {
+        let path = SekiroGraphicsConfig.file(in: bottle)
         guard let data = try? Data(contentsOf: path),
-              var text = String(data: data, encoding: .utf16LittleEndian)
+              let text = String(data: data, encoding: .utf16LittleEndian),
+              let patched = SekiroGraphicsConfig.patched(text, values: values),
+              let newData = patched.data(using: .utf16LittleEndian)
         else { return }
-
-        let wanted: [String: String] = [
-            "ScreenMode": "FULLSCREEN",
-            "Auto-detectBestRenderingSettings": "OFF",
-            "Resolution-FullScreenWidth": "\(width)",
-            "Resolution-FullScreenHeight": "\(height)",
-        ]
-        var changed = false
-        for (tag, value) in wanted {
-            guard let range = text.range(of: "<\(tag)>[^<]*</\(tag)>", options: .regularExpression)
-            else { continue }   // tag not present in this version of the file — leave it alone
-            let replacement = "<\(tag)>\(value)</\(tag)>"
-            if text[range] != replacement {
-                text.replaceSubrange(range, with: replacement)
-                changed = true
-            }
-        }
-        guard changed, let newData = text.data(using: .utf16LittleEndian) else { return }
         do {
             try newData.write(to: path)
-            console.append("Sekiro's own graphics config updated to match (\(width)×\(height), fullscreen).")
+            console.append("Sekiro's own graphics config updated to match (\(summary)).")
         } catch {
             console.append("Could not update Sekiro's graphics config: \(error.localizedDescription)")
         }
@@ -2262,6 +2271,7 @@ final class AppModel: ObservableObject {
             // Safe here: the launch is claimed, so a second click short-circuits above.
             await ensureSoftware2D(for: bottle)
             await ensureBorderlessFullscreen(for: bottle)
+            await ensureNativeWindow(for: bottle)
             await launchGPUKeepAliveIfNeeded(for: bottle)
 
             // Make sure anything newly installed has the patched graphics driver BEFORE it runs.
@@ -2273,8 +2283,9 @@ final class AppModel: ObservableObject {
 
             // DIRECT-EXE bottles: run the game binary itself rather than `steam.exe -applaunch`.
             // Needed for titles whose Steam entry point is an anti-cheat shim (EAC does not work
-            // under Wine on macOS). Steam must still be up first for steam_api64 to connect.
-            let direct = (bottle.settings.directExecutable ?? "").trimmingCharacters(in: .whitespaces)
+            // under Wine on macOS), and for every "Real game window" bottle (see
+            // `directLaunchTarget`). Steam must still be up first for steam_api64 to connect.
+            let direct = directLaunchTarget(for: bottle)
             if !direct.isEmpty {
                 // Did WE start Steam for this session? Only then may we shut it down afterwards —
                 // a Steam the user already had open is theirs, not ours to close.
@@ -2314,9 +2325,15 @@ final class AppModel: ObservableObject {
                     .deletingLastPathComponent()
                 var directExtraEnv = steamAppEnvironment(for: bottle)
                 for (k, v) in shaderCacheOverride(for: bottle) { directExtraEnv[k] = v }
-                launchQuietly(bottle: bottle, arguments: [direct],
-                              extraEnvironment: directExtraEnv,
-                              currentDirectory: gameFolder)
+                if bottle.settings.nativeWindow {
+                    await launchNativeWindowGame(bottle: bottle, arguments: [direct],
+                                                 extraEnvironment: directExtraEnv,
+                                                 currentDirectory: gameFolder)
+                } else {
+                    launchQuietly(bottle: bottle, arguments: [direct],
+                                  extraEnvironment: directExtraEnv,
+                                  currentDirectory: gameFolder)
+                }
                 suppressWineSystray(bottle: bottle, isGameLauncher: true)
                 reapSteamAfterGame(in: bottle, weStartedSteam: weStartedSteam)
                 // ⚠️ FOUND live during the pre-release debug plan's Phase 3 (2026-08-29):
@@ -2829,6 +2846,91 @@ final class AppModel: ObservableObject {
         let cache = Paths.shaderCache(for: bottle, gameKey: key)
         try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
         return ["DXMT_SHADER_CACHE_PATH": cache.path]
+    }
+
+    /// What the direct-exe branch of `launchSteam` should run — empty means "launch through
+    /// Steam's `-applaunch` as usual".
+    ///
+    /// An explicit `directExecutable` always wins (JJBA: Steam's entry point is an anti-cheat
+    /// shim). Otherwise a "Real game window" bottle launches its resolved game directly too: Steam
+    /// spawns `-applaunch` games itself, with an environment it builds from scratch, so neither
+    /// the window hook nor the games-category identity Game Mode needs could reach the game.
+    /// Steam still runs alongside — `launchSteam` starts it first — for steam_api64's DRM check.
+    private func directLaunchTarget(for bottle: Bottle) -> String {
+        let stored = (bottle.settings.directExecutable ?? "").trimmingCharacters(in: .whitespaces)
+        if !stored.isEmpty { return stored }
+        guard bottle.settings.nativeWindow,
+              let exe = resolvedGame(for: bottle)?.executable
+        else { return "" }
+        return exe.path
+    }
+
+    /// Launch a "Real game window" game through "Decanter Game.app" so it gets a games-category
+    /// app identity (Game Mode) and the window hook (resizable window → working green button).
+    /// See `BottleSettings.nativeWindow` for why each piece is needed.
+    ///
+    /// Opened through LaunchServices rather than spawned: only a LaunchServices launch registers
+    /// the process as that app — a plain child process of Decanter stays anonymous. One new
+    /// instance per game, so two games can each have their own.
+    ///
+    /// Degrades rather than fails: with no bundled host (a `swift run` dev build) or if
+    /// LaunchServices refuses it (e.g. Gatekeeper on a quarantined copy), the game still launches
+    /// the ordinary way with the hook injected — the window and green button work, Game Mode
+    /// doesn't — and the console says so.
+    private func launchNativeWindowGame(bottle: Bottle, arguments: [String],
+                                        extraEnvironment: [String: String],
+                                        currentDirectory: URL?) async {
+        guard let installation = installation(for: bottle) else { return }
+        let console = TaskConsole(title: "Window")
+        let gameName = arguments.first.map { windowsPathLastComponent($0) } ?? "the game"
+        let hook = Paths.bundledWindowHook?.path
+        if hook == nil {
+            console.append("Window hook not bundled — \(gameName) will open in a normal window, "
+                           + "but the green button may stay greyed out.")
+        }
+
+        var base = Wine.environment(for: bottle, using: installation)
+        for (k, v) in extraEnvironment { base[k] = v }
+
+        var installedHost: URL?
+        if let template = Paths.bundledGameHostTemplate {
+            do {
+                installedHost = try NativeWindow.installGameHost(template: template,
+                                                                 destination: Paths.installedGameHost)
+            } catch {
+                console.append("Couldn't install Decanter Game.app (\(error.localizedDescription)).")
+            }
+        }
+
+        if let host = installedHost {
+            let config = NSWorkspace.OpenConfiguration()
+            config.arguments = arguments
+            config.environment = NativeWindow.hostEnvironment(
+                base: base, loader: installation.loader.path,
+                workingDirectory: currentDirectory?.path, windowHook: hook)
+            config.createsNewApplicationInstance = true
+            config.activates = true
+            do {
+                _ = try await NSWorkspace.shared.openApplication(at: host, configuration: config)
+                console.append("Started \(gameName) as its own app — real window, green button "
+                               + "for fullscreen, Game Mode in fullscreen.")
+                return
+            } catch {
+                console.append("Couldn't start \(gameName) through Decanter Game.app "
+                               + "(\(error.localizedDescription)). Starting it directly instead — "
+                               + "the window works, but Game Mode won't engage.")
+            }
+        } else {
+            console.append("Decanter Game.app isn't available (dev build, or the install above "
+                           + "failed) — starting \(gameName) directly. The window works, but Game "
+                           + "Mode won't engage.")
+        }
+
+        var fallback = extraEnvironment
+        let inserts = NativeWindow.insertLibraries(windowHook: hook, base: base)
+        if !inserts.isEmpty { fallback["DYLD_INSERT_LIBRARIES"] = inserts.joined(separator: ":") }
+        launchQuietly(bottle: bottle, arguments: arguments, extraEnvironment: fallback,
+                      currentDirectory: currentDirectory)
     }
 
     /// Launch a long-lived program without popping a console sheet. Used for games/Steam, where

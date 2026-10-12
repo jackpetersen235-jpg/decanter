@@ -201,6 +201,25 @@ struct BottleSettings: Codable, Equatable {
     /// continuous background submission, so it's opt-in per bottle rather than assumed universal.
     var gpuKeepAlive: Bool = false
 
+    /// "Real game window": the game runs in an ordinary macOS window — move it, minimize it, and
+    /// use the green button for native fullscreen — and macOS Game Mode can engage. The opposite
+    /// trade from `borderlessFullscreen` (a Wine virtual desktop that fakes fullscreen with a
+    /// borderless window); when both are on, this one wins.
+    ///
+    /// Three things have to be true for this to work, and turning it on arranges all three:
+    ///   1. The window must be resizable. Games rarely ask for a resize border, and Wine only
+    ///      enables the green button for resizable windows — so a bundled hook adds the bit
+    ///      (Helpers/WindowHook/window-hook.m).
+    ///   2. The game process needs a games-category app identity, or Game Mode never engages — so
+    ///      the game is launched through "Decanter Game.app" (Helpers/GameHost/game-host.c).
+    ///   3. Neither survives Steam's `-applaunch` (Steam spawns the game itself, with its own
+    ///      environment), so Decanter starts the game executable directly — the same path
+    ///      `directExecutable` bottles already use — with Steam running alongside for its DRM.
+    ///
+    /// Measured 2026-10-12 — see GAMING-STACK.md §7b. Off by default: it changes how the game
+    /// presents frames, and the borderless desktop is the setup frame pacing was tuned on.
+    var nativeWindow: Bool = false
+
     var retinaMode: Bool = false      // HiDPI rendering inside the prefix
     var dpi: Int = 96                 // LogPixels
     var verboseLogging: Bool = false  // WINEDEBUG toggle
@@ -281,6 +300,7 @@ struct BottleSettings: Codable, Equatable {
         software2D      = v(.software2D, false)
         borderlessFullscreen = v(.borderlessFullscreen, false)
         gpuKeepAlive    = v(.gpuKeepAlive, false)
+        nativeWindow    = v(.nativeWindow, false)
         retinaMode      = v(.retinaMode, false)
         dpi             = v(.dpi, 96)
         verboseLogging  = v(.verboseLogging, false)

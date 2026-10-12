@@ -14,6 +14,13 @@ cd "$ROOT"
 # genuinely cannot launch on an Intel Mac, and this app gets passed around, so universal removes a
 # whole failure mode for about 1.5 MB.
 ARCHS=(--arch arm64 --arch x86_64)
+# NATIVE_ONLY=1 builds just this Mac's architecture. Universal builds need Xcode's xcbuild, so a
+# machine with only the Command Line Tools — or an Xcode whose license isn't accepted yet — can
+# still produce a local test build. Never ship a NATIVE_ONLY build to anyone else.
+if [ "${NATIVE_ONLY:-0}" = 1 ]; then
+  ARCHS=(--arch "$(uname -m)")
+  echo "▸ NATIVE_ONLY=1 — building $(uname -m) only (local testing; do not distribute)"
+fi
 
 echo "▸ Building ($CONFIG, universal)…"
 swift build -c "$CONFIG" "${ARCHS[@]}"
@@ -38,6 +45,29 @@ if [ -d "$ROOT/Assets/DXMT" ]; then
   mkdir -p "$APP/Contents/Resources/DXMT"
   cp "$ROOT/Assets/DXMT/"* "$APP/Contents/Resources/DXMT/"
 fi
+
+# "Real game window" (BottleSettings.nativeWindow) — two native pieces, built with plain clang
+# because neither belongs in the Swift package:
+#   - the window hook is an x86_64 dylib injected into Wine (which runs under Rosetta); dyld
+#     refuses a mismatched inserted library, so x86_64 ONLY — see Helpers/WindowHook/.
+#   - "Decanter Game.app" is the games-category app a game is launched through so macOS Game
+#     Mode can engage (see Helpers/GameHost/). It ships here only as a TEMPLATE: Decanter copies
+#     it to Application Support/Decanter and launches it from there, because Game Mode treats an
+#     app launched from inside another app's bundle as an extension and never engages for it
+#     (Paths.installedGameHost). Signed on its own so the installed copy carries a valid seal.
+SDK="$(xcrun --show-sdk-path)"
+echo "▸ Building window hook + game host"
+mkdir -p "$APP/Contents/Resources/WindowHook"
+clang -arch x86_64 -dynamiclib -fblocks -O2 -Wall -isysroot "$SDK" -mmacosx-version-min=14.0 \
+      -lobjc -o "$APP/Contents/Resources/WindowHook/libwindowhook.dylib" \
+      "$ROOT/Helpers/WindowHook/window-hook.m"
+HOST="$APP/Contents/Resources/GameHost/Decanter Game.app"
+mkdir -p "$HOST/Contents/MacOS" "$HOST/Contents/Resources"
+clang -arch arm64 -arch x86_64 -O2 -Wall -isysroot "$SDK" -mmacosx-version-min=14.0 \
+      -o "$HOST/Contents/MacOS/decanter-game-host" "$ROOT/Helpers/GameHost/game-host.c"
+cp "$ROOT/Helpers/GameHost/Info.plist" "$HOST/Contents/Info.plist"
+[ -f "$ROOT/Assets/AppIcon.icns" ] && cp "$ROOT/Assets/AppIcon.icns" "$HOST/Contents/Resources/AppIcon.icns"
+codesign --force --sign - "$HOST" >/dev/null
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

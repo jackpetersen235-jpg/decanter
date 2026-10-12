@@ -33,6 +33,7 @@ enum Uninstaller {
             ("Shader cache", Paths.shaderCacheRoot),
             ("Downloads (installers)", Paths.downloads),
             ("Logs", Paths.logsRoot),
+            ("Game launcher (Decanter Game.app)", Paths.installedGameHost),
             ("Backups", Paths.appSupport.appendingPathComponent("Backups", isDirectory: true)),
             ("Bottle index (bottles.json)", Paths.bottlesIndex),
         ]

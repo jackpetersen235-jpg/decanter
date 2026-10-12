@@ -116,6 +116,34 @@ enum Paths {
         return FileManager.default.isExecutableFile(atPath: bin.path) ? bin : nil
     }
 
+    /// The TEMPLATE of "Decanter Game.app" shipped inside this bundle — the games-category app a
+    /// "Real game window" game is launched through so macOS Game Mode will engage for it (see
+    /// Helpers/GameHost/game-host.c). Never launched from here: see `installedGameHost`. Nil in a
+    /// `swift run` dev build, which has no bundle; the caller falls back to a plain launch.
+    static var bundledGameHostTemplate: URL? {
+        guard let app = Bundle.main.resourceURL?
+            .appendingPathComponent("GameHost/Decanter Game.app", isDirectory: true) else { return nil }
+        let exe = app.appendingPathComponent("Contents/MacOS/decanter-game-host")
+        return FileManager.default.isExecutableFile(atPath: exe.path) ? app : nil
+    }
+
+    /// Where "Decanter Game.app" is installed and launched from: top level in Decanter's own data
+    /// folder, NOT nested inside Decanter.app. Measured 2026-10-12 — launched from inside another
+    /// app's bundle, `gamepolicyd` treats it as an app extension ("No appex record… Finding
+    /// containing app") and never opens a gaming session; the identical bundle at a top-level path
+    /// turned Game Mode on the instant the game went fullscreen. Removed by the uninstaller.
+    static var installedGameHost: URL {
+        appSupport.appendingPathComponent("Decanter Game.app", isDirectory: true)
+    }
+
+    /// The x86_64 window hook injected into a "Real game window" game — makes its window
+    /// resizable so the green button / native fullscreen works (Helpers/WindowHook/window-hook.m).
+    static var bundledWindowHook: URL? {
+        guard let dylib = Bundle.main.resourceURL?
+            .appendingPathComponent("WindowHook/libwindowhook.dylib") else { return nil }
+        return FileManager.default.fileExists(atPath: dylib.path) ? dylib : nil
+    }
+
     /// Rolling console history, so a crash or a force-quit doesn't take the only record of what
     /// just happened with it. Part of the pre-release debug plan's Phase 4 — before this, every
     /// `TaskConsole`'s text lived only in memory and died with the sheet that showed it, so a

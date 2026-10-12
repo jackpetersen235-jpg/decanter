@@ -36,6 +36,20 @@ final class UninstallerTests: XCTestCase {
         XCTAssertGreaterThan(plan.first?.bytes ?? 0, 0)
     }
 
+    /// "Real game window" installs Decanter Game.app into Decanter's data folder (it can't run from
+    /// inside the bundle — Game Mode ignores it there). An uninstall that left it behind would not
+    /// be a true uninstall.
+    func testInstalledGameHostIsRemovedByUninstall() throws {
+        let exe = Paths.installedGameHost.appendingPathComponent("Contents/MacOS/decanter-game-host")
+        try FileManager.default.createDirectory(at: exe.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try "host".write(to: exe, atomically: true, encoding: .utf8)
+
+        XCTAssertTrue(Uninstaller.plan().contains { $0.url == Paths.installedGameHost })
+        XCTAssertTrue(Uninstaller.execute().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: Paths.installedGameHost.path))
+    }
+
     /// The one deliberate difference from `OrphanReclaim`, which never scans `Backups/` at all
     /// (F21: it holds `RESTORE-*.sh`'s rollback material, live for as long as the app is in use).
     /// An uninstall is the one context where removing it too is exactly the point.

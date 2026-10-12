@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  "Decanter Game.app" — see game-host.c for why this bundle exists.
+
+  The games category is the point: it is what gives a game launched through this bundle a
+  games-category identity, which macOS Game Mode requires.
+
+  Everything else deliberately mirrors the Info.plist embedded in the Wine loader itself
+  (`launchctl plist __TEXT,__info_plist <wine>`), because once this bundle is the process's main
+  bundle, ITS keys replace Wine's:
+    - NSPrincipalClass WineApplication: Wine's own NSApplication subclass.
+    - No NSHighResolutionCapable: Wine's plist has none, and adding it could change the game's
+      backing scale, render size and frame rate.
+  LSUIElement is the one deliberate difference: Wine sets it, this bundle does not, so the game
+  is a normal app (Dock tile, Cmd+Tab) from the moment it starts. That is the configuration Game
+  Mode was measured working with.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>          <string>decanter-game-host</string>
+    <key>CFBundleIdentifier</key>          <string>com.decanter.app.gamehost</string>
+    <key>CFBundleName</key>                <string>Decanter Game</string>
+    <key>CFBundleDisplayName</key>         <string>Decanter Game</string>
+    <key>CFBundleIconFile</key>            <string>AppIcon</string>
+    <key>CFBundlePackageType</key>         <string>APPL</string>
+    <key>CFBundleShortVersionString</key>  <string>0.1.0</string>
+    <key>CFBundleVersion</key>             <string>1</string>
+    <key>CFBundleInfoDictionaryVersion</key> <string>6.0</string>
+    <key>CFBundleAllowMixedLocalizations</key> <true/>
+    <key>NSPrincipalClass</key>            <string>WineApplication</string>
+    <key>LSApplicationCategoryType</key>   <string>public.app-category.games</string>
+    <key>LSMinimumSystemVersion</key>      <string>14.0</string>
+</dict>
+</plist>

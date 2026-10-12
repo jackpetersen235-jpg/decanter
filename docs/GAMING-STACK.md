@@ -243,15 +243,18 @@ directory, so only that exe gets them. That's what the current setup does.
 > `BottleSettings.derivedEnvironment` deliberately does **not** emit `WINEDLLOVERRIDES` for
 > `.dxvk` — see the comment there. Don't "fix" it back.
 
-## 7. Fullscreen & macOS Game Mode — both impossible with Wine
+## 7. Fullscreen & macOS Game Mode
+
+> **CORRECTED 2026-10-12** — this section used to be titled "both impossible with Wine". Both
+> halves are reachable; see **7b** below. The two rows marked ⚠️ were wrong.
 
 | Approach | Result |
 |---|---|
 | Wine exclusive fullscreen | **Traps you** — captures the display, Cmd+Tab dead |
 | `CaptureDisplaysForFullscreen=n` | **Zoomed + still traps** — Wine can't switch display res without capture, so a low-res buffer renders 1:1 into a full-panel window |
 | Borderless at native res | 4× the pixels — destroys the perf gained |
-| Native macOS fullscreen (⌃⌘F) | **Wine doesn't implement it** — the green zoom button is greyed out |
-| **Game Mode** | Requires native fullscreen → **unreachable** |
+| ⚠️ Native macOS fullscreen (⌃⌘F) | ~~Wine doesn't implement it~~ — it does; the button is greyed because the game's window isn't **resizable** (7b) |
+| ⚠️ **Game Mode** | ~~unreachable~~ — needs native fullscreen **and** a games-category app identity on the game process itself (7b) |
 
 **UPDATE — borderless fullscreen IS achievable** (a per-app Wine virtual desktop):
 
@@ -280,6 +283,106 @@ Game Mode also needs the app to be a **games-category bundle**. We fixed the ide
 the Wine tree *inside* `Sekiro.app` (`Contents/Frameworks/Wine`, APFS clone) — `lsappinfo` now
 reports `bundleID="com.decanter.sekiro"`. **Identity was necessary but not sufficient**; Wine
 still can't produce the fullscreen state. Kept because it costs nothing.
+
+### 7b. Native fullscreen + Game Mode — measured working (2026-10-12)
+
+The missing half of the paragraph above. Identity was never the whole problem; the fullscreen
+state was blocked by one bit.
+
+**Why the green button is dead.** `-[WineWindow adjustFullScreenBehavior:]` in the shipped
+`winemac.so` (imp `0x163c0`, disassembled 2026-09-01) grants `FullScreenPrimary` — the live green
+button — only when **all** of: `styleMask & (Resizable|Utility) == Resizable`, not maximized, no
+parent/latent-parent window. Anything else → `FullScreenAuxiliary`, button greyed. No registry
+value touches this (every value `winemac.drv` reads was enumerated); it is driven purely by the
+Win32 window style. Sekiro's own windowed mode comes up as `styleMask 0x7` — titled, closable,
+miniaturizable, **no resize border** (games rarely set `WS_THICKFRAME`). That one missing bit is
+the entire reason.
+
+**The fix — the window hook.** `Helpers/WindowHook/window-hook.m` → `libwindowhook.dylib`
+(began as the experiment `Scripts/sekiro/fsforce.m`), injected with `DYLD_INSERT_LIBRARIES`, ORs
+`NSWindowStyleMaskResizable` into top-level titled WineWindows. Wine's own gate then computes
+`FullScreenPrimary` by itself (`collectionBehavior 0xa4`, `zoomButton=ENABLED`). Measured: Sekiro
+windowed → native fullscreen works.
+
+**Game Mode then needs identity on the GAME process.** Measured with `gamepolicyd`'s own log:
+
+| Game process identity | Native fullscreen | Result |
+|---|---|---|
+| `anon<wine>` (plain `wine sekiro.exe`) | yes | `gameDidLaunch:` fires, **no** gaming session, Game Mode never on |
+| `app<com.decanter.gmtest>` (wine `exec`'d from a games-category bundle) | yes, frontmost | `Full screen gaming session is now active` → **`Game mode status is now on`** |
+
+A games-category app merely *running* alongside (Decanter.app) does not count — the fullscreen
+frontmost process itself must be the game. `exec`ing wine from inside a bundle's
+`Contents/MacOS` is enough to give it that identity (same mechanism as `Sekiro.app`).
+
+### 7c. Shipped as "Real game window" (`BottleSettings.nativeWindow`, 2026-10-12)
+
+Opt-in per bottle (Configuration → Graphics); mutually exclusive with Borderless fullscreen.
+Verified end to end through Decanter's own Play path on an APFS clone of `Steam-Wine11`: game
+launched as `com.decanter.app.gamehost`, frontmost, green button live, and on fullscreen
+`Full screen gaming session is now active` → **`Game mode status is now on`**.
+
+**Launch path.** Steam's `-applaunch` spawns the game itself and rebuilds its environment, so
+neither the hook nor an app identity can reach it. A "Real game window" bottle therefore launches
+its game exe directly (the JJBA `directExecutable` path, Steam running alongside for DRM),
+through **"Decanter Game.app"** (`Helpers/GameHost/`): a games-category bundle opened via
+`NSWorkspace` that `exec`s Wine, so the game inherits its LaunchServices identity. `DYLD_*`
+travels renamed (`DECANTER_HOST_DYLD_*`) and the host restores it right before exec.
+
+**⚠️ The helper must NOT run from inside Decanter.app.** Launched from `Decanter.app/Contents/…`,
+`gamepolicyd` treats it as an app extension ("No appex record… Finding containing app") and
+never opens a gaming session — measured: nested = no Game Mode; the byte-identical bundle at a
+top-level path = Game Mode on at the instant of fullscreen. So the bundle ships as a TEMPLATE in
+`Contents/Resources/GameHost/` and Decanter installs it to
+`~/Library/Application Support/Decanter/Decanter Game.app` before launching (replaced when a new
+Decanter ships a different build; removed by the uninstaller).
+
+**Black bars — what's fixable and what isn't (measured).**
+- Sekiro is **locked to 16:9** and this screen (1470×956 points, notched) isn't, so *some* bars
+  exist in every mode — including the borderless desktop, where the game draws them itself.
+- In windowed mode Sekiro **snaps to its own resolution list**: asked for 1470×923 or 1470×827, it
+  takes **1440×810**, the largest 16:9 size it offers that fits the width. The old 1280×720 is
+  what made the bars big (≈95 pt per side → ≈15 pt).
+- Wine pins a non-resizable window's content min = max = its current size, and its
+  `window:willUseFullScreenContentSize:` returns `min(proposed, contentMaxSize)` — so native
+  fullscreen is exactly as big as the windowed window. Lifting the pin (`unpin` + `size` test
+  commands in the hook) does grow the window, but **Sekiro never re-renders on resize** — the
+  drawable stayed 2160×1218 — so a bigger window would only stretch the picture. Not done.
+- Net: Decanter asks Sekiro for the fullscreen content size and Sekiro picks its largest fit.
+  Fullscreen content on a notched Mac = screen height minus the menu-bar strip (33 here — one
+  point more than the 32 `safeAreaInsets.top` reports; `NativeWindow.fullscreenTopInset`).
+
+**Frame pacing — measured A/B, no regression.** `Scripts/sekiro/framestat.m` (times every
+`-[CAMetalLayer nextDrawable]`), title screen, screen unlocked and untouched, APFS clone:
+
+| Mode | fps (5 s windows) | interval p99 | worst frame | hitches >25 ms | drawable wait | render size |
+|---|---|---|---|---|---|---|
+| Borderless desktop (today's default) | 60.0 | ≈16.85 ms | 17–20 ms (one 38 ms) | 1 in 45 s | ≈0 ms | 1472×956 |
+| Real game window, native fullscreen | 59.4–61.8 | ≈17.1 ms | 17–24 ms | 0 in 40 s | ≈11.5 ms | 1440×812 |
+
+Both locked at 60. The ≈11.5 ms drawable wait in native fullscreen is the game finishing early
+and waiting for the display's refresh (vsync-locked), not a stall. Title screen, not combat —
+re-measure in real play before making this anything but opt-in.
+
+**Traps hit on the way, so nobody repeats them:**
+- **SIP strips `DYLD_*`** whenever an Apple system binary is exec'd — `nohup`, `env`, `bash -c`
+  and friends. Launching the injected game through `nohup` silently dropped the library, and
+  probing with `env`/`bash -c` then "proved" the variable was gone. Exec wine directly; to check
+  injection, look for the dylib's own log, not `env`.
+- A `DYLD_INSERT_LIBRARIES` constructor runs **before** `winemac.so` is loaded, so `WineWindow`
+  doesn't exist yet — the hook polls for the class instead of looking it up once.
+- **Two different `gamepolicyd` sessions on macOS 26.6.** Launching a games-category app logs
+  `Gaming session is now active` with status `paused`; going fullscreen logs `Full screen gaming
+  session is now active` (lowercase *gaming*) and then `on`. A case-sensitive
+  `CONTAINS "Gaming session"` filter misses the one that matters — use `CONTAINS[c]`.
+- **A locked screen invalidates frame-pacing and Game Mode runs.** The game keeps presenting at
+  60 fps to a screen nobody sees, and `loginwindow` is frontmost. Check
+  `CGSessionCopyCurrentDictionary` → `CGSSessionScreenIsLocked` before trusting a run.
+- **Cooperative activation**: a background process can't make itself frontmost
+  (`activateIgnoringOtherApps:` is ignored), and Game Mode keys off the frontmost app. Activate
+  through LaunchServices (`open <bundle>`) or a real click.
+- Don't reach for the Accessibility API on Wine windows: their menu bar and window objects
+  aren't exposed (`missing value`), so System Events can't drive them.
 
 ## 8. Things that are simply true and can't be engineered away
 

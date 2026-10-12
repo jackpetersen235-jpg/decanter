@@ -1681,3 +1681,40 @@ silently trust either way.
 
 Build/tests after all three fixes: 86/86 passing, full suite; `Scripts/make_app.sh` produces a
 universal `Decanter.app` with both `Decanter` and `gpukeepalive` present and code-signed.
+
+## "Real game window" — native fullscreen + macOS Game Mode (2026-10-12)
+
+New opt-in bottle setting `BottleSettings.nativeWindow` (Configuration → Graphics, mutually
+exclusive with Borderless fullscreen): the game runs in an ordinary macOS window, the green button
+takes it into native fullscreen, and Game Mode turns on. Full write-up with every measurement:
+**GAMING-STACK.md §7b/§7c** — read that before touching any of this.
+
+**Moving parts:**
+- `Helpers/WindowHook/window-hook.m` → `Contents/Resources/WindowHook/libwindowhook.dylib`
+  (x86_64). Adds the resize bit Wine's fullscreen gate needs. Silent unless
+  `DECANTER_WINDOWHOOK_DIR` is set, which also enables a test-command channel
+  (`dump`/`enter`/`exit`/`toggle`/`size W H`/`unpin`) — that's how fullscreen and Game Mode were
+  driven without clicking.
+- `Helpers/GameHost/` → "Decanter Game.app", a games-category bundle that `exec`s Wine so the game
+  gets an app identity. Ships as a template in `Contents/Resources/GameHost/`, **installed to and
+  launched from** `Application Support/Decanter/Decanter Game.app` — nested inside Decanter.app,
+  Game Mode never engages (`gamepolicyd` treats it as an app extension). Uninstaller removes it.
+- `NativeWindow.swift` / `SekiroGraphicsConfig.swift` — the pure parts (tested in
+  `NativeWindowTests`). `AppModel.ensureNativeWindow` / `launchNativeWindowGame` /
+  `directLaunchTarget` — the I/O. A "Real game window" bottle launches its exe directly (Steam's
+  `-applaunch` would strip both the hook and the identity), with graceful fallback to a plain
+  direct launch (window works, no Game Mode) if the host can't be installed or opened.
+- `Scripts/sekiro/framestat.m` — frame-pacing probe used for the A/B; not shipped.
+- `DECANTER_EXTRA_INSERT` (diagnostic): one more x86_64 library to inject into a "Real game
+  window" game, e.g. framestat. Never set `DYLD_INSERT_LIBRARIES` on Decanter itself — it's arm64
+  and dyld kills it for an x86_64 insert.
+
+**Measured, not assumed:** Game Mode on through Decanter's own Play path; frame pacing
+equivalent to the borderless desktop (both locked 60 fps, p99 ≈17 ms); black bars reduced but not
+eliminable — Sekiro is 16:9-locked, snaps to 1440×810 on this screen, and never re-renders on
+resize. All live runs used an APFS clone of `Steam-Wine11` in a scratch `DECANTER_HOME`; the live
+prefix was never touched. Title screen only — re-measure in real play before defaulting it on.
+
+**Build note:** `NATIVE_ONLY=1 bash Scripts/make_app.sh` builds this Mac's architecture only, for
+when universal builds are unavailable (Command Line Tools only, or Xcode's license not yet
+accepted — universal needs Xcode's xcbuild). Never distribute a NATIVE_ONLY build.
