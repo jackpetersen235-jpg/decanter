@@ -163,6 +163,11 @@ struct ConfigurationView: View {
                      + "button (Steam still runs alongside). Experimental: Borderless fullscreen is "
                      + "the mode frame pacing was tuned on.")
                     .font(.caption).foregroundStyle(.secondary)
+                if bottle.settings.nativeWindow,
+                   let reason = model.nativeWindowUnavailableReason(for: bottle) {
+                    Label(reason, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
 
                 Toggle("Retina / HiDPI mode", isOn: $bottle.settings.retinaMode)
                 Stepper("Screen DPI: \(bottle.settings.dpi)",

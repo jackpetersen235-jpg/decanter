@@ -22,6 +22,11 @@ final class AppModel: ObservableObject {
     /// click from spawning a duplicate before the first launch has fully come up.
     @Published private(set) var launchingBottleIDs: Set<Bottle.ID> = []
 
+    /// Bottles whose game launch Decanter is HOLDING until Steam signs in — the request exists
+    /// only in this process until then, so quitting Decanter drops it (see `LaunchWait`). Drives
+    /// the "keep Decanter open" caption under Play and the quit confirmation.
+    @Published private(set) var launchesWaitingForSteam: Set<Bottle.ID> = []
+
     /// True while the first-run setup wizard is actively running its steps. Keeps the wizard
     /// mounted (see ContentView) so creating the first bottle — which makes `bottles` non-empty —
     /// doesn't yank the wizard out from under the automation mid-way.
@@ -282,6 +287,42 @@ final class AppModel: ObservableObject {
                 let report = "stillOpening=\(stillOpening) failure=\(failure ?? "none")\n"
                 FileHandle.standardError.write(report.data(using: .utf8)!)
                 exit((stillOpening || failure != nil) ? 1 : 0)
+            }
+        }
+        // Headless replay of the 2026-10-21 four-minute launch (GAMING-STACK.md §7e): Quit Steam,
+        // select the bottle 3 s later (warm-start), press Play 4 s after that — the sequence the
+        // unified log recorded — then wait for the GAME, not just Steam, which is all
+        // `--play-test` can see. Quits Steam in the bottle's prefix and leaves the game running.
+        //   Decanter.app/Contents/MacOS/Decanter --quit-then-play-test "<bottle name>" [ceilingSeconds]
+        if let i = CommandLine.arguments.firstIndex(of: "--quit-then-play-test"),
+           i + 1 < CommandLine.arguments.count {
+            let name = CommandLine.arguments[i + 1]
+            let ceiling = CommandLine.arguments.count > i + 2
+                ? (Int(CommandLine.arguments[i + 2]) ?? 240) : 240
+            Task {
+                guard let bottle = bottles.first(where: { $0.name == name }) else {
+                    FileHandle.standardError.write("no such bottle: \(name)\n".data(using: .utf8)!)
+                    exit(1)
+                }
+                let start = Date()
+                func say(_ line: String) {
+                    let t = Int(Date().timeIntervalSince(start))
+                    FileHandle.standardError.write("[+\(t)s] \(line)\n".data(using: .utf8)!)
+                }
+                let quit = Task { await quitSteam(in: bottle) }
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                say("select \(name)")
+                userSelectedBottle(bottle.id)
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                say("play")
+                launchSteam(in: bottle)
+                say("quit finished — Steam stopped: \(await quit.value)")
+                for _ in 0..<(ceiling / 2) {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    if await isAnyGameRunning() { say("game running"); exit(0) }
+                }
+                say("no game after \(ceiling)s")
+                exit(1)
             }
         }
         // The `--trace-steam-launch` diagnostic used for the 2026-08-26 cold-login-stall
@@ -1431,7 +1472,7 @@ final class AppModel: ObservableObject {
                                            env: [String: String], console: TaskConsole) async {
         // `nativeWindow` is the opposite trade (a real window instead of a borderless desktop);
         // when a bottle has both on, it wins — `ensureNativeWindow` undoes what this would write.
-        guard bottle.settings.borderlessFullscreen, !bottle.settings.nativeWindow,
+        guard bottle.settings.borderlessFullscreen, !nativeWindowApplies(to: bottle),
               let exe = resolvedGame(for: bottle)?.executable.lastPathComponent
         else { return }
 
@@ -1474,7 +1515,7 @@ final class AppModel: ObservableObject {
     ///     The game renders at its window size and the window does not grow when macOS takes it
     ///     fullscreen, so any smaller size means black bars in fullscreen.
     func ensureNativeWindow(for bottle: Bottle) async {
-        guard bottle.settings.nativeWindow,
+        guard nativeWindowApplies(to: bottle),
               let installation = installation(for: bottle),
               let exe = resolvedGame(for: bottle)?.executable.lastPathComponent
         else { return }
@@ -2216,6 +2257,9 @@ final class AppModel: ObservableObject {
     private func warmStartSteam(for bottle: Bottle, prefixKey: String) async {
         guard warmStartTasks[prefixKey] == nil else { return }   // already warming this prefix
         let task = Task {
+            // Selecting a bottle right after Quit Steam must not start Steam inside the quit — see
+            // `quitSteam` for the four-minute launch that cost.
+            await waitForSteamQuit(in: bottle)
             guard await !isSteamRunning() else { return }   // already up — nothing to warm
             warmingPrefixKeys.insert(prefixKey)
             defer { warmingPrefixKeys.remove(prefixKey); warmStartTasks[prefixKey] = nil }
@@ -2269,6 +2313,8 @@ final class AppModel: ObservableObject {
             launchingBottleIDs.insert(bottle.id)
 
             // Safe here: the launch is claimed, so a second click short-circuits above.
+            // Nothing may touch the prefix while a Quit Steam is still tearing it down.
+            await waitForSteamQuit(in: bottle)
             await ensureSoftware2D(for: bottle)
             await ensureBorderlessFullscreen(for: bottle)
             await ensureNativeWindow(for: bottle)
@@ -2285,11 +2331,29 @@ final class AppModel: ObservableObject {
             // Needed for titles whose Steam entry point is an anti-cheat shim (EAC does not work
             // under Wine on macOS), and for every "Real game window" bottle (see
             // `directLaunchTarget`). Steam must still be up first for steam_api64 to connect.
+            if bottle.settings.nativeWindow, let reason = nativeWindowUnavailableReason(for: bottle) {
+                TaskConsole(title: "Window").append(reason)
+            }
             let direct = directLaunchTarget(for: bottle)
             if !direct.isEmpty {
+                // JOIN AN IN-FLIGHT WARM-START FIRST — it owns Steam's launch AND its logon wait.
+                //
+                // FOUND live 2026-10-21 ("decanter isn't working"): selecting a bottle warm-starts
+                // Steam; Play pressed seconds later found that Steam "running" (the process
+                // existed) but not yet logged on, so this branch skipped the logon wait and
+                // launched the game straight into it. Three Peggle clicks landed inside a 69-second
+                // cold login, and every one died to its DRM. The -applaunch path below has joined
+                // the warm-start since F27; this branch never did. Also covers the worse case: a
+                // warm-start that hasn't spawned Steam YET would otherwise see "not running" and
+                // start a SECOND client on top of it — the F27 collision itself.
+                let prefixKey = PrefixSharing.key(for: bottle.url)
+                if let warmTask = warmStartTasks[prefixKey] {
+                    await holdingLaunch(of: bottle) { await warmTask.value }
+                }
                 // Did WE start Steam for this session? Only then may we shut it down afterwards —
-                // a Steam the user already had open is theirs, not ours to close.
-                var weStartedSteam = false
+                // a Steam the user already had open is theirs, not ours to close. A warm-start that
+                // logged this prefix on counts as ours (same rule as the -applaunch path).
+                var weStartedSteam = warmStartedPrefixKeys.remove(prefixKey) != nil
                 if await !isSteamRunning() {
                     weStartedSteam = true
                     // Same bootstrap rule as the plain-Steam path below: skipping the initial
@@ -2308,7 +2372,15 @@ final class AppModel: ObservableObject {
                     // and simply dies — presenting as "the game won't launch" with nothing in any
                     // log. The bundled Sekiro launcher already polls connection_log.txt for this
                     // reason; this brings the app in line with it.
-                    await waitForSteamLogon(in: bottle, timeout: 150)
+                    await holdingLaunch(of: bottle) { await waitForSteamLogon(in: bottle, timeout: 150) }
+                } else if await !isSteamLoggedOn(in: bottle) {
+                    // Running but still signing in, and not a warm-start we could join — started
+                    // by hand, or a warm-start that timed out. `waitForSteamLogon` can't be used
+                    // here: it waits for a NEW logon line, and one that already landed would make
+                    // it sit out its whole timeout.
+                    TaskConsole(title: "Steam").append(
+                        "Waiting for Steam to finish signing in before starting the game…")
+                    await holdingLaunch(of: bottle) { await waitUntilSteamLoggedOn(in: bottle, timeout: 150) }
                 }
                 // ⚠️ ALSO FOUND live during the same Phase 3 pass, from an actual JJBA launch: with
                 // no `currentDirectory` set, the child process inherits DECANTER'S OWN working
@@ -2325,7 +2397,7 @@ final class AppModel: ObservableObject {
                     .deletingLastPathComponent()
                 var directExtraEnv = steamAppEnvironment(for: bottle)
                 for (k, v) in shaderCacheOverride(for: bottle) { directExtraEnv[k] = v }
-                if bottle.settings.nativeWindow {
+                if nativeWindowApplies(to: bottle) {
                     await launchNativeWindowGame(bottle: bottle, arguments: [direct],
                                                  extraEnvironment: directExtraEnv,
                                                  currentDirectory: gameFolder)
@@ -2375,9 +2447,13 @@ final class AppModel: ObservableObject {
             // process may not exist yet, briefly, right as the warm-start's own `launchQuietly`
             // call is executing — and Play would start a SECOND Steam client on top of it. That
             // collision is exactly the F27 regression ("missing its steam interface").
+            //
+            // The `-applaunch` below is sent only AFTER the warm-start finishes, so until then the
+            // launch exists only in this process — `holdingLaunch` is what tells the user to keep
+            // Decanter open (2026-10-21: quit 22 s before Steam signed in, Peggle never started).
             let prefixKey = PrefixSharing.key(for: bottle.url)
             if let warmTask = warmStartTasks[prefixKey] {
-                await warmTask.value
+                await holdingLaunch(of: bottle) { await warmTask.value }
             }
             // Did WE bring Steam up? Only then may we shut it down when the game exits — a Steam
             // the user already had open is theirs. Checked BEFORE launching, or the answer is
@@ -2474,18 +2550,16 @@ final class AppModel: ObservableObject {
 
     /// True if a Steam *client* process is running in any bottle.
     ///
-    /// The pattern must be `/steam\.exe` (leading FORWARD slash), not bare `steam\.exe`.
-    /// Steam's webhelper processes carry `-steampath=C:\Program Files (x86)\Steam\steam.exe`
-    /// in their argv, so a bare match also hits them — and those orphans survive for hours
-    /// after Steam exits (see GAMING-STACK.md §10). That made `launchSteam` believe Steam was
-    /// already up and short-circuit to `activateRunningGame()`, so the Launch button silently
-    /// did nothing. The real client's argv[0] is a unix path (`…/winetemp-…/steam.exe`) which
-    /// contains `/steam.exe`; the webhelper only ever has the Windows form `\steam.exe`.
+    /// Matched on each process's EXECUTABLE (`ps -o comm=`), never its arguments — see
+    /// `Steam.isClient`. This was `pgrep -f /steam\.exe`, itself a fix: a bare `steam\.exe` also
+    /// hit webhelpers (`-steampath=…\steam.exe`), orphans that outlive Steam for hours and made
+    /// Launch silently do nothing (GAMING-STACK.md §10). But any argument match still counted a
+    /// Wine launch of Steam that hung before it ever became Steam (`…/bin/wine …/Steam/steam.exe`)
+    /// — found live 2026-10-21 (GAMING-STACK.md §7e).
     private func isSteamRunning() async -> Bool {
-        guard let result = try? await Shell.run(
-            URL(fileURLWithPath: "/usr/bin/pgrep"),
-            arguments: ["-f", #"/steam\.exe"#]) else { return false }
-        return !result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard let result = try? await Shell.run(URL(fileURLWithPath: "/bin/ps"),
+                                                 arguments: ["-Ao", "comm="]) else { return false }
+        return result.stdout.split(separator: "\n").contains { Steam.isClient(comm: String($0)) }
     }
 
     /// Bring the already-running game/Steam window to the front (best effort).
@@ -2776,8 +2850,34 @@ final class AppModel: ObservableObject {
     /// relaunch itself, shut the prefix down (twice — the first `wineserver -k` sometimes only
     /// clears the initial refusal), and only report success once the Steam process has gone.
     /// Reports whether Steam is actually gone rather than assuming.
+    ///
+    /// One quit per prefix at a time, and anything that STARTS Steam waits for it
+    /// (`waitForSteamQuit`). A quit takes several seconds — `wineserver -k`, a 3 s pause, then a
+    /// sweep that kills whatever process it finds in the prefix — and a launch landing inside that
+    /// window gets swept with the rest. Found live 2026-10-21: Quit Steam, then selecting Peggle
+    /// three seconds later. The warm-start's Wine loader lost its wineserver to the sweep and hung
+    /// for good, Play waited out the warm-start's full 150 s for it, then needed a 66 s cold start:
+    /// four minutes from click to game (GAMING-STACK.md §7e).
     @discardableResult
     func quitSteam(in bottle: Bottle) async -> Bool {
+        let key = PrefixSharing.key(for: bottle.url)
+        if let inFlight = steamQuitTasks[key] { return await inFlight.value }
+        let quit = Task { await performQuitSteam(in: bottle) }
+        steamQuitTasks[key] = quit
+        let stopped = await quit.value
+        steamQuitTasks[key] = nil
+        return stopped
+    }
+
+    /// `quitSteam` calls still running, by prefix (`PrefixSharing.key`).
+    private var steamQuitTasks: [String: Task<Bool, Never>] = [:]
+
+    /// Let a `quitSteam` still tearing down `bottle`'s prefix finish before starting anything in it.
+    private func waitForSteamQuit(in bottle: Bottle) async {
+        if let quit = steamQuitTasks[PrefixSharing.key(for: bottle.url)] { _ = await quit.value }
+    }
+
+    private func performQuitSteam(in bottle: Bottle) async -> Bool {
         await disableSteamAutoStart(in: bottle)
         await shutdownPrefix(for: bottle)
         if await isSteamRunning() { await shutdownPrefix(for: bottle) }
@@ -2848,6 +2948,23 @@ final class AppModel: ObservableObject {
         return ["DXMT_SHADER_CACHE_PATH": cache.path]
     }
 
+    /// Why "Real game window" can't apply to `bottle`'s game, or nil when it can. Shown under the
+    /// toggle and logged at launch — the game then launches through Steam as usual instead of
+    /// failing, which is what happened before this existed: three Peggle clicks on 2026-10-21 each
+    /// reported "Started Peggle.exe as its own app" while its DRM put up "STEAM ERROR".
+    func nativeWindowUnavailableReason(for bottle: Bottle) -> String? {
+        guard let game = resolvedGame(for: bottle),
+              NativeWindow.requiresSteamToLaunch(gameFolder: game.folder)
+        else { return nil }
+        return "\(game.name)'s copy protection only runs when Steam starts it, so Decanter "
+             + "launches it through Steam as usual — Real game window can't apply to it."
+    }
+
+    /// The setting is on AND the game can actually be launched the way it needs.
+    private func nativeWindowApplies(to bottle: Bottle) -> Bool {
+        bottle.settings.nativeWindow && nativeWindowUnavailableReason(for: bottle) == nil
+    }
+
     /// What the direct-exe branch of `launchSteam` should run — empty means "launch through
     /// Steam's `-applaunch` as usual".
     ///
@@ -2859,7 +2976,7 @@ final class AppModel: ObservableObject {
     private func directLaunchTarget(for bottle: Bottle) -> String {
         let stored = (bottle.settings.directExecutable ?? "").trimmingCharacters(in: .whitespaces)
         if !stored.isEmpty { return stored }
-        guard bottle.settings.nativeWindow,
+        guard nativeWindowApplies(to: bottle),
               let exe = resolvedGame(for: bottle)?.executable
         else { return "" }
         return exe.path
@@ -2994,6 +3111,59 @@ final class AppModel: ObservableObject {
             }
         }
         return false
+    }
+
+    /// When `bottle`'s own steam.exe process started, or nil if it can't be found. Matched on a
+    /// command line that BEGINS with the bottle's steam.exe path, which scopes it to this prefix
+    /// (`Steam.clientStartDate`). `LC_ALL=C` keeps `lstart` in English on any Mac.
+    private func steamProcessStart(in bottle: Bottle) async -> Date? {
+        guard let ps = try? await Shell.run(URL(fileURLWithPath: "/bin/ps"),
+                                            arguments: ["-Ao", "lstart=,command="],
+                                            environment: ["LC_ALL": "C", "PATH": "/usr/bin:/bin"])
+        else { return nil }
+        return Steam.clientStartDate(ps: ps.stdout, steamExecutable: bottle.steamExecutable.path)
+    }
+
+    /// True when Steam's own log says this prefix's CURRENT client is logged on — not merely that
+    /// a steam.exe process exists, which is all `isSteamRunning` can tell.
+    private func isSteamLoggedOn(in bottle: Bottle) async -> Bool {
+        let log = bottle.driveC.appendingPathComponent("Program Files (x86)/Steam/logs/connection_log.txt")
+        guard let text = try? String(contentsOf: log, encoding: .utf8) else { return false }
+        return Steam.isLoggedOn(connectionLog: text, since: await steamProcessStart(in: bottle))
+    }
+
+    /// Poll Steam's log until the running client reports "Logged On", or `timeout` seconds pass.
+    /// Returns whether it did. Same 5-second grace as `waitForSteamLogon` once it lands: the client
+    /// logs on slightly before it is ready to answer a game.
+    @discardableResult
+    private func waitUntilSteamLoggedOn(in bottle: Bottle, timeout: Int) async -> Bool {
+        let log = bottle.driveC.appendingPathComponent("Program Files (x86)/Steam/logs/connection_log.txt")
+        let since = await steamProcessStart(in: bottle)
+        for _ in 0..<(timeout / 2) {
+            if let text = try? String(contentsOf: log, encoding: .utf8),
+               Steam.isLoggedOn(connectionLog: text, since: since) {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+        return false
+    }
+
+    /// Run `wait` with `bottle` marked as a launch Decanter is holding for Steam. Only for waits
+    /// that end with Decanter itself sending the launch — not for a cold `-applaunch` start, where
+    /// Steam already has the request in its own command line and survives Decanter quitting.
+    @discardableResult
+    private func holdingLaunch<T>(of bottle: Bottle, _ wait: () async -> T) async -> T {
+        launchesWaitingForSteam.insert(bottle.id)
+        defer { launchesWaitingForSteam.remove(bottle.id) }
+        return await wait()
+    }
+
+    /// What to ask before quitting while a launch is held, or nil to quit straight away.
+    func quitWarning() -> (title: String, message: String)? {
+        LaunchWait.quitWarning(gameNames: bottles.filter { launchesWaitingForSteam.contains($0.id) }
+                                                 .map(\.name))
     }
 
     /// Play stayed disabled — surfaces a launch that never produced anything, instead of the

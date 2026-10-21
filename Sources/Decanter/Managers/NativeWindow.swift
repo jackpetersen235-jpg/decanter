@@ -13,6 +13,23 @@ enum NativeWindow {
     /// Where the window hook writes its log and polls for test commands. Unset = silent.
     static let hookLogDirectoryVariable = "DECANTER_WINDOWHOOK_DIR"
 
+    /// Files whose presence in a game's folder mean its copy protection only runs when STEAM
+    /// starts the game — a direct launch, which "Real game window" depends on, can't work.
+    ///
+    /// `drm/common/drm.xml` is PopCap's DRM wrapper, used by its whole Steam catalogue (Peggle,
+    /// Bejeweled, Zuma…). Measured 2026-10-21 on Peggle Deluxe: launched directly — with Steam
+    /// running, logged in, and SteamAppId set — `Peggle.exe` opens a "STEAM ERROR" window instead
+    /// of the game, every time. Steam's own SteamStub wrapper is NOT on this list: Sekiro and
+    /// JJBA both carry it (a `.bind` PE section) and launch directly without complaint.
+    static let steamLaunchOnlyMarkers = ["drm/common/drm.xml"]
+
+    /// True when the game in `gameFolder` must be started by Steam itself.
+    static func requiresSteamToLaunch(gameFolder: URL, fileManager: FileManager = .default) -> Bool {
+        steamLaunchOnlyMarkers.contains {
+            fileManager.fileExists(atPath: gameFolder.appendingPathComponent($0).path)
+        }
+    }
+
     /// The size macOS gives a window in native fullscreen on a screen of `screenSize` points,
     /// when `topInset` points are reserved at the top (see `fullscreenTopInset`).
     static func fullscreenContentSize(screenSize: CGSize, topInset: CGFloat) -> CGSize {

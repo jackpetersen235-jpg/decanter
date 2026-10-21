@@ -1718,3 +1718,37 @@ prefix was never touched. Title screen only — re-measure in real play before d
 **Build note:** `NATIVE_ONLY=1 bash Scripts/make_app.sh` builds this Mac's architecture only, for
 when universal builds are unavailable (Command Line Tools only, or Xcode's license not yet
 accepted — universal needs Xcode's xcbuild). Never distribute a NATIVE_ONLY build.
+
+### 2026-10-21 — "decanter isn't working": Peggle + Real game window, three faults
+
+Full write-up: **GAMING-STACK.md §7d**. In short:
+1. **PopCap DRM (`drm/common/drm.xml`) refuses a direct launch** ("STEAM ERROR"), so Real game
+   window can't apply to Peggle and its siblings. Detected by `NativeWindow.requiresSteamToLaunch`;
+   such a bottle launches through `-applaunch` as usual and says why. SteamStub games are fine.
+2. **The direct-launch branch launched into a Steam still signing in.** It now joins the
+   warm-start and waits on `Steam.isLoggedOn(connectionLog:since:)` (`SteamLogonTests`).
+3. **Quitting Decanter while it held a launch silently dropped it.** When Play joins a warm-start,
+   the `-applaunch` is sent only after Steam signs in (~70 s cold), so until then it exists only in
+   Decanter's memory. Proven from the unified log: a Dock quit 22 s before sign-in, and Peggle
+   never started. `launchesWaitingForSteam` now drives a "starts by itself — keep Decanter open"
+   caption and a Keep Waiting / Quit Anyway alert (`QuitGuard`, `LaunchWait`, `LaunchWaitTests`).
+
+⚠️ **`--play-test` can't verify this path.** It calls `launchSteam` without selecting the bottle,
+so it never joins a warm-start (the path that failed), and it reports only that Steam came up, not
+that the game did. And `isSteamRunning()` is global: any other Steam (a clone's included) changes
+which launch path a test takes.
+
+### 2026-10-21 (later) — Quit Steam, then Play: four minutes to a game
+
+GAMING-STACK.md §7e. Pressing **Quit Steam** and then selecting the bottle started Steam inside
+the quit's own teardown, and the quit's straggler sweep killed the new wineserver. The Wine loader
+hung forever, and Play waited out the warm-start's 150 s, then a 66 s cold start. Fixes:
+- `quitSteam` runs once per prefix; the warm-start and `launchSteam` wait for it
+  (`waitForSteamQuit`).
+- `isSteamRunning()` matches the executable (`ps -o comm=`, `Steam.isClient`), not the command
+  line. `pgrep -f /steam\.exe` counted the hung `…/bin/wine …/steam.exe` loader as Steam, which
+  produced a false "[DEC-E09] Steam is still running" and a skipped sign-in wait
+  (`SteamProcessTests`).
+
+`--quit-then-play-test "<bottle>"` replays the sequence and waits for the game itself. Verified
+live: 74 s from Play to Peggle, all of it Steam's cold sign-in.

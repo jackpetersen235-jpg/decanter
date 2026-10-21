@@ -4,6 +4,7 @@ import SwiftUI
 struct DecanterApp: App {
     @StateObject private var model = AppModel()
     @StateObject private var themeController = ThemeController()
+    @NSApplicationDelegateAdaptor(QuitGuard.self) private var quitGuard
 
     var body: some Scene {
         WindowGroup {
@@ -21,6 +22,7 @@ struct DecanterApp: App {
                 // NSStatusItem in the menu bar indefinitely. This only fires when nothing is
                 // running in any bottle, so a live game's virtual desktop is never touched.
                 .task { model.reapOrphanedSystray() }
+                .task { quitGuard.model = model }
         }
         // Removes the title-bar STRIP while keeping the window controls.
         //
@@ -91,6 +93,24 @@ struct DecanterApp: App {
                 .environment(\.textTone, themeController.textTone)
                 .frame(width: 520, height: 500)
         }
+    }
+}
+
+/// Asks before quitting while a game launch is still waiting on Steam's sign-in — every quit path
+/// (⌘Q, the Dock, the app switcher) goes through `applicationShouldTerminate`. On 2026-10-21 a
+/// Dock quit 22 s before Steam signed in silently cost a Peggle launch.
+final class QuitGuard: NSObject, NSApplicationDelegate {
+    weak var model: AppModel?
+
+    @MainActor
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let warning = model?.quitWarning() else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = warning.title
+        alert.informativeText = warning.message
+        alert.addButton(withTitle: "Keep Waiting")
+        alert.addButton(withTitle: "Quit Anyway")
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateCancel : .terminateNow
     }
 }
 

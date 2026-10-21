@@ -384,6 +384,85 @@ re-measure in real play before making this anything but opt-in.
 - Don't reach for the Accessibility API on Wine windows: their menu bar and window objects
   aren't exposed (`missing value`), so System Events can't drive them.
 
+### 7d. "Decanter isn't working" — Peggle with Real game window on (2026-10-21)
+
+Reported as three Play clicks that each said "Started Peggle.exe as its own app", after which
+the game died about 2 seconds later. **Three separate faults**, found one after the other:
+
+1. **PopCap's DRM can't be launched directly.** Its wrapper (`drm/common/drm.xml` in the game
+   folder — the whole PopCap Steam catalogue) opens a "STEAM ERROR" window instead of the game
+   whenever Steam didn't start it, even with Steam running, signed in, and `SteamAppId` set.
+   Real game window depends on a direct launch, so it can't apply to these games.
+   `NativeWindow.requiresSteamToLaunch` detects the marker; Decanter then launches through
+   `-applaunch` as usual and says why (under the toggle, and in the console at launch). Steam's
+   own SteamStub wrapper (a `.bind` PE section — Sekiro, JJBA) is fine with direct launches.
+2. **The direct-launch branch never waited for sign-in.** Selecting a bottle warm-starts Steam;
+   Play seconds later found the process running and launched straight into a 69-second cold
+   sign-in. It now joins the warm-start the way the `-applaunch` branch always has, and otherwise
+   waits for `Steam.isLoggedOn(connectionLog:since:)` — `since` is steam.exe's own start time
+   (`ps -o lstart`, `LC_ALL=C`), because a client killed by `wineserver -k` never logs off and
+   leaves a stale `Logged On` as the last state line.
+3. **Quitting Decanter while it held the launch lost it.** Measured from the unified log after
+   fixes 1–2 shipped: Play at 09:20:03 joined a warm-start, the panel showed only "Opening…" and
+   promised "a few seconds", and Decanter received a **Quit Apple Event from the Dock at
+   09:20:47** — 22 s before Steam signed in (09:21:09). The `-applaunch` is sent only after the
+   warm-start finishes, so it lived only in Decanter's memory and died with it; Steam came up
+   alone and never heard about Peggle. Fixed with `AppModel.launchesWaitingForSteam`: while a
+   launch is held, the panel says the game starts by itself and to keep Decanter open
+   (`LaunchWait.caption`), and any quit (⌘Q, Dock, app switcher) asks **Keep Waiting / Quit
+   Anyway** (`QuitGuard`). A cold `-applaunch` start is NOT held — the request is in Steam's own
+   command line and survives Decanter quitting.
+
+**Traps from this hunt:**
+- **`--play-test` can't reproduce this.** It calls `launchSteam` without selecting the bottle, so
+  no warm-start runs and nothing is ever held; and it reports only that Steam came up, not that
+  the game did. Watch Steam's `console_log.txt` for `GameAction [AppID <id>` and `ps` for the
+  game process instead.
+- **`isSteamRunning()` is global.** A Steam in ANY prefix — including a test clone's — changes
+  the warm-start and launch path of every other prefix, so a clone test is only valid with no
+  other Steam up. And a clone's Steam signs in to the same account as the live one.
+- **A missing `ExecCommandLine … -applaunch` line is not proof nothing was sent.** On 2026-10-14
+  a launch reached `GameAction` with no such line. What settled this one was the unified log:
+  `/usr/bin/log show … --predicate 'process == "Decanter"'` → `Handling Quit AppleEvent`, with
+  a `Dock` event 1 ms earlier. (In zsh, bare `log` is a builtin, and macOS has no `timeout` — both
+  make searches return nothing and look like "no matches".)
+
+### 7e. Quit Steam, then Play: a four-minute launch (2026-10-21, same day)
+
+Reported as "it still isn't opening when I click play", after §7d shipped. Peggle did open, but
+**3 min 45 s** after the click. From the unified log, Steam's logs, and `ps`:
+
+| time | event |
+|---|---|
+| 10:05:22.6 | **Quit Steam** on the Peggle bottle: `wine reg delete` (auto-start), then `wineserver -k` |
+| 10:05:23.5 | Steam dies |
+| 10:05:26.1 | Peggle selected → warm-start runs `wine steam.exe` **while the quit is still in its 3 s pause** |
+| ~10:05:27 | the quit's straggler sweep kills the new wineserver; the Wine loader is left connected to nothing (`lsof`: unix socket `->(none)`), at 0.03 s CPU, forever |
+| ~10:05:30 | Play joins the warm-start, which waits its full 150 s for a sign-in that can't come |
+| 10:08:02 | timeout → `-applaunch` goes out to no Steam, so it becomes a fresh cold start |
+| 10:09:15 | Peggle — after Steam's own 66 s cold sign-in |
+
+The quit also showed **"[DEC-E09] Steam is still running, but not in Peggle Deluxe's prefix"** —
+false: `isSteamRunning()` was `pgrep -f /steam\.exe`, and the hung loader's command line
+(`…/bin/wine …/Steam/steam.exe`) matches it. The same false positive made Play believe Steam was
+already up and skip its sign-in wait.
+
+**Fixes.** `quitSteam` is now one task per prefix, and the warm-start and `launchSteam` wait for
+it (`waitForSteamQuit`) before touching the prefix. `isSteamRunning()` matches the process's
+EXECUTABLE (`ps -o comm=`, `Steam.isClient`), and the start time `isSteamLoggedOn` filters on
+comes only from a command line that BEGINS with steam.exe (`Steam.clientStartDate`) — both tested
+against that morning's `ps` values (`SteamProcessTests`).
+
+**Verified live** with `--quit-then-play-test "Peggle Deluxe"`, which replays the logged sequence
+(quit; select at +3 s; Play at +7 s) and waits for the game process itself: quit finished +7 s
+with "stopped: true"; the warm-start's Steam started **after** it (10:19:18); signed in 10:20:25;
+the held `-applaunch` went out 10:20:31; `popcapgame1.exe` at 10:20:33 — **74 s from Play**, all
+of it Steam's own cold sign-in. No hung loader left behind.
+
+**Still true:** a Steam start that hangs for any OTHER reason is still waited on for the full
+150 s. `waitForSteamLogon` could stop early once no client process exists, but a first-run
+bootstrap legitimately restarts steam.exe, so that check needs care; not done.
+
 ## 8. Things that are simply true and can't be engineered away
 
 - **Rosetta** translates the x86-64 game. Not fixable — no ARM build exists. CrossOver pays the

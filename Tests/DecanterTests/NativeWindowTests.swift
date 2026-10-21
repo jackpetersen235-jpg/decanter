@@ -243,6 +243,27 @@ final class NativeWindowTests: XCTestCase {
         XCTAssertEqual(leftovers, ["Decanter Game.app"])
     }
 
+    // MARK: - requiresSteamToLaunch
+
+    /// PopCap's DRM wrapper (Peggle and the rest of its Steam catalogue): launched directly it
+    /// shows "STEAM ERROR" even with Steam logged in — measured 2026-10-21.
+    func testPopCapDRMWrapperRequiresSteamToLaunch() throws {
+        let game = try scratchDirectory().appendingPathComponent("Peggle Deluxe")
+        try FileManager.default.createDirectory(at: game.appendingPathComponent("drm/common"),
+                                                withIntermediateDirectories: true)
+        try "<drm/>".write(to: game.appendingPathComponent("drm/common/drm.xml"),
+                           atomically: true, encoding: .utf8)
+        XCTAssertTrue(NativeWindow.requiresSteamToLaunch(gameFolder: game))
+    }
+
+    /// Sekiro and JJBA carry Steam's own SteamStub wrapper and launch directly fine — no marker.
+    func testOrdinaryGameFolderDoesNotRequireSteamToLaunch() throws {
+        let game = try scratchDirectory().appendingPathComponent("Sekiro")
+        try FileManager.default.createDirectory(at: game, withIntermediateDirectories: true)
+        try "exe".write(to: game.appendingPathComponent("sekiro.exe"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(NativeWindow.requiresSteamToLaunch(gameFolder: game))
+    }
+
     // MARK: - BottleSettings
 
     /// A bottles.json written before this setting existed must still decode — the custom

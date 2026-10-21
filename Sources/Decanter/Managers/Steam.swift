@@ -73,4 +73,83 @@ enum Steam {
         if started { args.append(current) }
         return args
     }
+
+    // MARK: - Logon state
+
+    /// The connection state Steam most recently recorded in `logs/connection_log.txt`, considering
+    /// only lines stamped at or after `since` (nil = all lines): "Logged On", "Logging On",
+    /// "Connecting", "Logged Off", …
+    ///
+    /// Every state-bearing line has the shape `[2026-10-21 09:10:25] [Logged On, 4, 7] …`; lines
+    /// without the bracketed state (connectivity tests, update checks) are skipped. Timestamps are
+    /// local time. `since` exists because a client killed with `wineserver -k` never writes a
+    /// logoff line: the previous session's last word is often "Logged On", and for the first few
+    /// seconds after a fresh start that stale line would otherwise read as "already logged in".
+    static func latestLogonState(connectionLog: String, since: Date?) -> String? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        for line in connectionLog.split(whereSeparator: \.isNewline).reversed() {
+            guard line.hasPrefix("["),
+                  let close = line.firstIndex(of: "]"),
+                  case let rest = line[line.index(after: close)...],
+                  rest.hasPrefix(" ["),
+                  let comma = rest.firstIndex(of: ",")
+            else { continue }
+            let state = rest[rest.index(rest.startIndex, offsetBy: 2)..<comma]
+            guard !state.isEmpty, state.allSatisfy({ $0.isLetter || $0 == " " }) else { continue }
+            if let since {
+                guard let stamp = formatter.date(from: String(line[line.index(after: line.startIndex)..<close])),
+                      stamp >= since
+                else { return nil }   // reached lines older than `since` — nothing newer exists
+            }
+            return String(state)
+        }
+        return nil
+    }
+
+    /// True when Steam's latest recorded state (since `since`) is "Logged On".
+    static func isLoggedOn(connectionLog: String, since: Date?) -> Bool {
+        latestLogonState(connectionLog: connectionLog, since: since) == "Logged On"
+    }
+
+    /// The start time from a `ps -o lstart=` field, e.g. "Wed Oct 21 09:09:16 2026" (single-digit
+    /// days are space-padded: "Wed Oct  1 …"). Expects the C locale — callers run `ps` with
+    /// `LC_ALL=C` so a non-English Mac doesn't localize the day and month names.
+    static func processStartDate(lstart: String) -> Date? {
+        let collapsed = lstart.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEE MMM d HH:mm:ss yyyy"
+        return formatter.date(from: collapsed)
+    }
+
+    /// True when a process's `ps -o comm=` (its executable, not its arguments) is a Steam client.
+    ///
+    /// The EXECUTABLE, because arguments lie in both directions: webhelpers carry
+    /// `-steampath=…\steam.exe`, and a Wine launch of Steam that hung before it became Steam is
+    /// `…/bin/wine …/Steam/steam.exe` — found live 2026-10-21, where counting it as a running Steam
+    /// produced a false "[DEC-E09] Steam is still running" and skipped Play's sign-in wait. Split
+    /// on both separators: Wine reports some executables as Windows paths.
+    static func isClient(comm: String) -> Bool {
+        let name = comm.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last ?? Substring(comm)
+        return name.lowercased() == "steam.exe"
+    }
+
+    /// When the Steam client at `steamExecutable` started, from `ps -Ao lstart=,command=` output
+    /// (run with `LC_ALL=C`), or nil if it isn't running. Only a line whose command BEGINS with
+    /// that path is the client — a hung `…/bin/wine <path>` launch merely mentions it.
+    static func clientStartDate(ps: String, steamExecutable: String) -> Date? {
+        for line in ps.split(separator: "\n") {
+            // lstart is a fixed 24-character field: "Wed Oct 21 09:09:16 2026".
+            let trimmed = line.drop(while: { $0 == " " })
+            guard trimmed.count > 24 else { continue }
+            let command = trimmed.dropFirst(24).drop(while: { $0 == " " })
+            if command.hasPrefix(steamExecutable),
+               let date = processStartDate(lstart: String(trimmed.prefix(24))) {
+                return date
+            }
+        }
+        return nil
+    }
 }
