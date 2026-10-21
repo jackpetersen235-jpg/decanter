@@ -193,6 +193,12 @@ GOOD TO KNOW
 
     Leave it OFF for 3D games - it would slow those down.
 
+  • WANT A NORMAL WINDOW? Open a game's Configuration and turn on
+    "Real game window". The game then opens in an ordinary Mac window you can
+    move and minimize, the green button makes it fullscreen, and macOS Game
+    Mode switches on while it's fullscreen. New and experimental — if
+    anything looks wrong, turn it back off.
+
 
 IF SOMETHING GOES WRONG
 -----------------------
@@ -250,9 +256,10 @@ Tested on an M5 MacBook Air running macOS 26.5. Your Mac may differ.
   • Short freezes (~7 seconds) where the WHOLE Mac locks up.
       Not fixed and not fixable here. This is a fault in Apple's GPU
       firmware: the chip fails to wake from its deepest sleep state and gets
-      reset. Decanter runs a small helper that keeps the GPU busy enough to
-      avoid it most of the time. Nothing you did wrong, and reinstalling
-      will not help.
+      reset. If it happens to you, open the game's Configuration and turn on
+      "GPU keep-alive" (under Performance) — a small helper that keeps the GPU
+      busy enough to avoid most of them. It's off by default because not every
+      Mac has this fault. Nothing you did wrong, and reinstalling will not help.
 
   • Games with kernel anti-cheat (Valorant, most competitive shooters) do
       not work. No Mac tool can run them — this is not a Decanter limitation.
