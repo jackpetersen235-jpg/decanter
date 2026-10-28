@@ -71,20 +71,38 @@ enum GameScanner {
     /// disagree about which binary a game means. Unreal titles ship a small shim at the top level
     /// beside the real one — Half Sword's is a 0.3 MB stub next to a 300 MB
     /// `Binaries/Win64/…-Shipping.exe` — so a top-level-only search picks wrong.
+    ///
+    /// BREADTH-FIRST, so the `fileLimit` budget is spent nearest the top, where executables live.
+    /// It was a depth-first `FileManager.enumerator`, which visits entries in whatever order the
+    /// directory lists them — on APFS that's hash order, not alphabetical. Resident Evil HD
+    /// REMASTER (2026-10-27) lists its 5,339-entry `nativePC/` before the top-level `bhd.exe`, so
+    /// the whole budget went into data files, no executable was found, and New Bottle silently
+    /// left the game out (`GameScannerTests`).
     static func largestExecutable(in folder: URL, fileLimit: Int = 4000) -> URL? {
         let fm = FileManager.default
-        let keys: Set<URLResourceKey> = [.fileSizeKey, .isDirectoryKey]
+        let keys: Set<URLResourceKey> = [.fileSizeKey, .isDirectoryKey, .isPackageKey]
         func size(_ u: URL) -> Int { (try? u.resourceValues(forKeys: keys).fileSize) ?? 0 }
 
         var candidates: [URL] = []
-        if let e = fm.enumerator(at: folder, includingPropertiesForKeys: Array(keys),
-                                 options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
-            var scanned = 0
-            for case let u as URL in e {
-                scanned += 1
-                if scanned > fileLimit { break }
-                if u.pathExtension.lowercased() == "exe" { candidates.append(u) }
+        var level = [folder]
+        var scanned = 0
+        walk: while !level.isEmpty {
+            var nextLevel: [URL] = []
+            for dir in level {
+                let items = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: Array(keys),
+                                                         options: [.skipsHiddenFiles])) ?? []
+                for u in items {
+                    scanned += 1
+                    if scanned > fileLimit { break walk }
+                    let values = try? u.resourceValues(forKeys: keys)
+                    if values?.isDirectory == true {
+                        if values?.isPackage != true { nextLevel.append(u) }
+                    } else if u.pathExtension.lowercased() == "exe" {
+                        candidates.append(u)
+                    }
+                }
             }
+            level = nextLevel
         }
         let real = candidates.filter { !isNoise($0) }
         return (real.isEmpty ? candidates : real).max(by: { size($0) < size($1) })

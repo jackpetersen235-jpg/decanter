@@ -372,6 +372,13 @@ creates a bottle already configured for it (app id or direct exe) and generates 
   the main actor in `.task` for the same reason.
 - `GameScanner.largestExecutable` is shared with `AppModel.resolvedGame` so the binary shown in
   the picker is always the one the launcher will run.
+- **That walk is BREADTH-FIRST, and must stay that way (2026-10-27).** It used to be a depth-first
+  `FileManager.enumerator` under the 4,000-entry budget, and APFS lists a directory in hash
+  order, not alphabetically. Resident Evil HD REMASTER lists its 5,339-entry `nativePC/` before
+  the top-level `bhd.exe`, so the budget ran out inside the data folder, no executable was found,
+  and the game was silently missing from New Bottle (and would have failed `resolvedGame` too).
+  `detectedSteamGames` only looks one level deep, which is why the DXMT DLLs still landed beside
+  `bhd.exe` and made it look like Decanter "knew" the game. Pinned by `GameScannerTests`.
 - **`Task.detached { await model.someMethod() }` does NOT get you off the main actor.** `AppModel`
   is `@MainActor`, so the detached task hops straight back and the work runs on the main actor
   anyway. The first version of the scan claimed to be off-thread and was not. The fix is a
