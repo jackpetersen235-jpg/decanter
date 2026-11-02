@@ -52,6 +52,10 @@ struct BottleDetailView: View {
         // No navigation title: the raised header panel directly below already names the bottle, and
         // the toolbar strip repeated it in unthemed white chrome across the top of the window.
         .navigationTitle("")
+        // Bottle ▸ Quit Steam… — the same path as the button, refusal and confirmation included.
+        .onReceive(NotificationCenter.default.publisher(for: .quitSteamRequested)) { note in
+            if note.object as? Bottle.ID == bottle.id, !quitting { requestQuit() }
+        }
         // Confirmed, not immediate: this is `wineserver -k` on the whole prefix, so a game that is
         // still running dies with it and unsaved progress goes with it.
         //
@@ -230,16 +234,7 @@ struct BottleDetailView: View {
                             // a `-silent` Steam sits in the tray with no window and survives every
                             // attempt to quit it from Steam's own UI (closing the window just
                             // re-hides it), with no control anywhere in the app to end it.
-                            Button(quitting ? "Quitting…" : "Quit Steam") {
-                                Task {
-                                    if let reason = await model.quitSteamBlockReason(for: bottle) {
-                                        quitBlockReason = reason
-                                        showQuitBlocked = true
-                                    } else {
-                                        confirmQuit = true
-                                    }
-                                }
-                            }
+                            Button(quitting ? "Quitting…" : "Quit Steam") { requestQuit() }
                                 .glassButton()
                                 .disabled(quitting)
 
@@ -342,6 +337,19 @@ struct BottleDetailView: View {
             }
         }
         .padding(16)
+    }
+
+    /// Quit Steam's one entry point, shared by the button and Bottle ▸ Quit Steam…: refuse with a
+    /// reason if quitting would kill something that matters, otherwise ask to confirm.
+    private func requestQuit() {
+        Task {
+            if let reason = await model.quitSteamBlockReason(for: bottle) {
+                quitBlockReason = reason
+                showQuitBlocked = true
+            } else {
+                confirmQuit = true
+            }
+        }
     }
 
     @ViewBuilder

@@ -43,6 +43,17 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .setupAssistantRequested)) { _ in
             showingWizard = true
         }
+        // Bottle ▸ Delete… — handled here because this view owns the window's undo manager and
+        // the with-files confirmation.
+        .onReceive(NotificationCenter.default.publisher(for: .deleteBottleRequested)) { note in
+            guard let id = note.object as? Bottle.ID,
+                  let bottle = model.bottles.first(where: { $0.id == id }) else { return }
+            if note.userInfo?["removeFiles"] as? Bool == true {
+                pendingDeletion = bottle
+            } else {
+                model.removeBottleKeepingFiles(bottle, undoManager: undoManager)
+            }
+        }
         .confirmationDialog(
             "Delete “\(pendingDeletion?.name ?? "")” and all its files?",
             isPresented: Binding(get: { pendingDeletion != nil },
@@ -180,6 +191,14 @@ struct ContentView: View {
                             .contextMenu { bottleContextMenu(bottle) }
                     }
                 }
+            }
+            // The Delete key (and Edit ▸ Delete) on a selected bottle: removes the entry and keeps
+            // the files, undoable with ⌘Z — what Delete does to a selected item in Mail or Notes.
+            // Only fires while the list has focus, so typing in a field never deletes a bottle.
+            .onDeleteCommand {
+                guard let bottle = model.bottles.first(where: { $0.id == model.selectedBottleID })
+                else { return }
+                model.removeBottleKeepingFiles(bottle, undoManager: undoManager)
             }
             Divider()
             wineStatusFooter

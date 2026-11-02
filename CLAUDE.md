@@ -627,6 +627,27 @@ Found and deliberately NOT changed — each needs Jack's call:
 - **Help ▸ Decanter Help** is the system default, which says help isn't available. Pointing it at
   the troubleshooting guide needs that guide shipped inside the app (today it's only in the zip).
 
+### HIG inputs pass (2026-11-02) — keyboard
+
+- **Bottle menu** (`BottleCommands`): Launch ‹bottle› (⌘↩), Quit Steam…, Open C: Drive, both
+  deletes. Items needing a confirmation or the undo manager are posted to the window
+  (`.deleteBottleRequested`, `.quitSteamRequested`), like New Bottle…. Quit Steam's refuse-or-
+  confirm logic is one function (`requestQuit`) shared by the button and the menu.
+- **Shortcut choices:** Launch is ⌘↩, not ⌘R — ⌘R beside Rescan's ⇧⌘R is "a modifier added to an
+  existing shortcut for an unrelated command", which the HIG rules out. **No ⌘⌫ for Delete:**
+  menu key equivalents fire while a text field has focus, so it would delete the bottle mid-edit.
+  The sidebar takes the plain Delete key via `onDeleteCommand` instead (focus-scoped, undoable).
+- The menu item is named after the bottle ("Launch Steam", "Launch Peggle Deluxe") instead of
+  asking `resolvedGame`, which walks the game folder — too heavy for a menu that re-renders on
+  every model change.
+
+Verified in a test copy through the menu bar alone (`app_menu`, which works even when the test
+window is unreachable): the Bottle menu lists and tracks the selection, and Delete Bottle (keep
+files) removed only the entry, prefix still on disk. **Not verified live: Edit ▸ Undo** — it is
+disabled unless the window is key, and the test window sat on another Space. Two traps from
+this: a copy launched from the scratchpad is unknown to Launch Services (`open_application` can't
+find it), and with the user in a full-screen app, full-screen control shows only black.
+
 ## "Why is this game slow" — measure it (`Scripts/profile-slow-game.command`)
 
 Peggle Deluxe was guessed at **twice** — first the graphics backend (DXVK), then the Wine engine

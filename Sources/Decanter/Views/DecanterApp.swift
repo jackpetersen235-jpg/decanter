@@ -83,6 +83,7 @@ struct DecanterApp: App {
                     }
                 }
             }
+            CommandMenu("Bottle") { BottleCommands(model: model) }
         }
 
         Settings {
@@ -117,4 +118,8 @@ final class QuitGuard: NSObject, NSApplicationDelegate {
 extension Notification.Name {
     static let newBottleRequested = Notification.Name("DecanterNewBottleRequested")
     static let setupAssistantRequested = Notification.Name("DecanterSetupAssistantRequested")
+    /// Bottle menu → window. `object` is the bottle's id; `userInfo["removeFiles"]` a Bool.
+    static let deleteBottleRequested = Notification.Name("DecanterDeleteBottleRequested")
+    /// Bottle menu → detail pane. `object` is the bottle's id.
+    static let quitSteamRequested = Notification.Name("DecanterQuitSteamRequested")
 }
