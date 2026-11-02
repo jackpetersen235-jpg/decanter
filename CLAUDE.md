@@ -662,6 +662,26 @@ find it), and with the user in a full-screen app, full-screen control shows only
   NavigationSplitView entirely"). Bringing it back by hand means a toggle plus moving the detail
   header clear of the floating traffic lights when the sidebar is gone.
 
+### HIG menus pass (2026-11-02) — where commands live
+
+| Menu | Holds |
+|---|---|
+| File | New Bottle… (⌘N), Import CrossOver Bottles |
+| View | Overview / Configuration / Programs (⌘1–⌘3, `DetailTabCommands`), Rescan Wine Installations (⇧⌘R), Setup Assistant… |
+| Bottle | Launch ‹bottle› (⌘↩), Quit Steam…, Open C: Drive, Apply Settings to Prefix, both deletes |
+| Help | Export Diagnostics |
+
+- Import and Export Diagnostics used to sit in View, which is for ways of looking at the window.
+  Export lost its ellipsis: it asks nothing, it saves straight to the Desktop (HIG: an ellipsis
+  means the command needs more input before it completes).
+- Every context-menu command is also in the menu bar (Apply Settings to Prefix was not).
+- One name per action: "Apply Settings to Prefix" everywhere (the Overview button said "Apply
+  Settings"); "Reinstall" is "Reinstall Steam".
+- `NSWindow.allowsAutomaticWindowTabbing = false` in `DecanterApp.init`: the system's Show Tab
+  Bar / Show All Tabs could only ever offer a second copy of the one window.
+- Verified by listing each menu in a test copy (`app_menu`). View ▸ Configuration was pressed but
+  the tab change itself was not seen — the window was unreachable again.
+
 ## "Why is this game slow" — measure it (`Scripts/profile-slow-game.command`)
 
 Peggle Deluxe was guessed at **twice** — first the graphics backend (DXVK), then the Wine engine

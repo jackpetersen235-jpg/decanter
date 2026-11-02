@@ -38,6 +38,9 @@ struct BottleCommands: View {
 
         Button("Open C: Drive") { if let bottle { model.openCDrive(bottle) } }
             .disabled(bottle == nil)
+        // Also in the context menu and on the Overview tab; the menu bar should hold every command.
+        Button("Apply Settings to Prefix") { if let bottle { model.applySettings(bottle) } }
+            .disabled(bottle == nil)
 
         Divider()
 
@@ -51,5 +54,22 @@ struct BottleCommands: View {
         guard let bottle else { return }
         NotificationCenter.default.post(name: name, object: bottle.id,
                                         userInfo: ["removeFiles": removeFiles])
+    }
+}
+
+/// View ▸ Overview / Configuration / Programs (⌘1–⌘3): the detail pane's tabs as menu items, as
+/// the HIG suggests for tab-style navigation. Built from `BottleDetailView.Tab` so the menu can
+/// never list a tab the pane doesn't have.
+struct DetailTabCommands: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        ForEach(Array(BottleDetailView.Tab.allCases.enumerated()), id: \.element) { index, tab in
+            Button(tab.rawValue) {
+                NotificationCenter.default.post(name: .detailTabRequested, object: tab)
+            }
+            .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
+            .disabled(model.selectedBottleID == nil)
+        }
     }
 }

@@ -6,6 +6,13 @@ struct DecanterApp: App {
     @StateObject private var themeController = ThemeController()
     @NSApplicationDelegateAdaptor(QuitGuard.self) private var quitGuard
 
+    init() {
+        // One window over one bottle list. The system's window tabs (View ▸ Show Tab Bar, Show All
+        // Tabs) could only ever offer a second copy of the same window, so they're switched off
+        // rather than left as menu items that lead nowhere useful.
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -33,24 +40,19 @@ struct DecanterApp: App {
         // lights themselves are left exactly as the system draws them.
         .windowStyle(.hiddenTitleBar)
         .commands {
+            // Menus follow the HIG menu-bar layout (2026-11-02): creating and importing bottles in
+            // File, ways of looking at the window in View, the selected bottle's actions in
+            // Bottle, support tools in Help. Import and Export Diagnostics used to sit in View.
+            //
+            // A MENU ITEM HAS NOWHERE TO PUT A RESULT, so Rescan, Import and Export report through
+            // the console sheet. They used to run and return in silence: ⇧⌘R looked identical
+            // whether it found five engines or none, and Import CrossOver on a Mac without
+            // CrossOver was a complete no-op with its Int result thrown away.
             CommandGroup(replacing: .newItem) {
                 Button("New Bottle…") {
                     NotificationCenter.default.post(name: .newBottleRequested, object: nil)
                 }
                 .keyboardShortcut("n", modifiers: .command)
-            }
-            CommandGroup(after: .toolbar) {
-                // A MENU ITEM HAS NOWHERE TO PUT A RESULT, so these report through the console
-                // sheet. Both used to run and return in silence: ⇧⌘R looked identical whether it
-                // found five engines or none, and Import CrossOver on a Mac without CrossOver was
-                // a complete no-op with its Int result thrown away.
-                Button("Rescan Wine Installations") {
-                    model.rescanInstallations()
-                    let console = model.openConsole(title: "Rescan")
-                    console.append(model.lastRescanMessage ?? "Rescan finished.")
-                    console.finish()
-                }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
                 Button("Import CrossOver Bottles") {
                     let n = model.importCrossOverBottles()
                     let console = model.openConsole(title: "Import CrossOver Bottles")
@@ -60,15 +62,28 @@ struct DecanterApp: App {
                           + "~/Library/Application Support/CrossOver/Bottles.")
                     console.finish()
                 }
+            }
+            CommandGroup(after: .toolbar) {
+                DetailTabCommands(model: model)
+                Divider()
+                Button("Rescan Wine Installations") {
+                    model.rescanInstallations()
+                    let console = model.openConsole(title: "Rescan")
+                    console.append(model.lastRescanMessage ?? "Rescan finished.")
+                    console.finish()
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
                 Button("Setup Assistant…") {
                     NotificationCenter.default.post(name: .setupAssistantRequested, object: nil)
                 }
-                Divider()
+            }
+            CommandGroup(after: .help) {
                 // Phase 4 of the pre-release debug plan: after release, a bug happens on a
                 // machine nobody here will ever touch, reported by someone who cannot describe
                 // it. This is what makes --diagnose/--verify's questions reachable without a
-                // terminal — one click, one zip, ready to attach to an email.
-                Button("Export Diagnostics…") {
+                // terminal — one click, one zip, ready to attach to an email. No ellipsis: it
+                // asks nothing, it saves straight to the Desktop.
+                Button("Export Diagnostics") {
                     let console = model.openConsole(title: "Export Diagnostics")
                     console.append("Gathering engine, bottle and log info…")
                     Task {
@@ -122,4 +137,6 @@ extension Notification.Name {
     static let deleteBottleRequested = Notification.Name("DecanterDeleteBottleRequested")
     /// Bottle menu → detail pane. `object` is the bottle's id.
     static let quitSteamRequested = Notification.Name("DecanterQuitSteamRequested")
+    /// View menu → detail pane. `object` is a `BottleDetailView.Tab`.
+    static let detailTabRequested = Notification.Name("DecanterDetailTabRequested")
 }

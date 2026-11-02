@@ -4,7 +4,8 @@ struct BottleDetailView: View {
     @EnvironmentObject private var model: AppModel
     let bottle: Bottle
 
-    private enum Tab: String, CaseIterable, Identifiable {
+    /// Not private: View ▸ Overview/Configuration/Programs (`DetailTabCommands`) is built from it.
+    enum Tab: String, CaseIterable, Identifiable {
         case overview = "Overview"
         case configuration = "Configuration"
         case programs = "Programs"
@@ -52,6 +53,10 @@ struct BottleDetailView: View {
         // No navigation title: the raised header panel directly below already names the bottle, and
         // the toolbar strip repeated it in unthemed white chrome across the top of the window.
         .navigationTitle("")
+        // View ▸ Overview / Configuration / Programs (⌘1–⌘3).
+        .onReceive(NotificationCenter.default.publisher(for: .detailTabRequested)) { note in
+            if let requested = note.object as? Tab { tab = requested }
+        }
         // Bottle ▸ Quit Steam… — the same path as the button, refusal and confirmation included.
         .onReceive(NotificationCenter.default.publisher(for: .quitSteamRequested)) { note in
             if note.object as? Bottle.ID == bottle.id, !quitting { requestQuit() }
@@ -238,7 +243,7 @@ struct BottleDetailView: View {
                                 .glassButton()
                                 .disabled(quitting)
 
-                            Button("Reinstall") { model.installSteam(in: bottle) }
+                            Button("Reinstall Steam") { model.installSteam(in: bottle) }
                                 .glassButton()
 
                             // Re-runnable on purpose: the wizard installs this after Steam, but a
@@ -327,7 +332,8 @@ struct BottleDetailView: View {
                         // Glass, like every secondary control. Only Play and Launch Steam keep the
                         // active theme's own treatment, so the eye still lands on them first.
                         Button("Open C: Drive") { model.openCDrive(bottle) }.glassButton()
-                        Button("Apply Settings") { model.applySettings(bottle) }.glassButton()
+                        // Same name as the context menu and Bottle menu item for the same action.
+                        Button("Apply Settings to Prefix") { model.applySettings(bottle) }.glassButton()
                         Button("Wine Config") { model.runTool(.winecfg, in: bottle) }.glassButton()
                     }
                     .padding(.top, 4)
