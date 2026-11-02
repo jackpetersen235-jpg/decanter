@@ -18,9 +18,8 @@ struct ConfigurationView: View {
     @ViewBuilder
     private func sharedCaption() -> some View {
         if !sharedWith.isEmpty {
-            Text("This is a property of the PREFIX, not this bottle. Changing it also changes: "
-                 + sharedWith.map(\.name).joined(separator: ", "))
-                .font(.caption).foregroundStyle(.orange)
+            StatusNote("This is a property of the PREFIX, not this bottle. Changing it also changes: "
+                       + sharedWith.map(\.name).joined(separator: ", "))
         }
     }
 
@@ -37,11 +36,10 @@ struct ConfigurationView: View {
     @ViewBuilder
     private func envSharedCaption() -> some View {
         if !sharedWith.isEmpty {
-            Text("This takes effect through Steam's own launch environment, not the registry — "
-                 + "whichever bottle starts Steam decides it for every game launched through that "
-                 + "same Steam session, until Steam quits. Also affects: "
-                 + sharedWith.map(\.name).joined(separator: ", "))
-                .font(.caption).foregroundStyle(.orange)
+            StatusNote("This takes effect through Steam's own launch environment, not the registry — "
+                       + "whichever bottle starts Steam decides it for every game launched through that "
+                       + "same Steam session, until Steam quits. Also affects: "
+                       + sharedWith.map(\.name).joined(separator: ", "))
         }
     }
 
@@ -72,8 +70,7 @@ struct ConfigurationView: View {
                     Text("Setting up…").font(.caption).foregroundStyle(.secondary)
                 }
                 if let engineError {
-                    Label(engineError, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.orange)
+                    StatusNote(engineError)
                 }
                 Text("Both modes share this bottle — same games, same saves, same Steam login. "
                      + "Only the engine differs, so online changes can't affect your offline setup.")
@@ -165,8 +162,7 @@ struct ConfigurationView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 if bottle.settings.nativeWindow,
                    let reason = model.nativeWindowUnavailableReason(for: bottle) {
-                    Label(reason, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.orange)
+                    StatusNote(reason)
                 }
 
                 Toggle("Retina / HiDPI mode", isOn: $bottle.settings.retinaMode)

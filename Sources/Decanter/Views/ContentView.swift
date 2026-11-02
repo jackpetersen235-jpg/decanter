@@ -226,6 +226,7 @@ struct ContentView: View {
                 Image(systemName: "wineglass")
                     .font(.system(size: 48))
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)      // decorative
                 Text("Select a bottle")
                     .font(.title3)
                     .foregroundStyle(.secondary)
@@ -268,6 +269,7 @@ private struct BottleRow: View {
             Image(systemName: bottle.isSteamInstalled ? "gamecontroller.fill" : "cube.box")
                 .foregroundStyle(bottle.isSteamInstalled ? Color.accentColor : .secondary)
                 .frame(width: 20)
+                .accessibilityHidden(true)      // the subtitle says the same ("Steam ready")
             VStack(alignment: .leading, spacing: 1) {
                 Text(bottle.name).lineLimit(1)
                 Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)

@@ -41,13 +41,10 @@ struct CreateBottleSheet: View {
             .formStyle(.grouped)
 
             if model.defaultInstallation == nil {
-                Label("No Wine build selected. Add one in Setup first.",
-                      systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
+                StatusNote("No Wine build selected. Add one in Setup first.")
             }
             if let failure {
-                Label(failure, systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
+                StatusNote.failure(failure)
             }
 
             HStack {
@@ -113,11 +110,29 @@ struct CreateBottleSheet: View {
         }
     }
 
+    /// A Button, not `.onTapGesture`: a tap gesture is invisible to VoiceOver and unreachable from
+    /// the keyboard, so the picker could only be used with a pointer (SetupView's F9 radio had the
+    /// same fault). VoiceOver hears the selection through the `.isSelected` trait.
     private func row(_ game: GameScanner.FoundGame) -> some View {
         let isSelected = selected?.id == game.id
-        return HStack(spacing: 10) {
+        return Button {
+            if isSelected { selected = nil } else {
+                selected = game
+                manualExecutable = nil          // the two choices are exclusive
+                if name.isEmpty { name = game.name }
+            }
+        } label: {
+            rowLabel(game, isSelected: isSelected)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func rowLabel(_ game: GameScanner.FoundGame, isSelected: Bool) -> some View {
+        HStack(spacing: 10) {
             Image(systemName: isSelected ? "checkmark.circle.fill" : "gamecontroller")
                 .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                .accessibilityHidden(true)      // the selection is the .isSelected trait
             VStack(alignment: .leading, spacing: 1) {
                 Text(game.name).lineLimit(1)
                 // Name the executable AND the prefix. The executable because the scan picks the
@@ -146,13 +161,6 @@ struct CreateBottleSheet: View {
         .padding(.vertical, 5).padding(.horizontal, 4)
         .contentShape(Rectangle())
         .background(isSelected ? Color.accentColor.opacity(0.12) : .clear)
-        .onTapGesture {
-            if isSelected { selected = nil } else {
-                selected = game
-                manualExecutable = nil          // the two choices are exclusive
-                if name.isEmpty { name = game.name }
-            }
-        }
     }
 
     // MARK: Actions

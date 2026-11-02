@@ -24,6 +24,7 @@ struct SetupView: View {
                 Image(systemName: "wineglass.fill")
                     .font(.system(size: 34))
                     .foregroundStyle(Color.accentColor)
+                    .accessibilityHidden(true)      // decorative
                 Text("Welcome to Decanter").font(.largeTitle.bold())
             }
             Text("Create Windows “bottles” to run Steam and games on your Mac. "
@@ -93,15 +94,17 @@ struct SetupView: View {
         HStack {
             // F9 (bug-sweep): `.onTapGesture` on a bare Image isn't exposed to VoiceOver as
             // interactive at all, regardless of any label — worse than the icon-only-button gap
-            // elsewhere, since there was nothing here for a label to attach meaning to. Adding the
-            // label AND the button trait, not just the label.
-            Image(systemName: model.defaultInstallationID == installation.id
-                  ? "largecircle.fill.circle" : "circle")
-                .foregroundStyle(Color.accentColor)
-                .onTapGesture { model.defaultInstallationID = installation.id }
-                .accessibilityLabel(model.defaultInstallationID == installation.id
-                                    ? "Default Wine installation" : "Set as default Wine installation")
-                .accessibilityAddTraits(.isButton)
+            // elsewhere, since there was nothing here for a label to attach meaning to. F9 added
+            // the label and a button TRAIT; it is now a real Button (2026-11-02), because a trait
+            // only claims interactivity — a tap gesture still can't be reached from the keyboard.
+            Button { model.defaultInstallationID = installation.id } label: {
+                Image(systemName: model.defaultInstallationID == installation.id
+                      ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(Color.accentColor)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(model.defaultInstallationID == installation.id
+                                ? "Default Wine installation" : "Set as default Wine installation")
             VStack(alignment: .leading, spacing: 1) {
                 Text(installation.name).font(.body.weight(.medium))
                 Text(installation.version ?? installation.binDirectory.path)

@@ -16,11 +16,12 @@ enum AppTheme: String, CaseIterable, Identifiable, Codable {
 
     var id: String { rawValue }
 
-    /// Sentence case throughout, per the app's copy style.
+    /// Sentence case, like every picker option — but these two are proper names (Apple's material,
+    /// and the 2000s style), and sentence case still capitalizes a proper name.
     var label: String {
         switch self {
-        case .liquidGlass:  return "Liquid glass"
-        case .frutigerAero: return "Frutiger aero"
+        case .liquidGlass:  return "Liquid Glass"
+        case .frutigerAero: return "Frutiger Aero"
         case .system:       return "Standard"
         }
     }

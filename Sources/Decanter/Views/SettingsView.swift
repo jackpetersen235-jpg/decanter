@@ -55,7 +55,7 @@ struct SettingsView: View {
                 }
                 HStack {
                     Button("Rescan") { model.rescanInstallations() }
-                    Button("Add Wine bin folder…") {
+                    Button("Add Wine Bin Folder…") {
                         if let url = Panels.chooseDirectory(prompt: "Select Wine bin folder") {
                             model.addWineDirectory(url)
                         }
@@ -71,9 +71,14 @@ struct SettingsView: View {
 
             Section("System") {
                 LabeledContent("Rosetta 2") {
-                    Label(model.isRosettaInstalled ? "Installed" : "Missing",
-                          systemImage: model.isRosettaInstalled ? "checkmark.circle.fill" : "xmark.circle")
-                        .foregroundStyle(model.isRosettaInstalled ? .green : .orange)
+                    // Tint on the icon only: green or orange caption-size text measures ~2.3:1 on
+                    // the light background (see StatusNote). The icon's shape carries the state too.
+                    Label {
+                        Text(model.isRosettaInstalled ? "Installed" : "Missing")
+                    } icon: {
+                        Image(systemName: model.isRosettaInstalled ? "checkmark.circle.fill" : "xmark.circle")
+                            .foregroundStyle(model.isRosettaInstalled ? .green : .orange)
+                    }
                 }
                 LabeledContent("Bottles folder") {
                     Button("Reveal in Finder") {
@@ -86,7 +91,7 @@ struct SettingsView: View {
             // engine, bottle, shader cache and log behind — no clean removal at all. This is
             // where that goes: itemised in `UninstallView`, sized up fresh each time the sheet
             // opens (not cached — data changes between visits).
-            Section("Danger Zone") {
+            Section("Danger zone") {
                 Button("Uninstall Decanter…") {
                     uninstallItems = Uninstaller.plan()
                     showingUninstall = true

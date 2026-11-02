@@ -33,6 +33,7 @@ struct ProgramsView: View {
                         } label: {
                             VStack(spacing: 6) {
                                 Image(systemName: icon(for: tool)).font(.title2)
+                                    .accessibilityHidden(true)  // the title below names the tool
                                 Text(tool.title).font(.caption).multilineTextAlignment(.center)
                             }
                             .frame(maxWidth: .infinity, minHeight: 64)

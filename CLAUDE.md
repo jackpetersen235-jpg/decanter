@@ -569,6 +569,41 @@ What to look for when checking by hand:
   opaque, the sidebar loses its material.
 - **Increase contrast** — Aero button fills darken by 18% (`AeroButtonStyle`).
 
+### HIG foundations pass (2026-11-02) — four rules for every new view
+
+1. **Never tint caption TEXT with a system colour — use `StatusNote`.** Measured against the
+   light window background: system orange **2.31:1**, yellow **1.51:1**, red **3.57:1**, green
+   **2.22:1** — all under the 4.5:1 small text needs (orange drops to 1.86:1 with Increase
+   Contrast). They pass only in dark mode, which is why they looked fine on this Mac.
+   `StatusNote` puts the tint on the symbol, tells warning (orange triangle) from failure
+   (`StatusNote.failure`, red octagon) by SHAPE, and leaves the text unstyled so Aero's ink and the
+   text-tone override still reach it. Ten call sites were converted.
+2. **Anything clickable is a `Button`, never `.onTapGesture`.** A tap gesture is invisible to
+   VoiceOver and unreachable from the keyboard; adding `.accessibilityAddTraits(.isButton)` (F9's
+   first fix) only CLAIMS interactivity. Use `.buttonStyle(.plain)` to keep a custom look, and
+   `.accessibilityAddTraits(.isSelected)` for selection. The New Bottle picker was pointer-only
+   until this pass. Checked by pressing a row through `AXPress` (what VoiceOver's activate sends).
+3. **State shown only visually needs an accessibility value** — the wizard's step badges now
+   read "Done" / "In progress" / "Not started". Decorative icons get `.accessibilityHidden(true)`.
+4. **No animation on something that fires per log line** — the console used to animate a scroll
+   for every line of a long install.
+
+Capitalization follows the macOS convention the app already mostly used: title case for buttons and
+menu items, sentence case for toggles, pickers and section headings — and proper names keep their
+capitals in either ("Liquid Glass", "Frutiger Aero"). The wizard's "Set everything up for me" and
+"Start using Decanter" were left as they are because the friend READ ME and FOR-CLAUDE-CODE.md quote
+them.
+
+Verifying a view change without touching the real app: copy `build/Decanter.app`, change its
+`CFBundleIdentifier`, re-sign ad hoc, and `open -n --env DECANTER_HOME=<scratch> <copy>`. Own
+preferences, own data, no click can land in the real instance. ⚠️ After that copy was killed,
+re-signed and relaunched, the computer-use tools could no longer see its window through
+accessibility (re-requesting access didn't help; which step caused it was not isolated), so make
+every Info.plist change before the first launch and do all the clicking in that one run. Force light mode per app with
+`defaults write <test bundle id> NSRequiresAquaSystemAppearance -bool true`
+(`-AppleInterfaceStyle Light` as a launch argument does nothing). Rendering one view with
+`ImageRenderer` under `NSAppearance(named: .aqua)` is the quickest light/dark before-and-after.
+
 ## "Why is this game slow" — measure it (`Scripts/profile-slow-game.command`)
 
 Peggle Deluxe was guessed at **twice** — first the graphics backend (DXVK), then the Wine engine
@@ -898,8 +933,9 @@ and reported, with "press the button again, anything already finished is skipped
 **5. A failed msync overlay reported SUCCESS.** `try? await installMsyncEngine()` then `phase =
 .done`. The non-fatal choice is right — a working wine 11 engine beats no engine — but the user
 silently received the **frame-spike engine that the overlay exists to avoid**, and only `--verify`
-could tell. `WineInstaller` now publishes a `warning`, and the wizard shows it in yellow, distinct
-from a red failure: the run finished, the result is just worse than intended. **Non-fatal must
+could tell. `WineInstaller` now publishes a `warning`, and the wizard shows it as an orange warning
+triangle, distinct from the red failure octagon (it was yellow text until the 2026-11-02 HIG pass —
+1.51:1, unreadable): the run finished, the result is just worse than intended. **Non-fatal must
 still mean reported.**
 
 **6. Rescan was silent in 2 of the 3 places it exists.** `rescanSummary()` had ONE caller

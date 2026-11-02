@@ -86,6 +86,7 @@ struct SetupWizard: View {
             Image(systemName: "wineglass.fill")
                 .font(.system(size: 40))
                 .foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)      // decorative
             Text("Let's get you playing").font(.largeTitle.bold())
             Text(allDone
                  ? "Everything's ready."
@@ -112,6 +113,9 @@ struct SetupWizard: View {
                     Image(systemName: step.icon).foregroundStyle(.secondary)
                 }
             }
+            // The badge shows the step's state only visually (green tick, spinner, icon). VoiceOver
+            // gets it as the row's value instead, and the badge's glyph names are hidden.
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(step.title).font(.body.weight(.semibold))
                 Text(step.blurb).font(.caption).foregroundStyle(.secondary)
@@ -132,6 +136,8 @@ struct SetupWizard: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.06)))
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(done ? "Done" : (active ? "In progress" : "Not started"))
     }
 
     @ViewBuilder
@@ -171,17 +177,17 @@ struct SetupWizard: View {
                     .font(.caption).foregroundStyle(.secondary)
 
                 if let failureMessage {
-                    Label(failureMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.orange)
+                    StatusNote.failure(failureMessage)
                         .padding(.top, 2)
                 }
                 // Setup SUCCEEDED but produced a worse result than intended — currently an engine
                 // without the msync overlay. Shown separately from a failure because the run did
                 // finish; staying silent is what let someone end up on the frame-spike engine
                 // believing everything was fine.
+                // Was yellow text — 1.51:1 on the light background, nearly invisible. Now an orange
+                // warning triangle, told apart from the red failure octagon by shape as well.
                 if let warningMessage {
-                    Label(warningMessage, systemImage: "exclamationmark.circle")
-                        .font(.caption).foregroundStyle(.yellow)
+                    StatusNote(warningMessage)
                         .padding(.top, 2)
                 }
             }

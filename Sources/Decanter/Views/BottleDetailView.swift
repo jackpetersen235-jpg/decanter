@@ -102,6 +102,7 @@ struct BottleDetailView: View {
             Image(systemName: "cube.box.fill")
                 .font(.system(size: 30))
                 .foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)      // decorative; the bottle name follows
             VStack(alignment: .leading, spacing: 2) {
                 // Dark ink on the light chrome panel, with the 1pt white shadow below — the
                 // period treatment, and the pairing that measures 14.76:1. White type was tried
@@ -325,8 +326,7 @@ struct BottleDetailView: View {
                     if !model.otherBottlesSharingPrefix(with: bottle).isEmpty {
                         let names = model.otherBottlesSharingPrefix(with: bottle)
                             .map(\.name).joined(separator: ", ")
-                        Label("Shared with \(names)", systemImage: "person.2")
-                            .font(.caption).foregroundStyle(.orange)
+                        StatusNote("Shared with \(names)", systemImage: "person.2")
                     }
                     HStack {
                         // Glass, like every secondary control. Only Play and Launch Steam keep the

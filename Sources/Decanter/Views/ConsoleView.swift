@@ -24,8 +24,11 @@ struct ConsoleView: View {
                         .padding(12)
                         .id("log")
                 }
+                // Jump, don't animate: this fires on every log line, so an animated scroll kept the
+                // view in motion for the whole of a long install (HIG Motion: avoid motion on
+                // interactions that happen frequently), with no way for Reduce Motion to stop it.
                 .onChange(of: console.text) { _, _ in
-                    withAnimation { proxy.scrollTo("log", anchor: .bottom) }
+                    proxy.scrollTo("log", anchor: .bottom)
                 }
             }
             .background(Color(nsColor: .textBackgroundColor))
