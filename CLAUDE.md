@@ -648,6 +648,20 @@ disabled unless the window is key, and the test window sat on another Space. Two
 this: a copy launched from the scratchpad is unknown to Launch Services (`open_application` can't
 find it), and with the user in a full-screen app, full-screen control shows only black.
 
+### HIG layout pass (2026-11-02)
+
+- **Configuration's grouped `Form` sits inside the detail pane's `ScrollView`** — two vertical
+  scrollers in the code, which the HIG says to avoid. **Checked live and left alone:** the
+  accessibility tree has ONE scroll bar spanning the pane, because SwiftUI lays a grouped Form
+  out at full height inside an outer ScrollView. Don't "fix" it without a screenshot showing a
+  second scroller.
+- **Sidebar rows carry `.help(bottle.name)`** — the 264pt column cuts long game names, and a
+  SwiftUI `Text` gets no automatic expansion tooltip the way an AppKit table cell does.
+- **Open decision: the sidebar can't be hidden.** The HIG suggests letting people hide it (View ▸
+  Hide Sidebar, ⌃⌘S). It went away with `NavigationSplitView` (see "The sidebar's grey needed dropping
+  NavigationSplitView entirely"). Bringing it back by hand means a toggle plus moving the detail
+  header clear of the floating traffic lights when the sidebar is gone.
+
 ## "Why is this game slow" — measure it (`Scripts/profile-slow-game.command`)
 
 Peggle Deluxe was guessed at **twice** — first the graphics backend (DXVK), then the Wine engine

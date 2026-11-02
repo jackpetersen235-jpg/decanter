@@ -80,3 +80,5 @@ Raised in the 2026-11-02 HIG patterns pass, waiting on Jack (details in `CLAUDE.
 - Restore the last-selected bottle at launch? Conflicts with the selection-only Steam warm-start.
 - Retire the gear sheet (`SetupSheet`), which duplicates the Settings window?
 - Point Help ▸ Decanter Help at a troubleshooting guide shipped inside the app?
+- Let people hide the sidebar (layout pass)? Lost when `NavigationSplitView` was dropped for
+  Liquid Glass; a hand-built toggle must also clear the floating traffic lights.

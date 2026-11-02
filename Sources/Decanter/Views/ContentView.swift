@@ -299,6 +299,9 @@ private struct BottleRow: View {
             }
         }
         .padding(.vertical, 2)
+        // The 264pt sidebar cuts long game names ("JoJo's Bizarre Adventure: All-Star…"), and a
+        // SwiftUI Text gets no automatic expansion tooltip the way an AppKit table cell does.
+        .help(bottle.name)
     }
 
     private var subtitle: String {
