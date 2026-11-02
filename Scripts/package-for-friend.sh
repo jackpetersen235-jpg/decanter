@@ -193,11 +193,11 @@ GOOD TO KNOW
 
     Leave it OFF for 3D games - it would slow those down.
 
-  • WANT A NORMAL WINDOW? Open a game's Configuration and turn on
-    "Real game window". The game then opens in an ordinary Mac window you can
-    move and minimize, the green button makes it fullscreen, and macOS Game
-    Mode switches on while it's fullscreen. New and experimental — if
-    anything looks wrong, turn it back off.
+  • WANT A NORMAL WINDOW? Open a game's Configuration and set Window mode
+    to "Real game window". The game then opens in an ordinary Mac window you
+    can move and minimize, the green button makes it fullscreen, and macOS
+    Game Mode switches on while it's fullscreen. New and experimental — if
+    anything looks wrong, set it back to "Game's own setting".
 
 
 IF SOMETHING GOES WRONG

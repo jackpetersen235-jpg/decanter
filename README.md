@@ -65,7 +65,7 @@ open build/Decanter.app
 3. **Overview ▸ Install Steam** — downloads the official `SteamSetup.exe` from Valve and
    installs it silently into the bottle.
 4. **Configuration** — pick the graphics backend (D3DMetal / DXVK / WineD3D), sync mode,
-   Windows version, Retina, DPI, AVX, etc. Press **Apply to Prefix** to write the
+   Windows version, Retina, DPI, AVX, etc. Press **Apply Settings to Prefix** to write the
    registry-backed ones.
 5. **Overview ▸ Launch Steam** — starts Steam with your configured launch flags.
 

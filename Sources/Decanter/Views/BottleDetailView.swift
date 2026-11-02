@@ -35,7 +35,9 @@ struct BottleDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             headerBar
             Divider()
-            Picker("", selection: $tab) {
+            // Labelled for VoiceOver even though `.labelsHidden()` keeps it off screen — an empty
+            // title left the control unnamed.
+            Picker("Bottle section", selection: $tab) {
                 ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)

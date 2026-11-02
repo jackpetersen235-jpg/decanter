@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Editable configuration for one bottle. Edits persist immediately; the "Apply to
+/// Editable configuration for one bottle. Edits persist immediately; the "Apply Settings to
 /// Prefix" button pushes registry-backed settings (Windows version, retina, DPI) into Wine.
 struct ConfigurationView: View {
     @EnvironmentObject private var model: AppModel
@@ -8,6 +8,49 @@ struct ConfigurationView: View {
 
     @State private var switchingEngine = false
     @State private var engineError: String?
+
+    /// `borderlessFullscreen` and `nativeWindow` as the single choice they really are. They were
+    /// two toggles that silently switched each other off, which reads as a bug — the HIG keeps
+    /// toggles for independent on/off states and mutually exclusive options for a picker. Still
+    /// stored as the same two settings, so `bottles.json` is unchanged.
+    private enum WindowMode: String, CaseIterable, Identifiable {
+        case gamesOwn = "Game's own setting"
+        case borderless = "Borderless fullscreen"
+        case nativeWindow = "Real game window"
+        var id: String { rawValue }
+
+        var detail: String {
+            switch self {
+            case .gamesOwn:
+                return "The game uses whatever window or fullscreen mode it chooses itself."
+            case .borderless:
+                return "Runs the game in a real window sized to fill your screen, instead of "
+                     + "whatever window mode it starts in — Cmd+Tab and the Dock still work. Use "
+                     + "this for a game that doesn't fill the screen on its own or looks wrong in "
+                     + "its normal fullscreen mode."
+            case .nativeWindow:
+                return "The game opens in an ordinary Mac window you can move, minimize, and take "
+                     + "fullscreen with the green button — and macOS Game Mode turns on while it's "
+                     + "fullscreen. Decanter starts the game itself instead of through Steam's Play "
+                     + "button (Steam still runs alongside). Experimental: Borderless fullscreen is "
+                     + "the mode frame pacing was tuned on."
+            }
+        }
+    }
+
+    private var windowMode: Binding<WindowMode> {
+        Binding(
+            get: {
+                if bottle.settings.nativeWindow { return .nativeWindow }
+                return bottle.settings.borderlessFullscreen ? .borderless : .gamesOwn
+            },
+            set: { mode in
+                var settings = bottle.settings          // one write, not two
+                settings.borderlessFullscreen = mode == .borderless
+                settings.nativeWindow = mode == .nativeWindow
+                bottle.settings = settings
+            })
+    }
 
     /// Bottles sharing `bottle`'s WINEPREFIX — Windows version, DPI and Retina all land in the
     /// registry ONCE PER PREFIX (HKLM, or HKCU keys the prefix itself owns), not once per bottle,
@@ -135,30 +178,10 @@ struct ConfigurationView: View {
                      + "entirely. Measured on Peggle Deluxe: 18 fps → 90 fps. Leave OFF for 3D games.")
                     .font(.caption).foregroundStyle(.secondary)
 
-                // The two window modes are opposite trades, so turning one on turns the other off.
-                Toggle("Borderless fullscreen", isOn: Binding(
-                    get: { bottle.settings.borderlessFullscreen },
-                    set: { on in
-                        bottle.settings.borderlessFullscreen = on
-                        if on { bottle.settings.nativeWindow = false }
-                    }))
-                Text("Runs the game in a real window sized to fill your screen, instead of "
-                     + "whatever window mode it starts in — Cmd+Tab and the Dock still work. Turn "
-                     + "this on for a game that doesn't fill the screen on its own or looks wrong "
-                     + "in its normal fullscreen mode.")
-                    .font(.caption).foregroundStyle(.secondary)
-
-                Toggle("Real game window", isOn: Binding(
-                    get: { bottle.settings.nativeWindow },
-                    set: { on in
-                        bottle.settings.nativeWindow = on
-                        if on { bottle.settings.borderlessFullscreen = false }
-                    }))
-                Text("The game opens in an ordinary Mac window you can move, minimize, and take "
-                     + "fullscreen with the green button — and macOS Game Mode turns on while it's "
-                     + "fullscreen. Decanter starts the game itself instead of through Steam's Play "
-                     + "button (Steam still runs alongside). Experimental: Borderless fullscreen is "
-                     + "the mode frame pacing was tuned on.")
+                Picker("Window mode", selection: windowMode) {
+                    ForEach(WindowMode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                Text(windowMode.wrappedValue.detail)
                     .font(.caption).foregroundStyle(.secondary)
                 if bottle.settings.nativeWindow,
                    let reason = model.nativeWindowUnavailableReason(for: bottle) {
@@ -177,11 +200,16 @@ struct ConfigurationView: View {
                 let install = model.installation(for: bottle)
                 LabeledContent("Fast sync (msync)") {
                     if let install {
-                        Label(install.supportsFastSync ? "Supported by this Wine build"
-                                                       : "Not available in this Wine build",
-                              systemImage: install.supportsFastSync ? "checkmark.circle.fill"
-                                                                    : "exclamationmark.triangle.fill")
-                            .foregroundStyle(install.supportsFastSync ? .green : .orange)
+                        // Tint on the icon only — green/orange text measures 2.2–2.3:1 on the light
+                        // background (see StatusNote). Missed by the foundations pass: a ternary.
+                        Label {
+                            Text(install.supportsFastSync ? "Supported by this Wine build"
+                                                          : "Not available in this Wine build")
+                        } icon: {
+                            Image(systemName: install.supportsFastSync ? "checkmark.circle.fill"
+                                                                       : "exclamationmark.triangle.fill")
+                                .foregroundStyle(install.supportsFastSync ? .green : .orange)
+                        }
                     } else {
                         Text("No Wine build").foregroundStyle(.secondary)
                     }
@@ -201,8 +229,7 @@ struct ConfigurationView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 envSharedCaption()
                 Toggle("Verbose Wine logging", isOn: $bottle.settings.verboseLogging)
-
-                Divider()
+                // (No Divider here: a grouped Form draws one as an empty-looking row of its own.)
                 Toggle("GPU keep-alive", isOn: $bottle.settings.gpuKeepAlive)
                 Text("Works around a GPU firmware fault on some Apple Silicon Macs that causes "
                      + "occasional multi-second whole-system freezes during play. Runs a small "
@@ -212,7 +239,13 @@ struct ConfigurationView: View {
             }
 
             Section("Steam launch arguments") {
-                TextField("Arguments", text: $bottle.settings.steamArguments)
+                // The example shows the one argument that matters: `-applaunch <app id>` is what
+                // makes this a game bottle that Play launches (Sekiro's id here).
+                // Label hidden: the section header already names it, and the monospaced font set on
+                // the field was also setting the label in code type. VoiceOver still reads it.
+                TextField("Steam launch arguments", text: $bottle.settings.steamArguments,
+                          prompt: Text("e.g. -applaunch 814380"))
+                    .labelsHidden()
                     .font(.system(.body, design: .monospaced))
             }
 
@@ -221,7 +254,7 @@ struct ConfigurationView: View {
                     Text("Registry-backed settings (Windows version, retina, DPI) apply when you press this.")
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Button("Apply to Prefix") { model.applySettings(bottle) }
+                    Button("Apply Settings to Prefix") { model.applySettings(bottle) }
                         .disabled(!bottle.isInitialized)
                 }
             }

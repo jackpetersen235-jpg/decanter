@@ -680,7 +680,25 @@ find it), and with the user in a full-screen app, full-screen control shows only
 - `NSWindow.allowsAutomaticWindowTabbing = false` in `DecanterApp.init`: the system's Show Tab
   Bar / Show All Tabs could only ever offer a second copy of the one window.
 - Verified by listing each menu in a test copy (`app_menu`). View ▸ Configuration was pressed but
-  the tab change itself was not seen — the window was unreachable again.
+  the tab change itself was not seen — the window was unreachable again. (Seen working in the
+  controls pass that followed.)
+
+### HIG controls pass (2026-11-02)
+
+- **Window mode is one picker, not two toggles.** "Borderless fullscreen" and "Real game window"
+  were toggles that silently switched each other off; mutually exclusive options belong in a
+  picker (Game's own setting / Borderless fullscreen / Real game window). Still stored as the two
+  `BottleSettings` bools — `ConfigurationView.WindowMode` maps them, writing both in one go.
+  Friend READ ME updated ("set Window mode to…").
+- **Fast sync status** was green/orange TEXT (a ternary, so the foundations grep missed it): tint
+  moved to the icon. When hunting colour-on-text, grep for `.green`/`.orange` inside ternaries too.
+- **"Apply to Prefix"** was a third name for Apply Settings to Prefix; renamed (README too).
+- **Steam launch arguments:** example prompt (`-applaunch 814380`), and the visible label hidden —
+  the section header names it, and the field's monospaced font was also setting the label.
+  VoiceOver still reads "Steam launch arguments" (checked in the AX tree).
+- **`Divider()` inside a grouped `Form` draws an empty-looking row**, not a line — removed the one
+  above GPU keep-alive.
+- The tab control's `Picker("", …)` is now `Picker("Bottle section", …)` (still `labelsHidden`).
 
 ## "Why is this game slow" — measure it (`Scripts/profile-slow-game.command`)
 
