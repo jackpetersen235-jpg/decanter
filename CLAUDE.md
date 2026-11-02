@@ -596,13 +596,36 @@ them.
 
 Verifying a view change without touching the real app: copy `build/Decanter.app`, change its
 `CFBundleIdentifier`, re-sign ad hoc, and `open -n --env DECANTER_HOME=<scratch> <copy>`. Own
-preferences, own data, no click can land in the real instance. ⚠️ After that copy was killed,
-re-signed and relaunched, the computer-use tools could no longer see its window through
-accessibility (re-requesting access didn't help; which step caused it was not isolated), so make
-every Info.plist change before the first launch and do all the clicking in that one run. Force light mode per app with
+preferences, own data, no click can land in the real instance. ⚠️ The computer-use tools lost
+accessibility access to such a copy twice: once after a relaunch (window on screen, AX listed
+nothing), once mid-run in a copy that was never re-signed (window moved to another Space). The
+screen was not locked either time, and the cause is not isolated. Do the critical clicks first,
+in the first run. Force light mode per app with
 `defaults write <test bundle id> NSRequiresAquaSystemAppearance -bool true`
 (`-AppleInterfaceStyle Light` as a launch argument does nothing). Rendering one view with
 `ImageRenderer` under `NSAppearance(named: .aqua)` is the quickest light/dark before-and-after.
+
+### HIG patterns pass (2026-11-02)
+
+- **"Delete Bottle (keep files)" is undoable** (Edit ▸ Undo, ⌘Z / ⇧⌘Z) instead of confirmed: it
+  only drops the list entry, so `AppModel.removeBottleKeepingFiles` / `restoreBottle` put it back
+  exactly (`BottleList.restoring`, `BottleListTests`). Delete-WITH-files keeps its confirmation —
+  undo can't bring back erased saves.
+- **Setup Assistant has a "Not Now"** when opened from the View menu with a step unfinished. It
+  replaces the main window, and its only exit used to be finishing setup. Hidden on first run and
+  while setup runs (`dismiss` is nil then).
+- **Esc cancels the Uninstall sheet** (Remove Everything stays click-only), matching New Bottle.
+- **One name for one action:** Setup's "Add Manually…" is now "Add Wine Bin Folder…", as in Settings.
+
+Found and deliberately NOT changed — each needs Jack's call:
+- **Launch doesn't restore the selected bottle** (always the first). HIG says restore state, but a
+  restored game bottle would never be "selected", so it would never warm-start Steam — and
+  warm-start was scoped to user selection only, never at launch.
+- **The gear sheet duplicates Settings** (Rosetta, Wine builds, default build, Rescan, add folder).
+  HIG wants settings in the Settings window; two copies is how the rescan messages drifted (see
+  review findings 4–6). Consolidating means retiring `SetupSheet`.
+- **Help ▸ Decanter Help** is the system default, which says help isn't available. Pointing it at
+  the troubleshooting guide needs that guide shipped inside the app (today it's only in the zip).
 
 ## "Why is this game slow" — measure it (`Scripts/profile-slow-game.command`)
 

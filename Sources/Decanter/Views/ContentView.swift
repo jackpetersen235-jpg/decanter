@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.undoManager) private var undoManager
     @State private var showingCreate = false
     @State private var showingSetup = false
     @State private var showingWizard = false
@@ -204,7 +205,10 @@ struct ContentView: View {
         Button("Open C: Drive") { model.openCDrive(bottle) }
         Button("Apply Settings to Prefix") { model.applySettings(bottle) }
         Divider()
-        Button("Delete Bottle (keep files)") { model.deleteBottle(bottle, removeFiles: false) }
+        // Undoable (Edit ▸ Undo), since it only removes the entry — no confirmation needed.
+        Button("Delete Bottle (keep files)") {
+            model.removeBottleKeepingFiles(bottle, undoManager: undoManager)
+        }
         // Destructive + irreversible: a prefix holds the game install AND its saves (10-100 GB,
         // and saves exist nowhere else). This is a context-menu item one slip away from the
         // harmless "keep files" entry, so it MUST confirm first.

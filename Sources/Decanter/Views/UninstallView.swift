@@ -49,6 +49,7 @@ struct UninstallView: View {
                 Text("Total: \(human(totalBytes))").font(.headline)
                 Spacer()
                 Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)    // Esc backs out; Remove stays click-only
                     .disabled(isRemoving)
                 Button(role: .destructive) {
                     remove()

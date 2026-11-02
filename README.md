@@ -39,7 +39,7 @@ to use. It auto-detects, in order:
 | **CrossOver** | `/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin` |
 | **Wine Stable/Staging / Homebrew** | app bundles + `/opt/homebrew/bin`, `/usr/local/bin` |
 
-You can also **Add Manually…** in Setup and pick any Wine `bin` folder.
+You can also **Add Wine Bin Folder…** in Setup (or Settings) and pick any Wine `bin` folder.
 
 Also required:
 - **Rosetta 2** — Decanter checks for it and offers to install it (`softwareupdate --install-rosetta`).

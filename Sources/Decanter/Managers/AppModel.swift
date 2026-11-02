@@ -1823,6 +1823,29 @@ final class AppModel: ObservableObject {
         try? FileManager.default.removeItem(at: bottle.url)
     }
 
+    /// "Delete Bottle (keep files)", with Edit ▸ Undo. It only drops the list entry — the prefix
+    /// stays on disk — so it can be reversed exactly, and the HIG prefers undo to a confirmation.
+    /// Delete-WITH-files stays behind its confirmation instead: that one erases saves for good.
+    func removeBottleKeepingFiles(_ bottle: Bottle, undoManager: UndoManager?) {
+        guard let index = bottles.firstIndex(where: { $0.id == bottle.id }) else { return }
+        deleteBottle(bottle, removeFiles: false)
+        undoManager?.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated { model.restoreBottle(bottle, at: index, undoManager: undoManager) }
+        }
+        undoManager?.setActionName("Delete “\(bottle.name)”")
+    }
+
+    /// The undo of `removeBottleKeepingFiles`. Registers the redo, so ⇧⌘Z deletes it again.
+    func restoreBottle(_ bottle: Bottle, at index: Int, undoManager: UndoManager?) {
+        bottles = BottleList.restoring(bottle, at: index, in: bottles)
+        selectedBottleID = bottle.id        // programmatic, so it never warm-starts Steam
+        saveBottles()
+        undoManager?.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated { model.removeBottleKeepingFiles(bottle, undoManager: undoManager) }
+        }
+        undoManager?.setActionName("Delete “\(bottle.name)”")
+    }
+
     func update(_ bottle: Bottle) {
         guard let index = bottles.firstIndex(where: { $0.id == bottle.id }) else { return }
         bottles[index] = bottle

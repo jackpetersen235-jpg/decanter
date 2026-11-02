@@ -176,6 +176,16 @@ struct SetupWizard: View {
                      : "Downloads about 317 MB. Nothing else on your Mac is touched.")
                     .font(.caption).foregroundStyle(.secondary)
 
+                // Opened from View ▸ Setup Assistant… with a step unfinished, the wizard REPLACES
+                // the main window, and its only exit was finishing setup — a trap (HIG Modality:
+                // always give people an obvious way to dismiss). `dismiss` is nil on first run,
+                // where there's nothing behind the wizard yet, and while setup runs, so this only
+                // appears when leaving is safe.
+                if let dismiss, !running {
+                    Button("Not Now", action: dismiss)
+                        .keyboardShortcut(.cancelAction)
+                }
+
                 if let failureMessage {
                     StatusNote.failure(failureMessage)
                         .padding(.top, 2)
