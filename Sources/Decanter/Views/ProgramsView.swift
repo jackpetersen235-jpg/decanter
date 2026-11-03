@@ -45,7 +45,8 @@ struct ProgramsView: View {
                 .padding(6)
             }
         }
-        .padding(16)
+        // Apple's 20pt content margin, matching Overview (docs/APPLE-GEOMETRY.md).
+        .padding(20)
     }
 
     private func icon(for tool: Wine.Tool) -> String {

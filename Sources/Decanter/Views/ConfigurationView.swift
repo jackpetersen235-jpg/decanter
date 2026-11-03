@@ -61,8 +61,8 @@ struct ConfigurationView: View {
     @ViewBuilder
     private func sharedCaption() -> some View {
         if !sharedWith.isEmpty {
-            StatusNote("This is a property of the PREFIX, not this bottle. Changing it also changes: "
-                       + sharedWith.map(\.name).joined(separator: ", "))
+            StatusNote("Also changes " + sharedWith.map(\.name).joined(separator: ", ")
+                       + ", which share this bottle's prefix.")
         }
     }
 
@@ -79,17 +79,31 @@ struct ConfigurationView: View {
     @ViewBuilder
     private func envSharedCaption() -> some View {
         if !sharedWith.isEmpty {
-            StatusNote("This takes effect through Steam's own launch environment, not the registry — "
-                       + "whichever bottle starts Steam decides it for every game launched through that "
-                       + "same Steam session, until Steam quits. Also affects: "
-                       + sharedWith.map(\.name).joined(separator: ", "))
+            StatusNote("Set by whichever bottle starts Steam, for every game launched in that Steam "
+                       + "session until it quits. Also affects "
+                       + sharedWith.map(\.name).joined(separator: ", ") + ".")
         }
+    }
+
+    /// A setting's explanation, for the second line of its label.
+    ///
+    /// Styled by hand rather than left to the Form: the text-tone override (Settings ▸ Appearance)
+    /// paints every `Text` in the detail column, and it turned the Form's own small grey subtitles
+    /// into full-size primary text. Returns `Text`, not `some View`, so the Form still recognises
+    /// it as the label's subtitle.
+    private func subtitle(_ text: String) -> Text {
+        Text(text).font(.caption).foregroundStyle(.secondary)
     }
 
     var body: some View {
         Form {
-            Section("Engine") {
-                Picker("Play mode", selection: Binding(
+            // Explanations are SUBTITLES of the control they explain — a second `Text` in the
+            // label, which a grouped Form draws under the title, the way System Settings does. They
+            // used to be rows of their own, each with a separator above it, so a section read as a
+            // stack of paragraphs with the controls lost between them. Notes about a whole section
+            // go in its footer, outside the box. See `subtitle(_:)` for why they're styled by hand.
+            Section {
+                Picker(selection: Binding(
                     get: { bottle.settings.engineProfile ?? .offline },
                     set: { profile in
                         // Routed through the model rather than written straight to the binding:
@@ -103,11 +117,11 @@ struct ConfigurationView: View {
                         }
                     })) {
                     ForEach(EngineProfile.allCases) { Text($0.label).tag($0) }
+                } label: {
+                    Text("Play mode")
+                    subtitle((bottle.settings.engineProfile ?? .offline).detail)
                 }
                 .disabled(switchingEngine)
-
-                Text((bottle.settings.engineProfile ?? .offline).detail)
-                    .font(.caption).foregroundStyle(.secondary)
 
                 if switchingEngine {
                     Text("Setting up…").font(.caption).foregroundStyle(.secondary)
@@ -115,55 +129,71 @@ struct ConfigurationView: View {
                 if let engineError {
                     StatusNote(engineError)
                 }
+
+                if (bottle.settings.engineProfile ?? .offline) == .online {
+                    // (No Divider above this: a grouped Form draws one as an empty row.)
+                    LabeledContent {
+                        Button(switchingEngine ? "Working…" : "Reset Online Engine") {
+                            switchingEngine = true
+                            engineError = nil
+                            Task {
+                                let ok = await model.resetOnlineEngine()
+                                engineError = ok ? nil : "Quit Steam and any running game first."
+                                switchingEngine = false
+                            }
+                        }
+                        .disabled(switchingEngine)
+                    } label: {
+                        Text("Online engine")
+                        subtitle("Restores a fresh copy from the offline engine if online play stops "
+                             + "working. Takes about a second and never touches your offline setup.")
+                    }
+                }
+            } header: {
+                Text("Engine")
+            } footer: {
+                // Leading, explicitly: a macOS Form lays a multi-line footer out trailing-aligned,
+                // which left its second line hanging off the right edge.
                 Text("Both modes share this bottle — same games, same saves, same Steam login. "
                      + "Only the engine differs, so online changes can't affect your offline setup.")
                     .font(.caption).foregroundStyle(.secondary)
-
-                if (bottle.settings.engineProfile ?? .offline) == .online {
-                    Divider()
-                    Button(switchingEngine ? "Working…" : "Reset Online Engine") {
-                        switchingEngine = true
-                        engineError = nil
-                        Task {
-                            let ok = await model.resetOnlineEngine()
-                            engineError = ok ? nil : "Quit Steam and any running game first."
-                            switchingEngine = false
-                        }
-                    }
-                    .disabled(switchingEngine)
-                    Text("Restores a fresh copy from the offline engine. Use this if online play "
-                         + "stops working after changing something — it takes about a second and "
-                         + "never touches your offline setup.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Section(sharedWith.isEmpty ? "Windows" : "Windows — shared with this prefix") {
+            // The shared-prefix note is the footer: it is about the whole section, and the header no
+            // longer has to carry "— shared with this prefix" as well.
+            Section {
                 Picker("Windows version", selection: $bottle.settings.windowsVersion) {
                     ForEach(WindowsVersion.allCases) { Text($0.label).tag($0) }
                 }
+            } header: {
+                Text("Windows")
+            } footer: {
                 sharedCaption()
             }
 
             Section("Graphics") {
-                Picker("Backend", selection: $bottle.settings.graphics) {
+                Picker(selection: $bottle.settings.graphics) {
                     ForEach(GraphicsBackend.allCases) { Text($0.label).tag($0) }
+                } label: {
+                    Text("Backend")
+                    subtitle(bottle.settings.graphics.detail)
                 }
-                Text(bottle.settings.graphics.detail)
-                    .font(.caption).foregroundStyle(.secondary)
 
                 if bottle.settings.graphics == .dxmt || bottle.settings.graphics == .d3dmetal {
                     Toggle("MetalFX upscaling", isOn: $bottle.settings.metalFX)
                     if bottle.settings.metalFX {
-                        Picker("Upscale factor", selection: $bottle.settings.metalFXFactor) {
+                        Picker(selection: $bottle.settings.metalFXFactor) {
                             Text("1.3× (mild)").tag(1.3)
                             Text("1.5× (balanced)").tag(1.5)
                             Text("2.0× (max)").tag(2.0)
+                        } label: {
+                            Text("Upscale factor")
+                            subtitle("MetalFX upscales from the game's own resolution — it doesn't lower "
+                                 + "it. For more frames, also lower the game's resolution and let "
+                                 + "MetalFX rebuild it to your display size.")
                         }
-                        Text("MetalFX upscales *from* the game's own resolution — it doesn't lower it. "
-                             + "For actual frames, also reduce the game's internal resolution and let "
-                             + "MetalFX rebuild it to your display size.")
-                            .font(.caption).foregroundStyle(.secondary)
                     }
                     Toggle("Metal performance HUD", isOn: $bottle.settings.metalHUD)
                     envSharedCaption()
@@ -171,18 +201,20 @@ struct ConfigurationView: View {
                 if bottle.settings.graphics == .dxvk {
                     Toggle("DXVK HUD (fps/frametimes)", isOn: $bottle.settings.dxvkHUD)
                 }
-                Toggle("Old 2D game — software rendering", isOn: $bottle.settings.software2D)
-                Text("For pre-2010 2D games (Peggle, Bejeweled, Zuma…). They draw every sprite as a "
-                     + "separate call — thousands per frame — and each one is far more expensive "
-                     + "through Wine on a Mac than on Windows. Rendering in software skips that "
-                     + "entirely. Measured on Peggle Deluxe: 18 fps → 90 fps. Leave OFF for 3D games.")
-                    .font(.caption).foregroundStyle(.secondary)
-
-                Picker("Window mode", selection: windowMode) {
-                    ForEach(WindowMode.allCases) { Text($0.rawValue).tag($0) }
+                Toggle(isOn: $bottle.settings.software2D) {
+                    Text("Old 2D game — software rendering")
+                    subtitle("For pre-2010 2D games like Peggle, Bejeweled and Zuma, which draw "
+                         + "thousands of sprites a frame — far slower through Wine on a Mac. "
+                         + "Software rendering skips that (Peggle Deluxe: 18 → 90 fps). "
+                         + "Leave off for 3D games.")
                 }
-                Text(windowMode.wrappedValue.detail)
-                    .font(.caption).foregroundStyle(.secondary)
+
+                Picker(selection: windowMode) {
+                    ForEach(WindowMode.allCases) { Text($0.rawValue).tag($0) }
+                } label: {
+                    Text("Window mode")
+                    subtitle(windowMode.wrappedValue.detail)
+                }
                 if bottle.settings.nativeWindow,
                    let reason = model.nativeWindowUnavailableReason(for: bottle) {
                     StatusNote(reason)
@@ -198,7 +230,7 @@ struct ConfigurationView: View {
                 // Fast sync is a property of the Wine BUILD, not a free choice. Builds without
                 // it silently ignore WINEMSYNC/WINEESYNC — say so rather than imply otherwise.
                 let install = model.installation(for: bottle)
-                LabeledContent("Fast sync (msync)") {
+                LabeledContent {
                     if let install {
                         // Tint on the icon only — green/orange text measures 2.2–2.3:1 on the light
                         // background (see StatusNote). Missed by the foundations pass: a ternary.
@@ -213,29 +245,34 @@ struct ConfigurationView: View {
                     } else {
                         Text("No Wine build").foregroundStyle(.secondary)
                     }
-                }
-                if let install, !install.supportsFastSync {
-                    Text("Without msync/esync every Windows mutex round-trips through wineserver, "
-                         + "which causes frame spikes in thread-heavy games. wine 11 has no fast sync "
-                         + "on macOS; only CrossOver-derived builds do. See docs/GAMING-STACK.md.")
-                        .font(.caption).foregroundStyle(.secondary)
+                } label: {
+                    Text("Fast sync (msync)")
+                    // The old text here blamed wine 11 and pointed at CrossOver and a repo doc. The
+                    // engine Decanter installs has msync (CLAUDE.md: "CrossOver is NOT needed"), so
+                    // the useful thing to say is which engine to use.
+                    if let install, !install.supportsFastSync {
+                        subtitle("Without it, thread-heavy games get frame spikes. The Decanter "
+                                 + "engine includes it.")
+                    }
                 }
                 Picker("Thread sync", selection: $bottle.settings.syncMode) {
                     ForEach(SyncMode.allCases) { Text($0.label).tag($0) }
                 }
                 .disabled(!(install?.supportsFastSync ?? false))
-                Toggle("Advertise AVX to Rosetta", isOn: $bottle.settings.advertiseAVX)
-                Text("Several Game Porting Toolkit titles require AVX support to launch.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Toggle(isOn: $bottle.settings.advertiseAVX) {
+                    Text("Advertise AVX to Rosetta")
+                    subtitle("Several Game Porting Toolkit titles require AVX support to launch.")
+                }
                 envSharedCaption()
                 Toggle("Verbose Wine logging", isOn: $bottle.settings.verboseLogging)
                 // (No Divider here: a grouped Form draws one as an empty-looking row of its own.)
-                Toggle("GPU keep-alive", isOn: $bottle.settings.gpuKeepAlive)
-                Text("Works around a GPU firmware fault on some Apple Silicon Macs that causes "
-                     + "occasional multi-second whole-system freezes during play. Runs a small "
-                     + "background helper for as long as this game does. Only turn this on if "
-                     + "you've actually seen those freezes — it costs a continuous small GPU load.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Toggle(isOn: $bottle.settings.gpuKeepAlive) {
+                    Text("GPU keep-alive")
+                    subtitle("Works around a GPU firmware fault on some Apple Silicon Macs that causes "
+                         + "occasional multi-second whole-system freezes during play. Only turn it "
+                         + "on if you've seen those freezes — it runs a small background GPU load "
+                         + "for as long as the game does.")
+                }
             }
 
             Section("Steam launch arguments") {
@@ -250,12 +287,12 @@ struct ConfigurationView: View {
             }
 
             Section {
-                HStack {
-                    Text("Registry-backed settings (Windows version, retina, DPI) apply when you press this.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
+                LabeledContent {
                     Button("Apply Settings to Prefix") { model.applySettings(bottle) }
                         .disabled(!bottle.isInitialized)
+                } label: {
+                    Text("Registry settings")
+                    subtitle("Windows version, Retina and DPI are written to Wine when you press Apply.")
                 }
             }
         }

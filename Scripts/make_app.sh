@@ -22,11 +22,27 @@ if [ "${NATIVE_ONLY:-0}" = 1 ]; then
   echo "▸ NATIVE_ONLY=1 — building $(uname -m) only (local testing; do not distribute)"
 fi
 
-echo "▸ Building ($CONFIG, universal)…"
-swift build -c "$CONFIG" "${ARCHS[@]}"
+# Record the SDK actually used. macOS picks an app's look from the SDK version stamped into the
+# binary, and Xcode's build system (active once the Xcode license is accepted) stamped `sdk 14.0` —
+# the deployment target — which runs the app in macOS 14 COMPATIBILITY MODE: no floating sidebar,
+# compact toolbar, old control metrics, whatever the SwiftUI says. The Command Line Tools stamp the
+# real SDK; this makes both do so. 14.0 is the deployment target from Package.swift (.macOS(.v14)).
+SDK_VERSION="$(xcrun --show-sdk-version)"
+LINK_SDK=(-Xlinker -platform_version -Xlinker macos -Xlinker 14.0 -Xlinker "$SDK_VERSION")
 
-BIN_DIR="$(swift build -c "$CONFIG" "${ARCHS[@]}" --show-bin-path)"
+echo "▸ Building ($CONFIG, universal, SDK $SDK_VERSION)…"
+swift build -c "$CONFIG" "${ARCHS[@]}" "${LINK_SDK[@]}"
+
+BIN_DIR="$(swift build -c "$CONFIG" "${ARCHS[@]}" "${LINK_SDK[@]}" --show-bin-path)"
 BIN="$BIN_DIR/Decanter"
+
+# Refuse to ship a compatibility-mode binary. See docs/APPLE-GEOMETRY.md ▸ "SDK stamp".
+STAMPED="$(otool -l "$BIN" | awk '/LC_BUILD_VERSION/{f=1} f && $1=="sdk"{print $2; exit}')"
+if [ "${STAMPED%%.*}" -lt 26 ]; then
+  echo "✗ Decanter is stamped sdk $STAMPED — macOS would run it in compatibility mode (old design)." >&2
+  exit 1
+fi
+echo "▸ SDK stamp: $STAMPED"
 KEEPALIVE_BIN="$BIN_DIR/GPUKeepalive"
 APP="$ROOT/build/Decanter.app"
 

@@ -17,4 +17,16 @@ enum BottleSetupState: Equatable {
         if isInitialized { return .ready }
         return isBooting ? .inProgress : .interrupted
     }
+
+    /// The sidebar row's second line, or nil when the bottle is fine and the row is one line.
+    ///
+    /// Every row used to say "Steam ready" — six identical captions that carried no information and
+    /// made the list look busy. A caption now appears only when it asks for attention.
+    func sidebarCaption(isSteamInstalled: Bool) -> String? {
+        switch self {
+        case .inProgress:  return "Initializing…"
+        case .interrupted: return "Setup didn't finish"
+        case .ready:       return isSteamInstalled ? nil : "Steam not installed"
+        }
+    }
 }

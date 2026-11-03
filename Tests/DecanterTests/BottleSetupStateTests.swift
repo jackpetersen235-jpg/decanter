@@ -19,4 +19,22 @@ final class BottleSetupStateTests: XCTestCase {
     func testNotInitializedWithNothingBootingIsInterrupted() {
         XCTAssertEqual(BottleSetupState.of(isInitialized: false, isBooting: false), .interrupted)
     }
+
+    // MARK: Sidebar caption
+
+    /// Every row used to read "Steam ready", which said nothing once it said it six times. A
+    /// healthy bottle is the normal case, so its row is one line.
+    func testAReadyBottleWithSteamHasNoCaption() {
+        XCTAssertNil(BottleSetupState.ready.sidebarCaption(isSteamInstalled: true))
+    }
+
+    /// The second line is kept for the states that need the user to do something or wait.
+    func testCaptionsAppearOnlyWhenSomethingNeedsAttention() {
+        XCTAssertEqual(BottleSetupState.ready.sidebarCaption(isSteamInstalled: false),
+                       "Steam not installed")
+        XCTAssertEqual(BottleSetupState.inProgress.sidebarCaption(isSteamInstalled: false),
+                       "Initializing…")
+        XCTAssertEqual(BottleSetupState.interrupted.sidebarCaption(isSteamInstalled: true),
+                       "Setup didn't finish")
+    }
 }

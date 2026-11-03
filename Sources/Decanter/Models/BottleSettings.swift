@@ -124,7 +124,9 @@ enum GraphicsBackend: String, Codable, CaseIterable, Identifiable {
 
     var detail: String {
         switch self {
-        case .dxmt:     return "DirectX 11 → Metal in one hop. Fastest option on Apple Silicon. Applied per-game: DXMT's DLLs sit beside the game .exe and are enabled via AppDefaults, so the launcher UI is untouched."
+        // The how (DLLs beside the game .exe, enabled via AppDefaults) is in CLAUDE.md, not here —
+        // this line is read by players choosing a backend.
+        case .dxmt:     return "DirectX 11 → Metal in one hop. Fastest option on Apple Silicon."
         case .d3dmetal: return "DirectX 11/12 → Metal. Best performance for modern titles; needs a GPTk-based Wine build."
         case .dxvk:     return "DirectX 9–11 → Vulkan → MoltenVK → Metal (3 hops). Much slower than DXMT here; prefer DXMT unless a game misbehaves."
         case .wined3d:  return "DirectX → OpenGL. Most compatible fallback, lowest performance."

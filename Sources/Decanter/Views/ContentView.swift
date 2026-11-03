@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.appTheme) private var appTheme
     @State private var showingCreate = false
     @State private var showingSetup = false
     @State private var showingWizard = false
@@ -20,6 +21,8 @@ struct ContentView: View {
                 // backdrop directly.
                 SetupWizard(dismiss: (showingWizard && !model.isSettingUp) ? { showingWizard = false } : nil)
                     .aeroInk()
+            } else if appTheme == .system {
+                standardSplitView
             } else {
                 splitView
             }
@@ -100,7 +103,51 @@ struct ContentView: View {
         }
     }
 
-    /// Two columns laid out by hand rather than by `NavigationSplitView`.
+    /// Standard: the system's own split view, toolbar and window title.
+    ///
+    /// Measured against System Settings and Notes (docs/APPLE-GEOMETRY.md), every way the hand-laid-
+    /// out columns below looked "not quite Apple" came from building the chrome by hand: no toolbar
+    /// (so the traffic lights sat 10pt higher than in any toolbar window), a full-height square
+    /// sidebar instead of Tahoe's floating one (8pt inset, corners concentric with the window), a
+    /// custom header band instead of the window title, 28pt rows instead of 32. These containers
+    /// produce all of those numbers themselves. The themed looks can't use them — see `splitView`.
+    private var standardSplitView: some View {
+        NavigationSplitView {
+            bottleList
+                .listStyle(.sidebar)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 320)
+                // Pinned under the list, inside the floating sidebar, the way Mail and Notes pin
+                // their footers. The gear lives here, beside the engine status it manages: the
+                // sidebar's share of the toolbar holds the traffic lights, + and the sidebar toggle,
+                // and a third button there overflowed into a ">>" menu.
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    HStack(spacing: 0) {
+                        wineStatusFooter
+                        Button { showingSetup = true } label: {
+                            Image(systemName: "gearshape")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Wine installations & system checks")
+                        .accessibilityLabel("Wine installations and system checks")
+                        .padding(.trailing, 12)
+                    }
+                }
+                .toolbar {
+                    ToolbarItem {
+                        Button { showingCreate = true } label: {
+                            Label("New Bottle", systemImage: "plus")
+                        }
+                        .help("Create a new bottle")
+                        .disabled(model.defaultInstallation == nil)
+                    }
+                }
+                .tonedText()
+        } detail: {
+            detail.tonedText()
+        }
+    }
+
+    /// Two columns laid out by hand rather than by `NavigationSplitView` — Liquid Glass and Aero.
     ///
     /// The split view's sidebar column is an `NSSplitViewItem` with sidebar behaviour, and that
     /// installs a vibrancy backdrop BELOW anything SwiftUI can reach — it kept the left column grey
@@ -173,36 +220,12 @@ struct ContentView: View {
             .padding(.top, 8)
             .padding(.bottom, 2)
 
-            // .plain, not .sidebar: the sidebar list style reintroduces its own vibrancy, which
-            // is the exact thing this layout exists to get rid of.
-            //
-            // Routed through `userSelectedBottle`, not a direct binding to `selectedBottleID` —
-            // this is the ONE place a selection change means the user actually chose a bottle.
-            // `selectedBottleID` itself is reassigned programmatically in several other places
-            // (after a delete, a create, a CrossOver import); a plain `$model.selectedBottleID`
-            // binding here couldn't tell those apart from a real click, and warm-starting Steam
-            // after a delete reassigns selection is exactly the trap that ruled that out.
-            List(selection: Binding(get: { model.selectedBottleID },
-                                    set: { model.userSelectedBottle($0) })) {
-                Section("Bottles") {
-                    ForEach(model.bottles) { bottle in
-                        BottleRow(bottle: bottle, setupState: model.setupState(of: bottle))
-                            .tag(bottle.id)
-                            .contextMenu { bottleContextMenu(bottle) }
-                    }
-                }
-            }
-            // The Delete key (and Edit ▸ Delete) on a selected bottle: removes the entry and keeps
-            // the files, undoable with ⌘Z — what Delete does to a selected item in Mail or Notes.
-            // Only fires while the list has focus, so typing in a field never deletes a bottle.
-            .onDeleteCommand {
-                guard let bottle = model.bottles.first(where: { $0.id == model.selectedBottleID })
-                else { return }
-                model.removeBottleKeepingFiles(bottle, undoManager: undoManager)
-            }
+            bottleList
             Divider()
             wineStatusFooter
         }
+        // .plain, not .sidebar: the sidebar list style reintroduces its own vibrancy, which is the
+        // exact thing this layout exists to get rid of.
         .listStyle(.plain)
         // The sidebar needs the Aero treatment too, and did not have it: `aeroInk()` was applied
         // only to the detail column and the wizard. Without it the sidebar stayed in the DARK
@@ -238,6 +261,38 @@ struct ContentView: View {
 
     /// Bottle awaiting delete-with-files confirmation.
     @State private var pendingDeletion: Bottle?
+
+    /// The bottle list, shared by both layouts; each applies its own list style.
+    ///
+    /// Routed through `userSelectedBottle`, not a direct binding to `selectedBottleID` — this is
+    /// the ONE place a selection change means the user actually chose a bottle. `selectedBottleID`
+    /// itself is reassigned programmatically in several other places (after a delete, a create, a
+    /// CrossOver import); a plain `$model.selectedBottleID` binding here couldn't tell those apart
+    /// from a real click, and warm-starting Steam after a delete reassigns selection is exactly the
+    /// trap that ruled that out.
+    private var bottleList: some View {
+        List(selection: Binding(get: { model.selectedBottleID },
+                                set: { model.userSelectedBottle($0) })) {
+            Section("Bottles") {
+                ForEach(model.bottles) { bottle in
+                    BottleRow(bottle: bottle, setupState: model.setupState(of: bottle))
+                        .tag(bottle.id)
+                        .contextMenu { bottleContextMenu(bottle) }
+                        // A sidebar separates rows with spacing, not rules. The plain list drew a
+                        // line under every bottle, which made six rows look like a table.
+                        .listRowSeparator(.hidden)
+                }
+            }
+        }
+        // The Delete key (and Edit ▸ Delete) on a selected bottle: removes the entry and keeps the
+        // files, undoable with ⌘Z — what Delete does to a selected item in Mail or Notes. Only
+        // fires while the list has focus, so typing in a field never deletes a bottle.
+        .onDeleteCommand {
+            guard let bottle = model.bottles.first(where: { $0.id == model.selectedBottleID })
+            else { return }
+            model.removeBottleKeepingFiles(bottle, undoManager: undoManager)
+        }
+    }
 
     @ViewBuilder
     private var detail: some View {
@@ -287,17 +342,22 @@ struct ContentView: View {
 private struct BottleRow: View {
     let bottle: Bottle
     let setupState: BottleSetupState
+    @Environment(\.appTheme) private var appTheme
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: bottle.isSteamInstalled ? "gamecontroller.fill" : "cube.box")
-                .foregroundStyle(bottle.isSteamInstalled ? Color.accentColor : .secondary)
-                .frame(width: 20)
-                .accessibilityHidden(true)      // the subtitle says the same ("Steam ready")
+        // A `Label`, so the Standard sidebar treats the symbol as the row's icon.
+        Label {
             VStack(alignment: .leading, spacing: 1) {
                 Text(bottle.name).lineLimit(1)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                // One line for a healthy bottle; a second only when it needs attention.
+                if let caption = setupState.sidebarCaption(isSteamInstalled: bottle.isSteamInstalled) {
+                    Text(caption).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
+        } icon: {
+            icon
+                // Decorative: the caption says so in words whenever Steam is missing.
+                .accessibilityHidden(true)
         }
         .padding(.vertical, 2)
         // The 264pt sidebar cuts long game names ("JoJo's Bizarre Adventure: All-Star…"), and a
@@ -305,13 +365,17 @@ private struct BottleRow: View {
         .help(bottle.name)
     }
 
-    private var subtitle: String {
-        switch setupState {
-        case .inProgress:  return "Initializing…"
-        case .interrupted: return "Setup didn't finish"
-        case .ready:       break
+    /// Uncoloured in Standard: the sidebar list tints a Label's icon with the accent colour and
+    /// turns it white on the selected row. Colouring it by hand (accent, as the themed looks do)
+    /// made it vanish into the accent-filled selection. The themed looks use a plain list, which
+    /// tints nothing, so they keep the explicit colour.
+    @ViewBuilder
+    private var icon: some View {
+        let image = Image(systemName: bottle.isSteamInstalled ? "gamecontroller.fill" : "cube.box")
+        if appTheme == .system {
+            image
+        } else {
+            image.foregroundStyle(bottle.isSteamInstalled ? Color.accentColor : .secondary)
         }
-        if bottle.isSteamInstalled { return "Steam ready" }
-        return bottle.settings.windowsVersion.label
     }
 }

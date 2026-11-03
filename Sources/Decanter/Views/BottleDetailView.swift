@@ -31,18 +31,29 @@ struct BottleDetailView: View {
     /// the system chrome is dark, so the ink must not be forced there.
     private var isAero: Bool { appTheme == .frutigerAero }
 
+    /// Standard uses the system toolbar and window title; the themed looks draw their own header.
+    private var usesSystemChrome: Bool { appTheme == .system }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            headerBar
-            Divider()
-            // Labelled for VoiceOver even though `.labelsHidden()` keeps it off screen — an empty
-            // title left the control unnamed.
-            Picker("Bottle section", selection: $tab) {
-                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+            if usesSystemChrome {
+                // The header's one piece of state that the window title can't carry.
+                if model.setupState(of: bottle) != .ready {
+                    HStack(spacing: 8) { setupStatus }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                }
+            } else {
+                headerBar
+                Divider()
+                sectionPicker
+                    // Its natural width, centred — the way a Mac pane's section switcher sits.
+                    // Unpinned, it stretched across the whole pane when the window was active and
+                    // shrank when it wasn't.
+                    .fixedSize()
+                    .frame(maxWidth: .infinity)
+                    .padding(12)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(12)
 
             ScrollView {
                 switch tab {
@@ -52,9 +63,17 @@ struct BottleDetailView: View {
                 }
             }
         }
-        // No navigation title: the raised header panel directly below already names the bottle, and
-        // the toolbar strip repeated it in unthemed white chrome across the top of the window.
-        .navigationTitle("")
+        // Standard: the bottle's name and engine are the window's title and subtitle, in the
+        // toolbar on the traffic lights' line, as in every Apple app (docs/APPLE-GEOMETRY.md). The
+        // themed looks keep it empty — their raised header panel already names the bottle, and a
+        // toolbar strip there repeated it in unthemed white chrome.
+        .navigationTitle(usesSystemChrome ? bottle.name : "")
+        .navigationSubtitle(usesSystemChrome ? (model.installation(for: bottle)?.name ?? "No Wine build") : "")
+        .toolbar {
+            if usesSystemChrome {
+                ToolbarItem(placement: .principal) { sectionPicker }
+            }
+        }
         // View ▸ Overview / Configuration / Programs (⌘1–⌘3).
         .onReceive(NotificationCenter.default.publisher(for: .detailTabRequested)) { note in
             if let requested = note.object as? Tab { tab = requested }
@@ -129,17 +148,7 @@ struct BottleDetailView: View {
                                             : AnyShapeStyle(.secondary))
             }
             Spacer()
-            // A spinner only while setup is really running. A bottle whose setup was cut short
-            // (Decanter quit mid-setup) used to show this spinner forever, with nothing behind it.
-            switch model.setupState(of: bottle) {
-            case .inProgress:
-                ProgressView().controlSize(.small)
-                Text("Setting up…").font(.caption).foregroundStyle(.secondary)
-            case .interrupted:
-                StatusNote("Setup didn't finish. Delete this bottle and create it again.")
-            case .ready:
-                EmptyView()
-            }
+            setupStatus
         }
         .padding(16)
         // A raised rounded panel rather than a full-width band of colour. The band met the content
@@ -149,6 +158,31 @@ struct BottleDetailView: View {
         .aeroPanel(cornerRadius: 14)
         .padding(.horizontal, 12)
         .padding(.top, 8)
+    }
+
+    /// Overview / Configuration / Programs. Labelled for VoiceOver even though `.labelsHidden()`
+    /// keeps it off screen — an empty title left the control unnamed.
+    private var sectionPicker: some View {
+        Picker("Bottle section", selection: $tab) {
+            ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+
+    /// A spinner only while setup is really running. A bottle whose setup was cut short (Decanter
+    /// quit mid-setup) used to show this spinner forever, with nothing behind it.
+    @ViewBuilder
+    private var setupStatus: some View {
+        switch model.setupState(of: bottle) {
+        case .inProgress:
+            ProgressView().controlSize(.small)
+            Text("Setting up…").font(.caption).foregroundStyle(.secondary)
+        case .interrupted:
+            StatusNote("Setup didn't finish. Delete this bottle and create it again.")
+        case .ready:
+            EmptyView()
+        }
     }
 
     // MARK: Overview
@@ -184,9 +218,9 @@ struct BottleDetailView: View {
                         // first launch downloads the client, Steam dies with "Failed to load
                         // steamui.dll", and saying only "Steam is installed" makes that look like
                         // a broken install rather than an unfinished one.
-                        if bottle.isSteamBootstrapped {
-                            Text("Steam is installed in this bottle.").foregroundStyle(.secondary)
-                        } else {
+                        // Nothing to say when Steam is ready — the buttons below say it. (This used
+                        // to print "Steam is installed in this bottle." above every Launch button.)
+                        if !bottle.isSteamBootstrapped {
                             Text("Steam is installed but hasn't finished setting itself up yet.")
                                 .foregroundStyle(.secondary)
                             Text("The first launch downloads the Steam client (a few hundred MB). "
@@ -252,23 +286,24 @@ struct BottleDetailView: View {
                                 .glassButton()
                                 .disabled(quitting)
 
-                            Button("Reinstall Steam") { model.installSteam(in: bottle) }
-                                .glassButton()
-
-                            // Re-runnable on purpose: the wizard installs this after Steam, but a
-                            // fresh library has no games yet, so it must be reachable afterwards.
-                            Button(installingGFX ? "Installing…" : "Install Graphics Driver") {
-                                installingGFX = true
-                                Task {
-                                    let n = await model.installGraphicsDriver(in: bottle)
-                                    gfxResult = n == 0
-                                        ? "No games found in this bottle yet — install one in Steam, then run this again."
-                                        : "Patched graphics driver installed for \(n) game\(n == 1 ? "" : "s")."
-                                    installingGFX = false
+                            // The two maintenance actions, behind one pull-down. As full buttons they
+                            // made a row of four equal-weight controls, so nothing on the screen read
+                            // as the thing to press. Both stay one click away: Install Graphics Driver
+                            // is re-runnable on purpose (the wizard installs it after Steam, but a
+                            // fresh library has no games yet, so it must be reachable afterwards).
+                            Menu("More") {
+                                Button("Reinstall Steam") { model.installSteam(in: bottle) }
+                                Button(installingGFX ? "Installing Graphics Driver…"
+                                                     : "Install Graphics Driver") {
+                                    installGraphicsDriver()
                                 }
+                                .disabled(installingGFX)
                             }
+                            .menuStyle(.button)
                             .glassButton()
-                            .disabled(installingGFX)
+                            .fixedSize()
+                            .help("Reinstall Steam or install the graphics driver")
+                            .accessibilityLabel("More Steam actions")
                         }
                         // One shared sampling region for the whole row. Without it each glass
                         // button samples independently and they render as flat capsules.
@@ -329,13 +364,17 @@ struct BottleDetailView: View {
                     infoRow("Windows version", bottle.settings.windowsVersion.label)
                     infoRow("Graphics", bottle.settings.graphics.label)
                     infoRow("Sync", bottle.settings.syncMode.label)
-                    infoRow("Prefix", bottle.url.path, mono: true)
+                    // The folder's name, not its path. The full path wrapped across two lines of
+                    // monospaced type and was the widest thing on the screen; it is one hover away.
+                    infoRow("Prefix", bottle.url.lastPathComponent, help: bottle.url.path)
                     // Names the real blast radius (F1/F2). A bottle's own settings and actions can
-                    // read as isolated when three others share this exact directory.
+                    // read as isolated when three others share this exact directory. Neutral, not
+                    // orange: on this screen it is a fact about the bottle, not a warning — the
+                    // warnings live beside the settings they affect, in Configuration.
                     if !model.otherBottlesSharingPrefix(with: bottle).isEmpty {
                         let names = model.otherBottlesSharingPrefix(with: bottle)
                             .map(\.name).joined(separator: ", ")
-                        StatusNote("Shared with \(names)", systemImage: "person.2")
+                        StatusNote("Shared with \(names)", systemImage: "person.2", tint: .secondary)
                     }
                     HStack {
                         // Glass, like every secondary control. Only Play and Launch Steam keep the
@@ -343,7 +382,7 @@ struct BottleDetailView: View {
                         Button("Open C: Drive") { model.openCDrive(bottle) }.glassButton()
                         // Same name as the context menu and Bottle menu item for the same action.
                         Button("Apply Settings to Prefix") { model.applySettings(bottle) }.glassButton()
-                        Button("Wine Config") { model.runTool(.winecfg, in: bottle) }.glassButton()
+                        // (Wine Config lived here too — a duplicate of Programs ▸ Wine Configuration.)
                     }
                     .padding(.top, 4)
                 }
@@ -351,7 +390,9 @@ struct BottleDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(16)
+        // 20pt — the content margin Apple's apps use from the sidebar and the window edge
+        // (docs/APPLE-GEOMETRY.md). Was 16.
+        .padding(20)
     }
 
     /// Quit Steam's one entry point, shared by the button and Bottle ▸ Quit Steam…: refuse with a
@@ -376,12 +417,27 @@ struct BottleDetailView: View {
         }
     }
 
-    private func infoRow(_ label: String, _ value: String, mono: Bool = false) -> some View {
+    /// Install Graphics Driver, from the More menu: runs it and reports how many games it patched.
+    private func installGraphicsDriver() {
+        installingGFX = true
+        Task {
+            let n = await model.installGraphicsDriver(in: bottle)
+            gfxResult = n == 0
+                ? "No games found in this bottle yet — install one in Steam, then run this again."
+                : "Patched graphics driver installed for \(n) game\(n == 1 ? "" : "s")."
+            installingGFX = false
+        }
+    }
+
+    /// One label/value line. `help` is a hover tooltip for a value shortened to fit.
+    private func infoRow(_ label: String, _ value: String, help: String? = nil) -> some View {
         HStack(alignment: .top) {
             Text(label).foregroundStyle(.secondary).frame(width: 130, alignment: .leading)
             Text(value)
-                .font(mono ? .system(.caption, design: .monospaced) : .body)
+                .lineLimit(1)
+                .truncationMode(.middle)
                 .textSelection(.enabled)
+                .help(help ?? value)
             Spacer()
         }
     }

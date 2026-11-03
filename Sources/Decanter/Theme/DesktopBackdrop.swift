@@ -32,6 +32,10 @@ struct ClearWindowBacking: NSViewRepresentable {
     /// Window state is global and sticky: whatever sets it must be able to UNSET it. So this view
     /// is always installed and drives the property in both directions.
     var clear: Bool
+    /// Whether the window shows its title in a real toolbar (Standard) or floats the traffic lights
+    /// over hand-laid-out content (the themed looks). The scene's `.hiddenTitleBar` style can't vary
+    /// by theme, so the window is set here — in both directions, for the same reason as `clear`.
+    var showsTitleBar = false
 
     func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
 
@@ -39,10 +43,13 @@ struct ClearWindowBacking: NSViewRepresentable {
         // `view.window` is nil while the view is still being inserted, so this has to run after
         // the current layout pass rather than inline.
         let clear = self.clear
+        let showsTitleBar = self.showsTitleBar
         DispatchQueue.main.async {
             guard let window = view.window else { return }
             window.isOpaque = !clear
             window.backgroundColor = clear ? .clear : .windowBackgroundColor
+            window.titleVisibility = showsTitleBar ? .visible : .hidden
+            window.titlebarAppearsTransparent = !showsTitleBar
         }
     }
 }
@@ -60,7 +67,10 @@ struct ThemedWindowBacking: ViewModifier {
         // ALWAYS installed, so it can restore the window as well as clear it. Conditionally
         // inserting it is what left the window transparent after switching to another theme.
         content.background(
-            ClearWindowBacking(clear: theme == .liquidGlass && !reduceTransparency)
+            ClearWindowBacking(clear: theme == .liquidGlass && !reduceTransparency,
+                               // Standard is laid out with the system's split view and toolbar,
+                               // which put the bottle's name in the window title (see ContentView).
+                               showsTitleBar: theme == .system)
                 .allowsHitTesting(false))
     }
 }

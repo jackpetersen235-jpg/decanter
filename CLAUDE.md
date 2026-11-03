@@ -765,6 +765,86 @@ shows only black.
   Notifications (long task finished while Decanter is in the background) are buildable today if
   wanted. Live Activities, complications, quick actions, Top Shelf, App Clips: not on macOS.
 
+### HIG visual pass (2026-11-02) — the rule passes left it correct but busy
+
+Reported as "still doesn't look as clean as I'd like" after every rule pass above. Those passes fixed
+contrast, keyboard, menus and wording; none removed clutter. Judged in **Standard, dark** (Jack's
+setting), against a cloned install (below). What changed, and the trap behind each:
+
+- **Sidebar rows are one line.** "Steam ready" under all six read as noise;
+  `BottleSetupState.sidebarCaption` (tested) keeps a second line only for Initializing… / Setup
+  didn't finish / Steam not installed.
+- **Sidebar rows:** `.listRowSeparator(.hidden)` in every theme; and an icon coloured by hand with
+  the accent **vanishes on a `.sidebar` list's accent selection** — `backgroundProminence` did not fix
+  it. The row is a `Label` with an UNcoloured icon in Standard (the sidebar tints it and whitens it
+  when selected); the themed looks' `.plain` list tints nothing, so they keep the explicit colour.
+- (Superseded within the day by the geometry pass below: a `.sidebar` list inside the hand-built
+  HStack, with the + and gear forced into the traffic-light row. It still didn't look like Apple's.)
+- **Overview: one primary button.** Reinstall Steam and Install Graphics Driver moved into a
+  **More** pull-down; Wine Config removed (it duplicated Programs ▸ Wine Configuration); "Steam is
+  installed in this bottle." removed; Prefix shows the folder name (`Steam-Wine11`) with the full
+  path on hover instead of two lines of monospace; "Shared with…" is neutral, not orange.
+- **The section picker is `.fixedSize()`, centred.** Unpinned it stretched across the pane only while
+  the window was key — a before/after captured inactive vs active looks like a regression you made.
+- **Configuration explanations are label SUBTITLES** (second `Text` in a control's label), not rows.
+  ⚠️ The text-tone override (`tonedText()`, Jack's is white) repaints the Form's subtitles as
+  full-size primary text — style them by hand via `ConfigurationView.subtitle(_:)`, which returns
+  `Text` so the Form still treats it as a subtitle. Section-wide notes are footers, and a macOS Form
+  lays a multi-line footer out **trailing** — set `.multilineTextAlignment(.leading)` + a leading
+  frame. Jargon trimmed: the DXMT description (AppDefaults/DLL mechanics), and the fast-sync note
+  that still recommended CrossOver.
+
+**Verified:** 153 tests; Standard dark captured before/after on Overview (launcher and game
+bottle) and Configuration, active and inactive. **Not verified:** Liquid Glass, Aero and light mode —
+the screen locked mid-check. The shared changes there are separators, the Label row (explicit
+colour kept), More, the picker and the subtitles.
+
+**How the checking was done without touching the real install** (the "test copy" recipe above,
+plus): `cp -Rc` the Bottles/engine folders into a scratch `DECANTER_HOME` (48 GB in 7 s) and
+rewrite `bottles.json`'s absolute `url`s to the clone — they are absolute, so a copied
+`bottles.json` alone still points every bottle at the REAL prefix. Reorder the scratch
+`bottles.json` to open on a game bottle (selecting one in the sidebar warm-starts Steam). When
+neither AX nor `app_screenshot` can see the copy's window, `screencapture -x -o -l <CGWindowID>`
+still captures it on another Space; nothing captures anything while the screen is locked.
+
+### HIG geometry pass (2026-11-02) — Standard uses the system's containers
+
+"Still looks not very good" after the visual pass. Measured Apple's own apps and AppKit's metrics on
+this Mac — **[docs/APPLE-GEOMETRY.md](docs/APPLE-GEOMETRY.md)** has every number and how it was taken.
+The finding: every remaining difference (traffic lights 10pt too high, a full-height square sidebar
+instead of Tahoe's floating one, 28pt rows instead of 32, a header band instead of a window title,
+16pt margins instead of 20) came from **building the chrome by hand**. Apple's apps get those numbers
+from the containers, so Standard now uses them:
+
+- `ContentView.standardSplitView`: `NavigationSplitView` + `.listStyle(.sidebar)`; + and gear are
+  sidebar toolbar items; the engine status is a `safeAreaInset(edge: .bottom)` inside the sidebar.
+  The themed looks keep `splitView` (HStack, `.plain`) — the clear-window reasons above still hold.
+  `bottleList` is shared by both, so selection routing and Delete/undo live in one place.
+- `BottleDetailView`: in Standard the custom header is gone — the bottle's name and engine are
+  `.navigationTitle` / `.navigationSubtitle`, the section picker is the toolbar's `.principal` item,
+  and setup progress (the header's only state) sits above the content. Overview margin 16 → 20pt.
+- **`.hiddenTitleBar` is scene-wide and can't vary by theme**, so `ClearWindowBacking` now also
+  drives `titleVisibility` / `titlebarAppearsTransparent` (`showsTitleBar`), both directions — the
+  same sticky-window-state rule as `isOpaque`. (With the picker as the `.principal` item the title
+  isn't drawn anyway — the Calendar pattern; the selected sidebar row names the bottle.)
+- **The gear sits in the sidebar footer**, beside the engine status it manages. As a third sidebar
+  toolbar item (after the system's sidebar toggle and +) it overflowed into a `>>` menu.
+- Programs' margin 16 → 20pt to match Overview.
+
+⚠️ **The SDK stamp decides the design, not the code.** After the Xcode licence was accepted, `swift
+build` went through Xcode's build system and stamped the binary **sdk 14.0** → macOS 14 compatibility
+mode (square full-height sidebar, compact toolbar). `make_app.sh` now passes the real SDK to the linker
+and refuses a stamp below 26 — see docs/APPLE-GEOMETRY.md ▸ "SDK stamp". Two toolchain facts that
+follow: the **Command Line Tools have no XCTest**, so `swift test` needs Xcode's toolchain; and
+"Build & run" above ("NO full Xcode on this machine", CLT-only) is out of date — Xcode is installed
+and selected now.
+
+**Verified (Standard, dark, SDK-26.5 build):** Overview for a launcher and a game bottle,
+Configuration and Programs, against the cloned install; lights at 26pt, floating sidebar, 32pt rows,
+20pt margins. 153 tests. **Not verified:** Liquid Glass, Aero (their layout is untouched apart from
+the shared `bottleList`), light mode, and `make_app.sh` end to end — it replaces the bundle the running
+Decanter was launched from, so only its build flags and stamp check were tested.
+
 ## "Why is this game slow" — measure it (`Scripts/profile-slow-game.command`)
 
 Peggle Deluxe was guessed at **twice** — first the graphics backend (DXVK), then the Wine engine
