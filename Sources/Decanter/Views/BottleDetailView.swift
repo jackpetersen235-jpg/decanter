@@ -129,9 +129,16 @@ struct BottleDetailView: View {
                                             : AnyShapeStyle(.secondary))
             }
             Spacer()
-            if !bottle.isInitialized {
+            // A spinner only while setup is really running. A bottle whose setup was cut short
+            // (Decanter quit mid-setup) used to show this spinner forever, with nothing behind it.
+            switch model.setupState(of: bottle) {
+            case .inProgress:
                 ProgressView().controlSize(.small)
                 Text("Setting up…").font(.caption).foregroundStyle(.secondary)
+            case .interrupted:
+                StatusNote("Setup didn't finish. Delete this bottle and create it again.")
+            case .ready:
+                EmptyView()
             }
         }
         .padding(16)

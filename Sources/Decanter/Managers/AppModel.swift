@@ -22,6 +22,15 @@ final class AppModel: ObservableObject {
     /// click from spawning a duplicate before the first launch has fully come up.
     @Published private(set) var launchingBottleIDs: Set<Bottle.ID> = []
 
+    /// Bottles whose first wineboot is running right now. A bottle is saved before its wineboot
+    /// starts, so `isInitialized == false` alone can't tell "being set up" from "setup was cut
+    /// short" — this can. Never persisted: after a relaunch nothing is booting, by definition.
+    @Published private(set) var bootingBottleIDs: Set<Bottle.ID> = []
+
+    func setupState(of bottle: Bottle) -> BottleSetupState {
+        .of(isInitialized: bottle.isInitialized, isBooting: bootingBottleIDs.contains(bottle.id))
+    }
+
     /// Bottles whose game launch Decanter is HOLDING until Steam signs in — the request exists
     /// only in this process until then, so quitting Decanter drops it (see `LaunchWait`). Drives
     /// the "keep Decanter open" caption under Play and the quit confirmation.
@@ -802,29 +811,41 @@ final class AppModel: ObservableObject {
         saveBottles()
 
         let console = openConsole(title: "Creating “\(bottle.name)”")
+        bootingBottleIDs.insert(bottle.id)
         console.handle = Wine.bootPrefix(bottle, using: installation, console: console) { [weak self] code in
             guard let self else { return }
+            self.bootingBottleIDs.remove(bottle.id)
             if code == 0 {
                 self.markInitialized(bottle.id)
                 Task { await self.applyRegistry(bottleID: bottle.id, console: console, finish: true) }
             } else {
-                // Remove the failed bottle rather than leaving it in the sidebar. It was appended
-                // and saved before wineboot ran, so a failure otherwise leaves an entry that looks
-                // real, can never launch anything, and gives the user no clue why — the state the
-                // missing-wine.inf bug produced, which had to be cleaned up by editing
-                // bottles.json by hand.
-                console.append("")
-                console.append("Setup failed, so this bottle was removed. Nothing else was changed.")
-                // F23 (bug-sweep): named the repo path, which doesn't exist in a friend-zip
-                // install — package-for-friend.sh ships this same script renamed to
-                // doctor.command. Name the tool, not a path only a git checkout has.
-                console.append("If this keeps happening, run Doctor (doctor.command, included "
-                               + "with Decanter — Scripts/doctor.sh in the repo) — a missing "
-                               + "engine file is the usual cause.")
-                self.deleteBottle(bottle, removeFiles: true)
-                console.finish(code)
+                self.failBottleCreation(bottle, console: console, code: code)
             }
         }
+        // `bootPrefix` returns nil when Wine couldn't even be started (`Shell.stream` under
+        // `try?`), and then `onExit` never runs: the bottle sat "Setting up…" forever and was never
+        // cleaned up. Finish it here as a failed setup — `createBottleForSetup` already does.
+        if console.handle == nil {
+            bootingBottleIDs.remove(bottle.id)
+            failBottleCreation(bottle, console: console, code: -1)
+        }
+    }
+
+    private func failBottleCreation(_ bottle: Bottle, console: TaskConsole, code: Int32) {
+        // Remove the failed bottle rather than leaving it in the sidebar. It was appended and saved
+        // before wineboot ran, so a failure otherwise leaves an entry that looks real, can never
+        // launch anything, and gives the user no clue why — the state the missing-wine.inf bug
+        // produced, which had to be cleaned up by editing bottles.json by hand.
+        console.append("")
+        console.append("Setup failed, so this bottle was removed. Nothing else was changed.")
+        // F23 (bug-sweep): named the repo path, which doesn't exist in a friend-zip install —
+        // package-for-friend.sh ships this same script renamed to doctor.command. Name the tool,
+        // not a path only a git checkout has.
+        console.append("If this keeps happening, run Doctor (doctor.command, included "
+                       + "with Decanter — Scripts/doctor.sh in the repo) — a missing "
+                       + "engine file is the usual cause.")
+        deleteBottle(bottle, removeFiles: true)
+        console.finish(code)
     }
 
     /// Build a bottle value with a collision-free prefix folder. Does not persist.
@@ -867,12 +888,14 @@ final class AppModel: ObservableObject {
         saveBottles()
 
         let hidden = TaskConsole(title: "setup")   // deliberately not shown as activeConsole
+        bootingBottleIDs.insert(bottle.id)
         let code: Int32 = await withCheckedContinuation { continuation in
             let handle = Wine.bootPrefix(bottle, using: installation, console: hidden) { code in
                 continuation.resume(returning: code)
             }
             if handle == nil { continuation.resume(returning: -1) }   // never started
         }
+        bootingBottleIDs.remove(bottle.id)
         guard code == 0 else {
             // CLEAN UP THE CORPSE. The bottle was appended and saved before booting, so a failed
             // wineboot used to leave a permanently broken entry in the list: it appears in the

@@ -186,7 +186,7 @@ struct ContentView: View {
                                     set: { model.userSelectedBottle($0) })) {
                 Section("Bottles") {
                     ForEach(model.bottles) { bottle in
-                        BottleRow(bottle: bottle)
+                        BottleRow(bottle: bottle, setupState: model.setupState(of: bottle))
                             .tag(bottle.id)
                             .contextMenu { bottleContextMenu(bottle) }
                     }
@@ -286,6 +286,7 @@ struct ContentView: View {
 /// One row in the bottle sidebar.
 private struct BottleRow: View {
     let bottle: Bottle
+    let setupState: BottleSetupState
 
     var body: some View {
         HStack(spacing: 10) {
@@ -305,7 +306,11 @@ private struct BottleRow: View {
     }
 
     private var subtitle: String {
-        if !bottle.isInitialized { return "Initializing…" }
+        switch setupState {
+        case .inProgress:  return "Initializing…"
+        case .interrupted: return "Setup didn't finish"
+        case .ready:       break
+        }
         if bottle.isSteamInstalled { return "Steam ready" }
         return bottle.settings.windowsVersion.label
     }

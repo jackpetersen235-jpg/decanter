@@ -715,6 +715,23 @@ shows only black.
   the quit guard (Keep Waiting is the default; NSAlert gives Esc only to a button titled Cancel,
   and renaming it would lose the clearer label).
 
+### HIG content pass (2026-11-02) — a spinner must mean something is running
+
+- **"Setting up…" could spin forever.** A bottle is saved BEFORE its wineboot runs, so quitting
+  Decanter mid-setup left it `isInitialized == false` with nothing booting it; after relaunch the
+  header spun "Setting up…" and the sidebar said "Initializing…" indefinitely. Now
+  `AppModel.bootingBottleIDs` (in memory only) records wineboots actually running, and
+  `BottleSetupState` (`BottleSetupStateTests`) tells *in progress* from *interrupted*. Interrupted
+  shows "Setup didn't finish. Delete this bottle and create it again." — no spinner. Nothing is
+  deleted automatically: removing files at launch is too risky to do unasked.
+- **Same bug, second door:** `createBottle` ignored a nil handle from `Wine.bootPrefix`
+  (`Shell.stream` under `try?` — Wine couldn't even start), so `onExit` never ran and the bottle
+  was neither cleaned up nor initialized. Now handled as a failed setup, as
+  `createBottleForSetup` already did; the failure path is one function (`failBottleCreation`).
+- Not applicable to Decanter: charts, web views, color/image wells, lockups. Considered and left:
+  Export Diagnostics could offer a share sheet (Mail/AirDrop) instead of only revealing the zip —
+  a nice-to-have for support, not a defect.
+
 ## "Why is this game slow" — measure it (`Scripts/profile-slow-game.command`)
 
 Peggle Deluxe was guessed at **twice** — first the graphics backend (DXVK), then the Wine engine
