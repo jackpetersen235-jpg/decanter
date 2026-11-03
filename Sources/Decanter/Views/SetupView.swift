@@ -171,5 +171,7 @@ struct SetupSheet: View {
             .padding(12)
         }
         .frame(width: 720, height: 620)
+        // Esc closes too: nothing here needs confirming — every change applies as it's made.
+        .onExitCommand { dismiss() }
     }
 }

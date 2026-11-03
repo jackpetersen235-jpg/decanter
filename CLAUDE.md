@@ -643,10 +643,12 @@ Found and deliberately NOT changed — each needs Jack's call:
 
 Verified in a test copy through the menu bar alone (`app_menu`, which works even when the test
 window is unreachable): the Bottle menu lists and tracks the selection, and Delete Bottle (keep
-files) removed only the entry, prefix still on disk. **Not verified live: Edit ▸ Undo** — it is
-disabled unless the window is key, and the test window sat on another Space. Two traps from
-this: a copy launched from the scratchpad is unknown to Launch Services (`open_application` can't
-find it), and with the user in a full-screen app, full-screen control shows only black.
+files) removed only the entry, prefix still on disk. Edit ▸ Undo is disabled unless the window is
+key, so it needed full-screen control — **verified in the dialogs pass:** the Delete key removed
+the selected bottle and ⌘Z put it back first in the list, selected, with no Wine started. Two
+traps from this: a copy launched from the scratchpad is unknown to Launch Services
+(`open_application` can't find it), and with the user in a full-screen app, full-screen control
+shows only black.
 
 ### HIG layout pass (2026-11-02)
 
@@ -699,6 +701,19 @@ find it), and with the user in a full-screen app, full-screen control shows only
 - **`Divider()` inside a grouped `Form` draws an empty-looking row**, not a line — removed the one
   above GPU keep-alive.
 - The tab control's `Picker("", …)` is now `Picker("Bottle section", …)` (still `labelsHidden`).
+
+### HIG dialogs pass (2026-11-02)
+
+- **The console's "Cancel" is now "Stop".** It kills the running operation (`TaskConsole.cancel`
+  terminates the process — an engine download, a Steam install), and beside "Hide" a red
+  "Cancel" read as "close this window". The log line says "— stopped —" to match.
+- **Esc closes the Setup sheet and the console** (`.onExitCommand`), as it already did New Bottle
+  and Uninstall. On the console it hides, never stops. Verified live with full-screen control.
+  Background keystrokes can NOT deliver Esc to a sheet — the computer-use tools refuse it.
+- Left as they are, and why: the two destructive confirmations (specific titles, destructive
+  button, Cancel); the "Couldn't …" alerts (single OK is right for purely informational alerts);
+  the quit guard (Keep Waiting is the default; NSAlert gives Esc only to a button titled Cancel,
+  and renaming it would lose the clearer label).
 
 ## "Why is this game slow" — measure it (`Scripts/profile-slow-game.command`)
 

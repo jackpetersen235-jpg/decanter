@@ -47,6 +47,6 @@ final class TaskConsole: ObservableObject, Identifiable {
     func cancel() {
         handle?.terminate()
         isRunning = false
-        append("— cancelled —")
+        append("— stopped —")           // matches the console's Stop button
     }
 }

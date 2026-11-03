@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A live log sheet for a running operation. Auto-scrolls and offers cancel/close.
+/// A live log sheet for a running operation. Auto-scrolls and offers stop/close.
 struct ConsoleView: View {
     @ObservedObject var console: TaskConsole
     @Environment(\.dismiss) private var dismiss
@@ -36,8 +36,10 @@ struct ConsoleView: View {
             Divider()
             HStack {
                 Spacer()
+                // "Stop", not "Cancel": this kills the running operation (an engine download, a
+                // Steam install), and beside "Hide" a "Cancel" read as "close this window".
                 if console.isRunning {
-                    Button("Cancel", role: .destructive) { console.cancel() }
+                    Button("Stop", role: .destructive) { console.cancel() }
                 }
                 Button(console.isRunning ? "Hide" : "Close") { dismiss() }
                     .keyboardShortcut(.defaultAction)
@@ -45,5 +47,7 @@ struct ConsoleView: View {
             .padding(12)
         }
         .frame(width: 640, height: 460)
+        // Esc hides, like the button — it never stops the operation.
+        .onExitCommand { dismiss() }
     }
 }
