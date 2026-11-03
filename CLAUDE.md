@@ -732,6 +732,22 @@ shows only black.
   Export Diagnostics could offer a share sheet (Mail/AirDrop) instead of only revealing the zip —
   a nice-to-have for support, not a defect.
 
+### HIG status pass (2026-11-02) — one bar for the engine
+
+- **The engine download bar filled twice.** The engine is two downloads (~317 MB base, then the
+  ~163 MB msync overlay) and each drove `WineInstaller.Phase.downloading` from 0 to 1 itself, so
+  the wizard's bar hit 100%, vanished during unpacking, and restarted at 0. `EngineDownloadProgress`
+  (`EngineDownloadProgressTests`) maps both onto one bar weighted by size: base ~0–66%, overlay
+  ~66–100%, never backwards.
+- **That also fixes the Install Engine console going quiet:** its ticker logs every +10% against
+  the last value it logged, so after the base reached 100% the restarted overlay never logged again.
+- **No stacked indicators:** while the engine bar shows, the wizard's step badge shows the step icon
+  instead of a second spinner.
+- Not live-run: proving the bar end to end means a real ~480 MB engine install (do it with
+  `DECANTER_HOME=<scratch> Decanter --install-engine`, never against the real install). The
+  mapping is unit-tested; the wiring is the two `phase = .downloading(…)` call sites.
+- Not applicable: status bars (iOS), activity rings (watchOS).
+
 ## "Why is this game slow" — measure it (`Scripts/profile-slow-game.command`)
 
 Peggle Deluxe was guessed at **twice** — first the graphics backend (DXVK), then the Wine engine

@@ -161,8 +161,9 @@ final class WineInstaller: ObservableObject {
         // sequence one byte at a time costs ~25x throughput here (measured: 0.12 MB/s vs 3 MB/s
         // for the same file) — a 317 MB download would take ~45 minutes. A download task streams
         // to disk natively and reports progress via its delegate.
+        // One bar for both downloads (`EngineDownloadProgress`): the base fills ~0–66%.
         let progress = DownloadProgress { [weak self] fraction in
-            Task { @MainActor in self?.phase = .downloading(fraction) }
+            Task { @MainActor in self?.phase = .downloading(EngineDownloadProgress.overall(.base, fraction)) }
         }
         let (tempURL, response) = try await URLSession.shared.download(from: Self.releaseURL,
                                                                        delegate: progress)
@@ -230,9 +231,10 @@ final class WineInstaller: ObservableObject {
                 + "could not be installed.")
         }
 
-        phase = .downloading(0)
+        // Picks up where the base download left the bar (~66%) instead of restarting at 0.
+        phase = .downloading(EngineDownloadProgress.overall(.overlay, 0))
         let progress = DownloadProgress { [weak self] fraction in
-            Task { @MainActor in self?.phase = .downloading(fraction) }
+            Task { @MainActor in self?.phase = .downloading(EngineDownloadProgress.overall(.overlay, fraction)) }
         }
         let (tempURL, response) = try await URLSession.shared.download(from: Self.msyncEngineURL,
                                                                        delegate: progress)

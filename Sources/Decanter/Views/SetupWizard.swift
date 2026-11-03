@@ -107,6 +107,10 @@ struct SetupWizard: View {
                     .frame(width: 34, height: 34)
                 if done {
                     Image(systemName: "checkmark").foregroundStyle(.green).font(.system(size: 15, weight: .bold))
+                } else if active, step == .engine, case .downloading = installer.phase {
+                    // The download bar below is this step's indicator; a spinner here as well
+                    // would stack two for one task. The tinted badge still marks the active step.
+                    Image(systemName: step.icon).foregroundStyle(Color.accentColor)
                 } else if active {
                     ProgressView().controlSize(.small)
                 } else {
