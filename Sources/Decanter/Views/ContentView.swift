@@ -3,7 +3,6 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.undoManager) private var undoManager
-    @Environment(\.appTheme) private var appTheme
     @State private var showingCreate = false
     @State private var showingSetup = false
     @State private var showingWizard = false
@@ -21,8 +20,6 @@ struct ContentView: View {
                 // backdrop directly.
                 SetupWizard(dismiss: (showingWizard && !model.isSettingUp) ? { showingWizard = false } : nil)
                     .aeroInk()
-            } else if appTheme == .system {
-                standardSplitView
             } else {
                 splitView
             }
@@ -103,15 +100,20 @@ struct ContentView: View {
         }
     }
 
-    /// Standard: the system's own split view, toolbar and window title.
+    /// The window's layout, in every theme: the system's own split view, toolbar and window title.
     ///
-    /// Measured against System Settings and Notes (docs/APPLE-GEOMETRY.md), every way the hand-laid-
-    /// out columns below looked "not quite Apple" came from building the chrome by hand: no toolbar
-    /// (so the traffic lights sat 10pt higher than in any toolbar window), a full-height square
-    /// sidebar instead of Tahoe's floating one (8pt inset, corners concentric with the window), a
-    /// custom header band instead of the window title, 28pt rows instead of 32. These containers
-    /// produce all of those numbers themselves. The themed looks can't use them — see `splitView`.
-    private var standardSplitView: some View {
+    /// Measured against System Settings and Notes (docs/APPLE-GEOMETRY.md), every way the old
+    /// hand-laid-out columns looked "not quite Apple" came from building the chrome by hand: no
+    /// toolbar (so the traffic lights sat 10pt higher than in any toolbar window), a full-height
+    /// square sidebar instead of Tahoe's floating one (8pt inset, corners concentric with the
+    /// window), a custom header band instead of the window title, 28pt rows instead of 32. These
+    /// containers produce all of those numbers themselves.
+    ///
+    /// The themed looks used an `HStack` instead, because the split view's sidebar brought a vibrancy
+    /// backdrop that kept a Liquid Glass sidebar grey over the clear window. On macOS 26 that sidebar
+    /// IS a floating Liquid Glass pane, so the reason is gone — and the themes now differ only in their
+    /// surfaces (sky, clear window, ink), never in layout.
+    private var splitView: some View {
         NavigationSplitView {
             bottleList
                 .listStyle(.sidebar)
@@ -123,6 +125,8 @@ struct ContentView: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     HStack(spacing: 0) {
                         wineStatusFooter
+                        // F9 (bug-sweep): icon-only buttons need a real accessibility label;
+                        // `.help()` is only the hover tooltip/VoiceOver hint.
                         Button { showingSetup = true } label: {
                             Image(systemName: "gearshape")
                         }
@@ -141,105 +145,18 @@ struct ContentView: View {
                         .disabled(model.defaultInstallation == nil)
                     }
                 }
-                .tonedText()
-        } detail: {
-            detail.tonedText()
-        }
-    }
-
-    /// Two columns laid out by hand rather than by `NavigationSplitView` — Liquid Glass and Aero.
-    ///
-    /// The split view's sidebar column is an `NSSplitViewItem` with sidebar behaviour, and that
-    /// installs a vibrancy backdrop BELOW anything SwiftUI can reach — it kept the left column grey
-    /// while the detail pane was clear. Neither
-    /// `.containerBackground(.clear, for: .navigationSplitView)` (iOS only) nor hiding the
-    /// `NSVisualEffectView` from either direction touched it.
-    ///
-    /// An `HStack` has no such backdrop, so the clear window shows through. The cost is the system
-    /// sidebar behaviour: the collapse animation and its toggle button. The width is handled here
-    /// instead.
-    private var splitView: some View {
-        HStack(spacing: 0) {
-            sidebar
-                .frame(width: 264)
-                // Lifted slightly and given a real edge. Laid out by hand, the two columns had no
-                // boundary at all, and one continuous sky behind both turned the join into an
-                // accidental-looking seam.
-                .sidebarLift()
-
-            ColumnSeparator()
-
-            // Wizard wallpaper removed. In Aero the atmosphere is the backdrop, and two competing
-            // background images read as clutter; in Liquid Glass the detail pane is cleaner
-            // without it. `Wallpaper` itself is kept — the app icon still uses the artwork.
-            //
-            // Hiding the title bar removes the STRIP but SwiftUI still reserves its height as a
-            // top safe-area inset, which left an empty band above the header panel. Ignoring that
-            // inset is what actually reclaims the space. Only the detail column does this — the
-            // sidebar keeps its inset, because the traffic lights float there.
-            detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea(.container, edges: .top)
+                // Aero's light chrome and ink reach the sidebar too — without it the sidebar stays
+                // in the dark colour scheme against a light sky. No-op in the other themes.
                 .aeroInk()
                 .tonedText()
-                // Its own surface. The window is genuinely clear in Liquid Glass, so a pane with
-                // no background would sit its text straight on the desktop wallpaper.
+        } detail: {
+            detail
+                .aeroInk()
+                .tonedText()
+                // Its own surface. The window is genuinely clear in Liquid Glass, so a pane with no
+                // background would sit its text straight on the desktop wallpaper. No-op elsewhere.
                 .themedPaneSurface()
         }
-    }
-
-    private var sidebar: some View {
-        VStack(spacing: 0) {
-            // These two used to live in the window toolbar. The toolbar is gone — it drew an
-            // unthemed white strip across the top of the window that duplicated the header panel's
-            // title — so they move into the sidebar itself. The leading gap is clearance for the
-            // traffic lights, which now float over the content; they are deliberately left alone
-            // rather than restyled.
-            HStack(spacing: 6) {
-                Spacer(minLength: 74)
-                // F9 (bug-sweep): icon-only buttons with zero accessibilityLabel anywhere in the
-                // Views layer. `.help()` sets a hover tooltip/VoiceOver hint, not the label VoiceOver
-                // announces first — without this, these read as "plus button" / "gearshape button",
-                // the glyph, not what pressing it does.
-                Button { showingCreate = true } label: {
-                    Image(systemName: "plus").frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .help("Create a new bottle")
-                .accessibilityLabel("Create a new bottle")
-                .disabled(model.defaultInstallation == nil)
-
-                Button { showingSetup = true } label: {
-                    Image(systemName: "gearshape").frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .help("Wine installations & system checks")
-                .accessibilityLabel("Wine installations and system checks")
-            }
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
-            .padding(.bottom, 2)
-
-            bottleList
-            Divider()
-            wineStatusFooter
-        }
-        // .plain, not .sidebar: the sidebar list style reintroduces its own vibrancy, which is the
-        // exact thing this layout exists to get rid of.
-        .listStyle(.plain)
-        // The sidebar needs the Aero treatment too, and did not have it: `aeroInk()` was applied
-        // only to the detail column and the wizard. Without it the sidebar stayed in the DARK
-        // colour scheme and its List kept painting an opaque dark backdrop — because
-        // `scrollContentBackground(.hidden)` lives inside `GlassPane`, which is a no-op in Aero.
-        // That is what made the left side very dark while the right showed the sky.
-        .aeroInk()
-        .tonedText()
-        // Floated and inset so the material has four visible edges to refract along. Full-bleed,
-        // the rim — where the whole effect lives — is clipped off and only a flat tint remains.
-        // Was an unconditional `.glassPane`, which meant Standard still got a floating glass
-        // sidebar — the whole reason "Standard" still looked like Liquid Glass.
-        .themedPaneSurface(cornerRadius: 18, inset: 10,
-                           plainFill: Color(nsColor: .controlBackgroundColor))
     }
 
     @ViewBuilder
@@ -262,7 +179,7 @@ struct ContentView: View {
     /// Bottle awaiting delete-with-files confirmation.
     @State private var pendingDeletion: Bottle?
 
-    /// The bottle list, shared by both layouts; each applies its own list style.
+    /// The bottle list in the sidebar.
     ///
     /// Routed through `userSelectedBottle`, not a direct binding to `selectedBottleID` — this is
     /// the ONE place a selection change means the user actually chose a bottle. `selectedBottleID`

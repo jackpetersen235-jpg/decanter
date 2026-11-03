@@ -477,6 +477,11 @@ proves too limited.
 
 ### The sidebar's grey needed dropping NavigationSplitView entirely
 
+> **Superseded 2026-11-02 (layout-unification pass, below):** every theme is back on
+> `NavigationSplitView`. On macOS 26 — with a binary stamped with a 26+ SDK, see "SDK stamp" in
+> docs/APPLE-GEOMETRY.md — the split view's sidebar is itself a floating Liquid Glass pane, which is
+> what this section was trying to build by hand. Kept for the history of what was tried.
+
 A `NavigationSplitView` sidebar column is an `NSSplitViewItem` with sidebar behaviour, and that
 installs a vibrancy backdrop **below anything SwiftUI can reach**. It kept the left column grey
 while the detail pane was clear. Two fixes were tried and both failed:
@@ -818,8 +823,8 @@ from the containers, so Standard now uses them:
 
 - `ContentView.standardSplitView`: `NavigationSplitView` + `.listStyle(.sidebar)`; + and gear are
   sidebar toolbar items; the engine status is a `safeAreaInset(edge: .bottom)` inside the sidebar.
-  The themed looks keep `splitView` (HStack, `.plain`) — the clear-window reasons above still hold.
-  `bottleList` is shared by both, so selection routing and Delete/undo live in one place.
+  (At first the themed looks kept the hand-built HStack — see the unification pass below, which
+  moved them onto this layout too.)
 - `BottleDetailView`: in Standard the custom header is gone — the bottle's name and engine are
   `.navigationTitle` / `.navigationSubtitle`, the section picker is the toolbar's `.principal` item,
   and setup progress (the header's only state) sits above the content. Overview margin 16 → 20pt.
@@ -841,9 +846,39 @@ and selected now.
 
 **Verified (Standard, dark, SDK-26.5 build):** Overview for a launcher and a game bottle,
 Configuration and Programs, against the cloned install; lights at 26pt, floating sidebar, 32pt rows,
-20pt margins. 153 tests. **Not verified:** Liquid Glass, Aero (their layout is untouched apart from
-the shared `bottleList`), light mode, and `make_app.sh` end to end — it replaces the bundle the running
-Decanter was launched from, so only its build flags and stamp check were tested.
+20pt margins. 153 tests. `make_app.sh` later ran end to end (universal, stamped 27.2).
+
+### Layout-unification pass (2026-11-02) — one layout, three skins
+
+Jack: make Aero and Liquid Glass "follow the same layout as the plain black UI". Every theme now uses
+`ContentView.splitView` (the `NavigationSplitView` above) and `BottleDetailView`'s toolbar title +
+`.principal` picker; the themes differ only in SURFACES. Removed: the hand-built HStack layout, its
+top button row, the raised header panel (`headerBar`, `aeroPanel` on it) and `ColumnSeparator.swift`
+(`ColumnSeparator`, `SidebarLift`), all of which only that layout used.
+
+What each theme still adds: Aero — the painted sky (`themedAtmosphere`) and `aeroInk()` on BOTH
+columns (light scheme + ink; without it on the sidebar the list stays dark against the sky);
+Liquid Glass — the clear window (`ClearWindowBacking`) and a glass pane behind the detail column
+(`themedPaneSurface`), since a clear window would otherwise put text straight on the wallpaper. The
+sidebar needs nothing: macOS 26's floating sidebar is already glass. In the themed looks the title
+bar stays transparent (`opaqueTitleBar: false`) so the sky or desktop runs up behind the toolbar.
+
+Two things only showed up on screen (2026-11-03, test copy, all three themes, every tab, fresh
+launch AND live switches in Settings):
+
+- **Aero's sidebar was dark ink on dark glass.** `aeroInk()` sets `\.colorScheme` — an environment
+  value AppKit never sees — and the floating sidebar's material and the toolbar glass are AppKit's,
+  drawn from the WINDOW's appearance. Setting `NSWindow.appearance` from `ClearWindowBacking` did
+  nothing (SwiftUI owns that property and resets it). Fix: `.preferredColorScheme(.light / nil)` in
+  `ThemedWindowBacking`. On macOS that reaches every window of the app, so Settings and sheets go
+  light in Aero too — consistent with a light look, and nil hands the choice back on a live switch.
+- **A live switch to Standard put "Steam / Decanter Engine" in the toolbar**, which no fresh launch
+  showed: `titleVisibility = .visible` was latent until the title bar flipped transparent → opaque
+  and AppKit laid the title out again. Now `.hidden` in every theme; the centred picker stands in
+  for it (as in Calendar) and `navigationTitle` still names the window for the Window menu.
+
+Known, minor: switching themes resets the detail column to Overview (the theme modifiers branch, so
+the subtree's identity changes and `BottleDetailView`'s `@State tab` is rebuilt).
 
 ## "Why is this game slow" — measure it (`Scripts/profile-slow-game.command`)
 

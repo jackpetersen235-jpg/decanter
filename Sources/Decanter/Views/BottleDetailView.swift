@@ -19,7 +19,6 @@ struct BottleDetailView: View {
     @State private var quitResult: String?
     @State private var showQuitBlocked = false
     @State private var quitBlockReason: String?
-    @Environment(\.appTheme) private var appTheme
 
     /// The two buttons that use a CUSTOM style in Aero, and so lose the focus ring macOS draws for
     /// system styles. Everything else in the app is on `.glass`/`.glassProminent`/`.bordered` and
@@ -27,32 +26,13 @@ struct BottleDetailView: View {
     private enum CustomStyledControl: Hashable { case play, launchSteam }
     @FocusState private var focusedControl: CustomStyledControl?
 
-    /// Header type is coloured for the Aero panel it sits on. In Liquid Glass there is no panel and
-    /// the system chrome is dark, so the ink must not be forced there.
-    private var isAero: Bool { appTheme == .frutigerAero }
-
-    /// Standard uses the system toolbar and window title; the themed looks draw their own header.
-    private var usesSystemChrome: Bool { appTheme == .system }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if usesSystemChrome {
-                // The header's one piece of state that the window title can't carry.
-                if model.setupState(of: bottle) != .ready {
-                    HStack(spacing: 8) { setupStatus }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 12)
-                }
-            } else {
-                headerBar
-                Divider()
-                sectionPicker
-                    // Its natural width, centred — the way a Mac pane's section switcher sits.
-                    // Unpinned, it stretched across the whole pane when the window was active and
-                    // shrank when it wasn't.
-                    .fixedSize()
-                    .frame(maxWidth: .infinity)
-                    .padding(12)
+            // The one piece of state the old header panel carried that the window title can't.
+            if model.setupState(of: bottle) != .ready {
+                HStack(spacing: 8) { setupStatus }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
             }
 
             ScrollView {
@@ -63,16 +43,14 @@ struct BottleDetailView: View {
                 }
             }
         }
-        // Standard: the bottle's name and engine are the window's title and subtitle, in the
-        // toolbar on the traffic lights' line, as in every Apple app (docs/APPLE-GEOMETRY.md). The
-        // themed looks keep it empty — their raised header panel already names the bottle, and a
-        // toolbar strip there repeated it in unthemed white chrome.
-        .navigationTitle(usesSystemChrome ? bottle.name : "")
-        .navigationSubtitle(usesSystemChrome ? (model.installation(for: bottle)?.name ?? "No Wine build") : "")
+        // The bottle's name and engine are the window's title and subtitle, and the section picker is
+        // the toolbar's centre item, on the traffic lights' line as in every Apple app
+        // (docs/APPLE-GEOMETRY.md). Every theme: they used to draw a raised header panel instead,
+        // and the themes now differ only in surfaces, not layout.
+        .navigationTitle(bottle.name)
+        .navigationSubtitle(model.installation(for: bottle)?.name ?? "No Wine build")
         .toolbar {
-            if usesSystemChrome {
-                ToolbarItem(placement: .principal) { sectionPicker }
-            }
+            ToolbarItem(placement: .principal) { sectionPicker }
         }
         // View ▸ Overview / Configuration / Programs (⌘1–⌘3).
         .onReceive(NotificationCenter.default.publisher(for: .detailTabRequested)) { note in
@@ -123,41 +101,6 @@ struct BottleDetailView: View {
         } message: {
             Text(quitBlockReason ?? "")
         }
-    }
-
-    // MARK: Header
-
-    private var headerBar: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "cube.box.fill")
-                .font(.system(size: 30))
-                .foregroundStyle(Color.accentColor)
-                .accessibilityHidden(true)      // decorative; the bottle name follows
-            VStack(alignment: .leading, spacing: 2) {
-                // Dark ink on the light chrome panel, with the 1pt white shadow below — the
-                // period treatment, and the pairing that measures 14.76:1. White type was tried
-                // first and cannot work here: the gloss lightens the top of the panel far too much
-                // for it to hold.
-                Text(bottle.name).font(.title2.bold())
-                    .foregroundStyle(isAero ? AnyShapeStyle(AeroTokens.ink)
-                                            : AnyShapeStyle(.primary))
-                    .aeroTextShadow(isAero)
-                Text(model.installation(for: bottle)?.name ?? "No Wine build")
-                    .font(.caption)
-                    .foregroundStyle(isAero ? AnyShapeStyle(AeroTokens.inkSecondary)
-                                            : AnyShapeStyle(.secondary))
-            }
-            Spacer()
-            setupStatus
-        }
-        .padding(16)
-        // A raised rounded panel rather than a full-width band of colour. The band met the content
-        // below in a straight square edge, which read as a seam next to a UI that is rounded and
-        // has depth everywhere else. Inset so the panel visibly floats instead of butting into the
-        // window edges. No-op in Liquid Glass.
-        .aeroPanel(cornerRadius: 14)
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
     }
 
     /// Overview / Configuration / Programs. Labelled for VoiceOver even though `.labelsHidden()`

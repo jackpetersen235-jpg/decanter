@@ -32,10 +32,11 @@ struct ClearWindowBacking: NSViewRepresentable {
     /// Window state is global and sticky: whatever sets it must be able to UNSET it. So this view
     /// is always installed and drives the property in both directions.
     var clear: Bool
-    /// Whether the window shows its title in a real toolbar (Standard) or floats the traffic lights
-    /// over hand-laid-out content (the themed looks). The scene's `.hiddenTitleBar` style can't vary
-    /// by theme, so the window is set here — in both directions, for the same reason as `clear`.
-    var showsTitleBar = false
+    /// Whether the title bar is drawn (Standard) or left transparent so what's behind the window
+    /// shows through it (Liquid Glass's desktop, Aero's sky). The scene's `.hiddenTitleBar` style
+    /// can't vary by theme, so the window is set here — in both directions, for the same reason
+    /// as `clear`.
+    var opaqueTitleBar = false
 
     func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
 
@@ -43,13 +44,19 @@ struct ClearWindowBacking: NSViewRepresentable {
         // `view.window` is nil while the view is still being inserted, so this has to run after
         // the current layout pass rather than inline.
         let clear = self.clear
-        let showsTitleBar = self.showsTitleBar
+        let opaqueTitleBar = self.opaqueTitleBar
         DispatchQueue.main.async {
             guard let window = view.window else { return }
             window.isOpaque = !clear
             window.backgroundColor = clear ? .clear : .windowBackgroundColor
-            window.titleVisibility = showsTitleBar ? .visible : .hidden
-            window.titlebarAppearsTransparent = !showsTitleBar
+            // No theme DRAWS the title: the toolbar's centred section picker stands in its place,
+            // as Calendar's does. The title is still set (`navigationTitle`), so the Window menu
+            // and Mission Control name the bottle. `.visible` here looked harmless at launch, but
+            // flipping the title bar from transparent to opaque on a live switch to Standard made
+            // AppKit lay the title out again, and "Steam / Decanter Engine" appeared beside the
+            // sidebar button — a look no fresh launch ever showed.
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = !opaqueTitleBar
         }
     }
 }
@@ -66,12 +73,19 @@ struct ThemedWindowBacking: ViewModifier {
     func body(content: Content) -> some View {
         // ALWAYS installed, so it can restore the window as well as clear it. Conditionally
         // inserting it is what left the window transparent after switching to another theme.
-        content.background(
-            ClearWindowBacking(clear: theme == .liquidGlass && !reduceTransparency,
-                               // Standard is laid out with the system's split view and toolbar,
-                               // which put the bottle's name in the window title (see ContentView).
-                               showsTitleBar: theme == .system)
-                .allowsHitTesting(false))
+        content
+            .background(
+                ClearWindowBacking(clear: theme == .liquidGlass && !reduceTransparency,
+                                   // Standard draws an ordinary title bar; the themed looks let
+                                   // their backdrop run up behind the toolbar.
+                                   opaqueTitleBar: theme == .system)
+                    .allowsHitTesting(false))
+            // Aero is a light look, so the whole WINDOW goes light, not just the views under
+            // `aeroLightChrome()`. That modifier only sets an environment value, which AppKit
+            // never sees — and the floating sidebar's material and the toolbar's glass are drawn
+            // by AppKit from the window's appearance. On a dark-mode Mac they stayed dark, and the
+            // Aero ink landed dark-on-dark in the sidebar. nil hands the choice back to the system.
+            .preferredColorScheme(theme == .frutigerAero ? .light : nil)
     }
 }
 
