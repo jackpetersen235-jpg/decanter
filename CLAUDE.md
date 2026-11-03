@@ -748,6 +748,23 @@ shows only black.
   mapping is unit-tested; the wiring is the two `phase = .downloading(…)` call sites.
 - Not applicable: status bars (iOS), activity rings (watchOS).
 
+### HIG system-experiences pass (2026-11-02) — Dock menu
+
+- **Right-click the Dock icon → Launch <bottle>** for every bottle with Steam, in sidebar order,
+  greyed out while that bottle is launching. `DockMenuEntries` decides what's listed
+  (`DockMenuEntriesTests`); `DockMenu` builds the `NSMenu`; `QuitGuard` (the app delegate) returns
+  it from `applicationDockMenu`. Items call the same `launchSteam` as Play. Chosen by Jack over
+  notifications.
+- **Verified live:** the menu listed all six bottles. Screenshot trick worth keeping: the
+  computer-use screenshot HIDES Dock menus (the Dock can't be allow-listed), but the menu stays
+  open across tool calls, so `screencapture -x` from the shell while it's open captures it.
+- **Ruled out by the toolchain, not by design:** App Shortcuts (Siri/Spotlight) need
+  `appintentsmetadataprocessor`, which ships with full Xcode, not the Command Line Tools; a
+  widget is a separate extension that SwiftPM doesn't build and macOS is strict about loading
+  ad-hoc-signed. Both become possible once Xcode's license is accepted and signing is real.
+  Notifications (long task finished while Decanter is in the background) are buildable today if
+  wanted. Live Activities, complications, quick actions, Top Shelf, App Clips: not on macOS.
+
 ## "Why is this game slow" — measure it (`Scripts/profile-slow-game.command`)
 
 Peggle Deluxe was guessed at **twice** — first the graphics backend (DXVK), then the Wine engine

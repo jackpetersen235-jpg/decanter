@@ -112,11 +112,20 @@ struct DecanterApp: App {
     }
 }
 
-/// Asks before quitting while a game launch is still waiting on Steam's sign-in — every quit path
-/// (⌘Q, the Dock, the app switcher) goes through `applicationShouldTerminate`. On 2026-10-21 a
-/// Dock quit 22 s before Steam signed in silently cost a Peggle launch.
+/// Decanter's app delegate. Two jobs:
+///
+/// - Asks before quitting while a game launch is still waiting on Steam's sign-in — every quit
+///   path (⌘Q, the Dock, the app switcher) goes through `applicationShouldTerminate`. On 2026-10-21
+///   a Dock quit 22 s before Steam signed in silently cost a Peggle launch.
+/// - Supplies the Dock icon's menu (`DockMenu`): Launch <bottle> for each bottle.
 final class QuitGuard: NSObject, NSApplicationDelegate {
     weak var model: AppModel?
+
+    @MainActor
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        guard let model else { return nil }
+        return DockMenu.make(for: model)
+    }
 
     @MainActor
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
