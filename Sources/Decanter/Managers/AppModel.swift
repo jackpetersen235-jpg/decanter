@@ -543,6 +543,9 @@ final class AppModel: ObservableObject {
     /// headless flag).
     @discardableResult
     func runGuidedSetup() async -> String? {
+        guard SystemChecks.isAppleSilicon else {
+            return FailureCode.unsupportedMac.tag(SystemChecks.unsupportedMacMessage)
+        }
         isSettingUp = true
         defer { isSettingUp = false }
 
@@ -3046,7 +3049,16 @@ final class AppModel: ObservableObject {
         guard let installation = installation(for: bottle) else { return }
         let console = TaskConsole(title: "Window")
         let gameName = arguments.first.map { windowsPathLastComponent($0) } ?? "the game"
-        let hook = Paths.bundledWindowHook?.path
+        var hook = Paths.bundledWindowHook?.path
+        if let template = Paths.bundledWindowHook {
+            do {
+                hook = try NativeWindow.installWindowHook(template: template,
+                                                          destination: Paths.installedWindowHook).path
+            } catch {
+                console.append("Couldn't set up the window helper (\(error.localizedDescription)). "
+                               + "Using the copy inside Decanter instead.")
+            }
+        }
         if hook == nil {
             console.append("Window hook not bundled — \(gameName) will open in a normal window, "
                            + "but the green button may stay greyed out.")
@@ -3209,7 +3221,8 @@ final class AppModel: ObservableObject {
     /// What to ask before quitting while a launch is held, or nil to quit straight away.
     func quitWarning() -> (title: String, message: String)? {
         LaunchWait.quitWarning(gameNames: bottles.filter { launchesWaitingForSteam.contains($0.id) }
-                                                 .map(\.name))
+                                                 .map(\.name),
+                               isSettingUp: isSettingUp)
     }
 
     /// Play stayed disabled — surfaces a launch that never produced anything, instead of the

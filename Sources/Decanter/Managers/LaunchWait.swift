@@ -19,8 +19,18 @@ enum LaunchWait {
             + "This can take a minute or more, so keep Decanter open until then."
     }
 
-    /// The quit confirmation, or nil when no launch is being held.
-    static func quitWarning(gameNames: [String]) -> (title: String, message: String)? {
+    /// The quit confirmation, or nil when no launch is being held and setup isn't running.
+    ///
+    /// Setup is here too because quitting it was just as silent: ⌘Q partway through the ~500 MB
+    /// engine download quit at once and threw the download away.
+    static func quitWarning(gameNames: [String],
+                            isSettingUp: Bool = false) -> (title: String, message: String)? {
+        if isSettingUp {
+            return ("Setup is still running",
+                    "Decanter is still downloading and setting things up. If you quit now, "
+                    + "the next \"Set everything up for me\" skips whatever already finished, "
+                    + "but an unfinished download starts over.")
+        }
         guard let first = gameNames.first else { return nil }
         if gameNames.count == 1 {
             return ("\(first) hasn't started yet",

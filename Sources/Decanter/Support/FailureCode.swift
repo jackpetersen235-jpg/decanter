@@ -20,6 +20,7 @@ enum FailureCode: String {
     case save = "DEC-E07"           // bottles.json failed to write
     case salvage = "DEC-E08"        // bottles.json was unreadable and had to be reset
     case quit = "DEC-E09"           // Steam did not fully shut down after quitSteam
+    case unsupportedMac = "DEC-E10" // an Intel Mac — the engine and DXMT need Apple silicon
 
     /// Prepends the code to a message — the one place this formatting is decided, so a grep for
     /// "DEC-E" across every failure site (or a diagnostics export) finds the same shape everywhere.

@@ -12,7 +12,7 @@ cd "$(dirname "$0")" || exit 1
 NEW="$PWD/Decanter.app"
 
 say() { printf '%s\n' "$1"; }
-fail() { printf '\n❌ %s\n\nNothing was changed. Tell whoever sent you this what it says above.\n' "$1"; read -r -p "Press return to close." _; exit 1; }
+fail() { printf '\n❌ %s\n\nNothing was changed. Report what it says above on Decanter'"'"'s GitHub page (see READ ME, GETTING HELP).\n' "$1"; read -r -p "Press return to close." _; exit 1; }
 
 say "Updating Decanter…"
 say ""

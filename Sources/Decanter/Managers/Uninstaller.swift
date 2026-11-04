@@ -34,6 +34,7 @@ enum Uninstaller {
             ("Downloads (installers)", Paths.downloads),
             ("Logs", Paths.logsRoot),
             ("Game launcher (Decanter Game.app)", Paths.installedGameHost),
+            ("Window helper", Paths.installedWindowHook.deletingLastPathComponent()),
             ("Backups", Paths.appSupport.appendingPathComponent("Backups", isDirectory: true)),
             ("Bottle index (bottles.json)", Paths.bottlesIndex),
         ]

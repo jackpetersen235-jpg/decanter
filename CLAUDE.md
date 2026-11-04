@@ -220,8 +220,36 @@ kernel anti-cheat (VAC-only, or none) are unaffected and work normally.
 
 ## Sharing with someone else
 
-`Scripts/package-for-friend.sh` → `~/Desktop/Decanter-for-friend.zip` (~2 MB; engine self-downloads).
-Strips quarantine + AppleDouble clutter, re-signs ad-hoc, writes a plain-language READ ME.
+`Scripts/package-for-friend.sh` → `~/Desktop/Decanter-<version>.zip` (~7 MB; engine self-downloads).
+It is also the GitHub release asset. Strips this Mac's attributes + AppleDouble clutter, re-signs
+ad-hoc, writes a plain-language READ ME. Version lives in `make_app.sh`'s Info.plist (1.0, build 33).
+⚠️ `make_app.sh` deletes `build/Decanter.app` first — if Jack has that copy open, build the release
+from a scratch copy of the repo (`rsync --exclude .build --exclude build`) instead.
+
+### Release readiness sweep (2026-11-03) — what a stranger downloading it hits
+
+**Not notarized, and can't be yet:** the only signing identity on this Mac is a free "Apple
+Development" cert; notarization needs the paid Developer Program (Jack's call). Consequences,
+all measured by simulating a browser download (`xattr -w com.apple.quarantine …` on the zip,
+`ditto -x -k`, `spctl -a -vv`):
+- Every file in the zip arrives quarantined and `spctl` rejects the app. Stripping quarantine before
+  zipping does nothing for a download. Since macOS 15, Control-click ▸ Open no longer gets past
+  Gatekeeper — the READ ME now walks through System Settings ▸ Privacy & Security ▸ Open Anyway.
+- The `.command` helpers are rejected the same way (READ ME: "THE EXTRA TOOLS IN THIS FOLDER").
+- **`FileManager.copyItem` keeps the quarantine**, so "Decanter Game.app" copied out of a downloaded
+  bundle was a quarantined app Gatekeeper refused — even after the user approved Decanter itself.
+  `NativeWindow.installGameHost` now clears it every time (`Quarantine.strip`; `replaceItemAt`
+  keeps the replaced item's metadata, so "only after a fresh copy" would miss an older install).
+  The window hook is injected into the game's process, so it is now copied out too
+  (`Paths.installedWindowHook`) and cleared, instead of loaded quarantined from inside the bundle.
+
+Fixed in the same pass: quitting mid-setup now asks first (`LaunchWait.quitWarning(isSettingUp:)`);
+an Intel Mac is told up front it needs Apple silicon (`SystemChecks.isAppleSilicon` asks the
+hardware via `hw.optional.arm64` — the old `#if arch(arm64)` was never called, and would have said
+"Intel" under Rosetta; `DEC-E10`); a plain Steam bottle's Overview says how to add a game (+) and
+why one started from Steam's own window can be slow the first time (the driver is applied when
+DECANTER starts Steam); sizes now say ~500 MB (332 + 166 MB); READ ME step 4 no longer claims Steam
+opens by itself (nothing launches it after setup); the helper note says `wine-10.0`.
 
 ## Gotchas that already bit us (don't rediscover these)
 

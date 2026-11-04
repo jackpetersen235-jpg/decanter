@@ -243,6 +243,76 @@ final class NativeWindowTests: XCTestCase {
         XCTAssertEqual(leftovers, ["Decanter Game.app"])
     }
 
+    /// A downloaded Decanter's bundle is quarantined, and `FileManager.copyItem` copies the
+    /// attribute along. Left on, Gatekeeper refuses the host even after the user approved Decanter
+    /// itself, and "Real game window" loses Game Mode on every downloaded install.
+    func testInstalledHostLosesTheDownloadQuarantine() throws {
+        let dir = try scratchDirectory()
+        let template = dir.appendingPathComponent("Template/Decanter Game.app")
+        let destination = dir.appendingPathComponent("Support/Decanter Game.app")
+        try makeHostBundle(at: template, executable: "v1")
+        try QuarantineFixture.quarantineTree(template)
+
+        try NativeWindow.installGameHost(template: template, destination: destination)
+
+        XCTAssertFalse(Quarantine.isQuarantined(destination))
+        XCTAssertFalse(Quarantine.isQuarantined(
+            destination.appendingPathComponent("Contents/MacOS/decanter-game-host")))
+    }
+
+    /// A host an older Decanter installed is byte-identical, so it isn't recopied — but it still
+    /// carries the quarantine that version copied along. It has to be cleared in place.
+    func testUpToDateButQuarantinedHostIsClearedInPlace() throws {
+        let dir = try scratchDirectory()
+        let template = dir.appendingPathComponent("Template/Decanter Game.app")
+        let destination = dir.appendingPathComponent("Support/Decanter Game.app")
+        try makeHostBundle(at: template, executable: "same")
+        try makeHostBundle(at: destination, executable: "same")
+        try QuarantineFixture.quarantineTree(destination)
+
+        try NativeWindow.installGameHost(template: template, destination: destination)
+
+        XCTAssertFalse(Quarantine.isQuarantined(
+            destination.appendingPathComponent("Contents/MacOS/decanter-game-host")))
+    }
+
+    // MARK: - installWindowHook
+
+    /// The hook is injected into the game's own process, so it gets the same treatment as the
+    /// host: copied out of the bundle and cleared, rather than loaded quarantined from inside it.
+    func testWindowHookIsCopiedOutWithoutTheQuarantine() throws {
+        let dir = try scratchDirectory()
+        let template = dir.appendingPathComponent("Bundle/libwindowhook.dylib")
+        let destination = dir.appendingPathComponent("Support/WindowHook/libwindowhook.dylib")
+        try FileManager.default.createDirectory(at: template.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try "hook v1".write(to: template, atomically: true, encoding: .utf8)
+        try QuarantineFixture.quarantine(template)
+
+        try NativeWindow.installWindowHook(template: template, destination: destination)
+
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "hook v1")
+        XCTAssertFalse(Quarantine.isQuarantined(destination))
+    }
+
+    func testOutdatedWindowHookIsReplaced() throws {
+        let dir = try scratchDirectory()
+        let template = dir.appendingPathComponent("Bundle/libwindowhook.dylib")
+        let destination = dir.appendingPathComponent("Support/WindowHook/libwindowhook.dylib")
+        for (url, text) in [(template, "new"), (destination, "old")] {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+
+        try NativeWindow.installWindowHook(template: template, destination: destination)
+
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "new")
+        let leftovers = try FileManager.default.contentsOfDirectory(
+            atPath: destination.deletingLastPathComponent().path)
+        XCTAssertEqual(leftovers, ["libwindowhook.dylib"])
+    }
+
     // MARK: - requiresSteamToLaunch
 
     /// PopCap's DRM wrapper (Peggle and the rest of its Steam catalogue): launched directly it

@@ -261,6 +261,18 @@ struct BottleDetailView: View {
                             Label("Preparing Steam…", systemImage: "hourglass")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
+                        // A plain Steam bottle: say how a newly installed game gets into Decanter.
+                        // Nothing else did, and the graphics driver is put in place only when
+                        // Decanter starts Steam — so a game installed and then started from Steam's
+                        // own window ran on the slow fallback renderer, which is how "it's slow"
+                        // reports start.
+                        if model.resolvedGame(for: bottle) == nil, bottle.isSteamBootstrapped {
+                            Text("To play a game you've installed, press + and pick it, then press "
+                                 + "Play. Decanter sets up a game's graphics when it starts Steam, "
+                                 + "so a game started from Steam's own window can run slowly the "
+                                 + "first time.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         if let gfxResult {
                             Text(gfxResult).font(.caption).foregroundStyle(.secondary)
                         }

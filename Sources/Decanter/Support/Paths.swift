@@ -144,6 +144,12 @@ enum Paths {
         return FileManager.default.fileExists(atPath: dylib.path) ? dylib : nil
     }
 
+    /// Where the window hook is copied to and injected from. Out of the bundle for the same reason
+    /// the host's copy is cleared: a downloaded Decanter's files are quarantined (see `Quarantine`).
+    static var installedWindowHook: URL {
+        appSupport.appendingPathComponent("WindowHook/libwindowhook.dylib")
+    }
+
     /// Rolling console history, so a crash or a force-quit doesn't take the only record of what
     /// just happened with it. Part of the pre-release debug plan's Phase 4 — before this, every
     /// `TaskConsole`'s text lived only in memory and died with the sheet that showed it, so a

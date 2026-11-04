@@ -50,6 +50,18 @@ final class UninstallerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: Paths.installedGameHost.path))
     }
 
+    /// The window hook is copied out next to the host for the same reason, and goes with it.
+    func testInstalledWindowHookIsRemovedByUninstall() throws {
+        let hook = Paths.installedWindowHook
+        try FileManager.default.createDirectory(at: hook.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try "hook".write(to: hook, atomically: true, encoding: .utf8)
+
+        XCTAssertTrue(Uninstaller.plan().contains { $0.url == hook.deletingLastPathComponent() })
+        XCTAssertTrue(Uninstaller.execute().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: hook.path))
+    }
+
     /// The one deliberate difference from `OrphanReclaim`, which never scans `Backups/` at all
     /// (F21: it holds `RESTORE-*.sh`'s rollback material, live for as long as the app is in use).
     /// An uninstall is the one context where removing it too is exactly the point.

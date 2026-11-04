@@ -33,12 +33,13 @@ went wrong.
 ## Path A — the user just has the app (shared zip)
 
 1. **Unzip → drag `Decanter.app` to `/Applications`.**
-2. **First open must be right-click ▸ Open** (it's ad-hoc signed, not notarized). If they double-clicked
-   and got *"Decanter is damaged"*, clear quarantine:
+2. **First open needs Open Anyway** (it's ad-hoc signed, not notarized, and a downloaded copy is
+   quarantined). On macOS 15+ Control-click ▸ Open no longer works: double-click, click Done, then
+   System Settings ▸ Privacy & Security ▸ **Open Anyway**. Or clear the quarantine:
    ```bash
    xattr -cr /Applications/Decanter.app
    ```
-3. In the app, press **"Set everything up for me"** and wait (a few minutes; mostly the 317 MB engine).
+3. In the app, press **"Set everything up for me"** and wait (a few minutes; mostly the ~500 MB engine).
 4. Sign into Steam, install games, play.
 
 ## Path B — building from the repo (this folder)
@@ -68,7 +69,8 @@ python3 -c 'import json;print(json.load(open("'"$HOME"'/Library/Application Supp
 ## Troubleshooting (most-common first)
 
 **"Decanter is damaged and can't be opened."**
-Double-clicked an ad-hoc-signed app. `xattr -cr /Applications/Decanter.app`, then right-click ▸ Open.
+A quarantined, ad-hoc-signed app. `xattr -cr /Applications/Decanter.app`, or System Settings ▸ Privacy &
+Security ▸ Open Anyway. (Control-click ▸ Open stopped working for this in macOS 15.)
 
 **Engine download fails / stalls.**
 Network. The installer cleans up a half-download so a retry is clean — just press the button again.

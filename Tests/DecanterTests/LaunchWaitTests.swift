@@ -12,6 +12,14 @@ final class LaunchWaitTests: XCTestCase {
     }
 
     /// One game: name it, and say plainly that quitting means it won't start.
+    /// Quitting mid-setup used to need no confirmation at all, and silently threw away a partial
+    /// ~500 MB engine download that the next run had to start again.
+    func testSetupInProgressAsksBeforeQuitting() throws {
+        let warning = try XCTUnwrap(LaunchWait.quitWarning(gameNames: [], isSettingUp: true))
+        XCTAssertEqual(warning.title, "Setup is still running")
+        XCTAssertTrue(warning.message.contains("starts over"))
+    }
+
     func testWarningNamesTheOneHeldGame() throws {
         let warning = try XCTUnwrap(LaunchWait.quitWarning(gameNames: ["Peggle Deluxe"]))
         XCTAssertTrue(warning.title.contains("Peggle Deluxe"))

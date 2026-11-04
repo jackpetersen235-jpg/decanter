@@ -30,7 +30,7 @@ struct SetupWizard: View {
         var blurb: String {
             switch self {
             case .rosetta: return "Lets your Mac understand software written for Intel chips. Made by Apple, already on most Macs."
-            case .engine:  return "Translates Windows games so they run on macOS. About 480 MB in two parts — Decanter downloads and sets it up for you, including the fast-sync build that avoids stutter."
+            case .engine:  return "Translates Windows games so they run on macOS. About 500 MB in two parts — Decanter downloads and sets it up for you, including the fast-sync build that avoids stutter."
             case .bottle:  return "A private Windows environment for your games. Nothing leaks into the rest of your Mac."
             case .steam:   return "The Steam app itself, installed inside that environment."
             }
@@ -173,11 +173,18 @@ struct SetupWizard: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(running)
+                .disabled(running || !SystemChecks.isAppleSilicon)
 
+                // Said before the button is pressed, not after a Rosetta step that can't succeed.
+                if !SystemChecks.isAppleSilicon {
+                    StatusNote.failure(FailureCode.unsupportedMac.tag(SystemChecks.unsupportedMacMessage))
+                }
+
+                // The two engine parts measure 332 MB + 166 MB; this used to say 317, the first
+                // part alone, while the row above (and the READ ME) said 480.
                 Text(running
                      ? "This can take several minutes. You can leave it running."
-                     : "Downloads about 317 MB. Nothing else on your Mac is touched.")
+                     : "Downloads about 500 MB. Nothing else on your Mac is touched.")
                     .font(.caption).foregroundStyle(.secondary)
 
                 // Opened from View ▸ Setup Assistant… with a step unfinished, the wizard REPLACES

@@ -1,7 +1,8 @@
 #!/bin/bash
 # Build a clean, shareable Decanter.app + plain-language READ ME, zipped to the Desktop.
-# The zip is tiny (~2 MB) because the Wine engine self-downloads on first run (~480 MB in two
+# The zip is tiny (~2 MB) because the Wine engine self-downloads on first run (~500 MB in two
 # parts: the base bundle, then the upstream-wine-10-with-msync overlay that avoids frame spikes).
+# This is also the GitHub release asset: written to ~/Desktop/Decanter-<version>.zip.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,12 +11,13 @@ cd "$ROOT"
 echo "▸ Building the app…"
 ./Scripts/make_app.sh release >/dev/null
 
-STAGE="$(mktemp -d)/Decanter-for-friend"
+STAGE="$(mktemp -d)/Decanter"
 mkdir -p "$STAGE"
 cp -R build/Decanter.app "$STAGE/Decanter.app"
 
-# Strip quarantine so their Gatekeeper prompt is the milder "unidentified developer"
-# (right-click ▸ Open) rather than "damaged and can't be opened".
+# Clear this Mac's own attributes so the zip carries none. It does NOT spare the recipient
+# Gatekeeper: a browser re-quarantines everything in a downloaded zip (measured 2026-11-03,
+# `spctl` → rejected), which is why the READ ME walks through Open Anyway.
 xattr -cr "$STAGE/Decanter.app" 2>/dev/null || true
 # Re-apply the ad-hoc signature after stripping xattrs.
 codesign --force --sign - "$STAGE/Decanter.app" >/dev/null 2>&1 || true
@@ -35,14 +37,16 @@ has the app — no repo. Getting them going is short:
    ```bash
    bash "$(dirname "$0")/doctor.command"      # or just: bash doctor.command  (in this folder)
    ```
-2. **Install the app**: drag `Decanter.app` to `/Applications`. If double-clicking gives
-   *"Decanter is damaged"*, it's just the unsigned-app gate — clear it:
+2. **Install the app**: drag `Decanter.app` to `/Applications`. It's ad-hoc signed, not
+   notarized, so a downloaded copy is quarantined and Gatekeeper refuses it ("could not verify").
+   On macOS 15+ Control-click ▸ Open no longer gets past that: use System Settings ▸ Privacy &
+   Security ▸ **Open Anyway**, or clear the quarantine:
    ```bash
    xattr -cr /Applications/Decanter.app
    ```
-   then right-click ▸ Open.
+   The `.command` helpers in this folder are quarantined the same way.
 3. **Press "Set everything up for me"** in the app. It installs, in order and on its own:
-   Rosetta 2 → the Windows engine (~480 MB: base bundle + upstream wine 10 + msync overlay,
+   Rosetta 2 → the Windows engine (~500 MB: base bundle + upstream wine 10 + msync overlay,
    which is what avoids the frame-spike stutter) → a game bottle → Steam.
    Progress shows inline. It self-skips anything already done, so it's safe to re-press.
 4. Sign into Steam, install games, play.
@@ -50,7 +54,7 @@ has the app — no repo. Getting them going is short:
 ## Verify (the 4 things a working setup needs)
 ```bash
 ls /Library/Apple/usr/libexec/oah/libRosettaRuntime                                   # 1. Rosetta
-"$HOME/Library/Application Support/Decanter/Wine/Libraries/Wine/bin/wine" --version    # 2. engine -> wine-11.0
+"$HOME/Library/Application Support/Decanter/Wine/Libraries/Wine/bin/wine" --version    # 2. engine -> wine-10.0
 cat "$HOME/Library/Application Support/Decanter/bottles.json"                          # 3. a bottle, isInitialized:true
 # 4. Steam = steam.exe inside that bottle's drive_c/Program Files (x86)/Steam/
 ```
@@ -107,20 +111,22 @@ Drag the file called "Decanter" from THIS folder into that Applications window.
 
 STEP 2 — Open it the first time (this part is fussy, once)
 ----------------------------------------------------------
-In your Applications folder, find "Decanter".
+In your Applications folder, double-click "Decanter".
 
-Hold CONTROL on your keyboard and click it. A small menu appears.
-Choose "Open" from that menu.
+macOS shows a warning that it could not verify Decanter.
+Click "Done" (NOT "Move to Trash"). Then:
 
-A warning says Decanter is from an unidentified developer.
-Click the "Open" button in that warning.
+  1. Open System Settings (Apple menu > System Settings).
+  2. Click "Privacy & Security" in the sidebar.
+  3. Scroll down to "Security". It says Decanter was blocked.
+     Click "Open Anyway", and confirm with your password or Touch ID.
+  4. Decanter opens. If one more warning appears, click "Open Anyway".
 
-  WHY: this app did not come from Apple's App Store, so macOS checks with
-  you once. After this, you can open it normally forever.
+  WHY: Decanter isn't from the App Store and isn't registered with Apple,
+  so macOS makes you approve it once. After this it opens normally.
 
-  IF YOU SEE "Decanter is damaged and can't be opened" — you double-clicked
-  instead of Control-clicking. Drag it to the Trash, re-copy it from this
-  folder, and do the Control-click properly. Nothing is broken.
+  ON macOS 14 (Sonoma) it's simpler: Control-click Decanter, choose "Open",
+  then click "Open" in the warning.
 
 
 STEP 3 — Press the one button
@@ -129,9 +135,9 @@ A window appears with a button reading "Set everything up for me".
 Click it, then leave it alone for about ten minutes.
 
 It does all of this by itself, in order:
-  • Apple's translation layer — macOS WILL ask for your Mac password. That
-    is normal and it is Apple asking, not this app. Type it and continue.
-  • The Windows engine — about 480 MB. This is the slow part.
+  • Apple's translation layer (Rosetta) — if your Mac doesn't have it yet,
+    Decanter installs it. It's free and made by Apple.
+  • The Windows engine — about 500 MB. This is the slow part.
   • A private folder for your games
   • Steam
 
@@ -142,14 +148,20 @@ You will see each line get a checkmark as it finishes.
   all that is needed.
 
 
-STEP 4 — Play
--------------
-Steam opens on its own. Sign in with your Steam account and install a game
-like you would on a PC.
+STEP 4 — Start Steam and add a game
+-----------------------------------
+When every line has a checkmark, click "Start using Decanter", then click
+"Launch Steam".
 
-When you launch a game through Decanter, it automatically applies the
-graphics fixes for that game — you do not have to do anything. The first
-launch after installing a game may take a few extra seconds because of this.
+The FIRST time, Steam downloads itself (a few hundred MB) before any window
+appears, so it can look stuck for several minutes. Leave it alone until the
+Steam sign-in window shows up. Sign in and install a game like you would on
+a PC.
+
+To play it: click + at the top of Decanter's sidebar, pick the game from the
+list, then press Play. Decanter sets up a game's graphics fixes each time it
+starts Steam, so start your games from Decanter. A game started from Steam's
+own window right after installing it can run slowly the first time.
 
 That's it. You're done.
 
@@ -179,7 +191,7 @@ GOOD TO KNOW
   • Performance varies a lot by game. "DXMT (DirectX -> Metal)" is the default
     and fastest graphics mode, and MetalFX upscaling (in Configuration) can add
     frames. Some demanding 3D games need extra per-game setup to run their best
-    — ask whoever sent you this if a specific game feels slow.
+    — the "WHY IS MY GAME SLOW" tool in this folder can tell you why one is.
 
   • OLD 2D GAMES (Peggle, Bejeweled, Zuma, anything pre-2010) — if one feels
     slow, open Configuration and turn ON "Old 2D game - software rendering".
@@ -202,8 +214,9 @@ GOOD TO KNOW
 
 IF SOMETHING GOES WRONG
 -----------------------
-  • "Decanter is damaged / can't be opened"
-      -> You double-clicked instead of right-click -> Open. See step 2.
+  • "Decanter could not be verified" / "Decanter is damaged"
+      -> Approve it as in step 2: System Settings > Privacy & Security >
+         "Open Anyway".
       -> Or open Terminal and run:  xattr -cr /Applications/Decanter.app
 
   • The icon bounces in the Dock and then nothing happens
@@ -232,10 +245,33 @@ IF SOMETHING GOES WRONG
       connection. Decanter's Steam panel will tell you when it's still setting
       itself up.
 
-      If it still fails, open Terminal and paste this, then send the output to
-      whoever gave you this app:
+      If it still fails, open Terminal and paste this, then include what it
+      prints when you report it (see GETTING HELP below):
 
         /Applications/Decanter.app/Contents/MacOS/Decanter --diagnose
+
+
+THE EXTRA TOOLS IN THIS FOLDER
+------------------------------
+The files ending in ".command" (doctor, UPDATE Decanter, WHY IS MY GAME
+SLOW, OPTIONAL - speed up old games) are small helpers you only need if
+something goes wrong. macOS blocks each one the first time, just like
+Decanter in step 2: double-click it, click "Done", then System Settings >
+Privacy & Security > "Open Anyway".
+
+
+UPDATING TO A NEW VERSION
+-------------------------
+Download the new zip, open it, and drag the new "Decanter" into your
+Applications folder. Choose "Replace". Your games, saves and Steam login
+are kept: they live elsewhere on your Mac, not inside the app.
+Then approve the new version once, as in step 2.
+
+
+GETTING HELP
+------------
+Report problems on Decanter's GitHub page:
+  https://github.com/jackpetersen235-jpg/decanter/issues
 
 
 KNOWN ISSUES (honest heads-up)
@@ -275,11 +311,13 @@ Tested on an M5 MacBook Air running macOS 26.5. Your Mac may differ.
 Enjoy.
 TXT
 
-OUT="$HOME/Desktop/Decanter-for-friend.zip"
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Decanter.app/Contents/Info.plist)"
+OUT="$HOME/Desktop/Decanter-$VERSION.zip"
 rm -f "$OUT"
 # ditto with no resource forks / no extended attrs => a clean zip with no "._" clutter.
 ( cd "$(dirname "$STAGE")" && ditto -c -k --sequesterRsrc --keepParent \
     "$(basename "$STAGE")" "$OUT" )
 
 echo "▸ Done: $OUT ($(du -h "$OUT" | cut -f1))"
-echo "  Send that one file. They unzip, right-click ▸ Open, press the button."
+echo "  Upload that one file as the release asset. People unzip, drag Decanter to Applications,"
+echo "  approve it once (READ ME step 2), and press the button."

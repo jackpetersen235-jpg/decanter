@@ -59,7 +59,7 @@ done
 if [ -n "$APP" ]; then
   ok "Found: $(echo "$APP" | sed "s|$HOME|~|")"
   if xattr "$APP" 2>/dev/null | grep -q com.apple.quarantine; then
-    warn "App is quarantined — first open must be right-click ▸ Open (or: xattr -cr \"$APP\")"
+    warn "App is quarantined — approve it in System Settings ▸ Privacy & Security ▸ Open Anyway (or: xattr -cr \"$APP\")"
   fi
 else
   warn "Decanter.app not found in the usual places (that's fine if you haven't installed it yet)"
@@ -85,7 +85,7 @@ if [ -x "$ENGINE_BIN" ]; then
   fi
 else
   warn "Decanter's own engine isn't installed yet"
-  NEXT+=("Open Decanter and press \"Set everything up for me\" — it downloads the engine (~317 MB)")
+  NEXT+=("Open Decanter and press \"Set everything up for me\" — it downloads the engine (~500 MB)")
 fi
 # other wine builds Decanter can also use
 for probe in \

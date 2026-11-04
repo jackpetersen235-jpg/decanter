@@ -80,8 +80,35 @@ enum NativeWindow {
     @discardableResult
     static func installGameHost(template: URL, destination: URL,
                                 fileManager: FileManager = .default) throws -> URL {
-        guard gameHostNeedsInstall(template: template, destination: destination,
-                                   fileManager: fileManager) else { return destination }
+        if gameHostNeedsInstall(template: template, destination: destination, fileManager: fileManager) {
+            try installCopy(of: template, at: destination, fileManager: fileManager)
+        }
+        // Every time, not only after a fresh copy: a downloaded Decanter's bundle is quarantined,
+        // the copy inherits it, and Gatekeeper then refuses the host (see `Quarantine`). A host an
+        // older Decanter installed still carries it, and `replaceItemAt` keeps the replaced item's
+        // metadata by default.
+        try Quarantine.strip(destination, fileManager: fileManager)
+        return destination
+    }
+
+    /// Copies the window hook out of Decanter.app to `destination` when it's missing or out of
+    /// date, clears its quarantine, and returns `destination`. It is injected into the game's own
+    /// process, so it must not be loaded quarantined from inside a downloaded bundle any more than
+    /// the host may be launched from there.
+    @discardableResult
+    static func installWindowHook(template: URL, destination: URL,
+                                  fileManager: FileManager = .default) throws -> URL {
+        if !fileManager.contentsEqual(atPath: template.path, andPath: destination.path) {
+            try installCopy(of: template, at: destination, fileManager: fileManager)
+        }
+        try Quarantine.strip(destination, fileManager: fileManager)
+        return destination
+    }
+
+    /// Copies to a sibling first and swaps it in, so a failed copy never leaves a half-written
+    /// item behind.
+    private static func installCopy(of template: URL, at destination: URL,
+                                    fileManager: FileManager) throws {
         let parent = destination.deletingLastPathComponent()
         try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
         let staging = parent.appendingPathComponent(".\(destination.lastPathComponent).installing-\(UUID().uuidString)")
@@ -93,7 +120,6 @@ enum NativeWindow {
         } else {
             try fileManager.moveItem(at: staging, to: destination)
         }
-        return destination
     }
 
     /// The libraries to inject: the window hook, plus `extraInsertVariable` if it is set.
