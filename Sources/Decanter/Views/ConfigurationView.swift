@@ -297,6 +297,8 @@ struct ConfigurationView: View {
             }
         }
         .formStyle(.grouped)
+        // On the Form itself. The glass pane's own setting stops at the detail ScrollView.
+        .glassFormBackground()
         .padding(.horizontal, 4)
         // Dense screen: engine, window, graphics and sync sections run well past eight rows, so
         // this takes the restrained variant — solid fill, no atmosphere behind the text.

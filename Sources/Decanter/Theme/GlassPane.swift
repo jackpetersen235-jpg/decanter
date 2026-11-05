@@ -96,7 +96,37 @@ struct ThemedPaneSurface: ViewModifier {
     }
 }
 
+/// Lets a grouped `Form` show the glass pane behind it, in Liquid Glass only.
+///
+/// `GlassPane` already sets `scrollContentBackground(.hidden)`, but in the live window it never
+/// reached the Form in the detail column. The Form painted its usual solid backing, so the
+/// Configuration tab was a black slab while Overview's GroupBoxes beside it stayed clear (measured
+/// 2026-11-05; see CLAUDE.md). A bare-NSWindow copy of the same nesting did NOT reproduce it, so
+/// whatever stops the setting is part of the real window. Set on the Form ITSELF, it worked
+/// everywhere it was tried, so it lives here, right next to the Form, not up on the pane.
+///
+/// Only Liquid Glass. Standard keeps the system's opaque grouped look, and Aero already hides it
+/// through `aeroLightChrome()`. That's why this changes nothing in those themes instead of passing
+/// `.automatic`: a value set closer to the Form would override Aero's.
+struct GlassFormBackground: ViewModifier {
+    @Environment(\.appTheme) private var theme
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if theme == .liquidGlass {
+            content.scrollContentBackground(.hidden)
+        } else {
+            content
+        }
+    }
+}
+
 extension View {
+    /// Apply directly to a grouped `Form` that sits on a glass pane. See `GlassFormBackground`.
+    func glassFormBackground() -> some View {
+        modifier(GlassFormBackground())
+    }
+
     /// Float this pane on Liquid Glass. See `GlassPane` — the inset is load-bearing, not styling.
     func glassPane(cornerRadius: CGFloat = 18, inset: CGFloat = 10,
                    scrim: Double = 0.14) -> some View {

@@ -904,6 +904,15 @@ launch AND live switches in Settings):
   showed: `titleVisibility = .visible` was latent until the title bar flipped transparent → opaque
   and AppKit laid the title out again. Now `.hidden` in every theme; the centred picker stands in
   for it (as in Calendar) and `navigationTitle` still names the window for the Window menu.
+- **Liquid Glass's Configuration tab was a black slab** (found 2026-11-05). Overview and Programs
+  use GroupBoxes and stayed clear. Configuration's grouped `Form` painted its own solid backing,
+  because `GlassPane`'s `.scrollContentBackground(.hidden)` never reached it in the live window.
+  A bare-NSWindow probe could NOT reproduce this: the same nesting came out clear there, so the
+  difference is something in the real WindowGroup/toolbar window. Fix: `glassFormBackground()` set
+  directly on the Form (Liquid Glass only; Standard and Aero untouched). To check without a desktop
+  behind the window, compare `screencapture -l <window>` pixels with the Overview tab's. The glass
+  renders as flat grey (26,26,26) in a window capture. The solid form shows as bluish
+  (33,34,35)/(40,41,42) rows. After the fix, the area round the rows matches the glass exactly.
 
 Known, minor: switching themes resets the detail column to Overview (the theme modifiers branch, so
 the subtree's identity changes and `BottleDetailView`'s `@State tab` is rebuilt).
