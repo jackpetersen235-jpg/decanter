@@ -222,7 +222,7 @@ kernel anti-cheat (VAC-only, or none) are unaffected and work normally.
 
 `Scripts/package-for-friend.sh` → `~/Desktop/Decanter-<version>.zip` (~7 MB; engine self-downloads).
 It is also the GitHub release asset. Strips this Mac's attributes + AppleDouble clutter, re-signs
-ad-hoc, writes a plain-language READ ME. Version lives in `make_app.sh`'s Info.plist (1.0, build 33).
+ad-hoc, writes a plain-language READ ME. Version lives in `make_app.sh`'s Info.plist (1.0, build 34).
 ⚠️ `make_app.sh` deletes `build/Decanter.app` first — if Jack has that copy open, build the release
 from a scratch copy of the repo (`rsync --exclude .build --exclude build`) instead.
 

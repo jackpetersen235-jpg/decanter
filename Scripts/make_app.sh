@@ -54,6 +54,14 @@ cp "$BIN" "$APP/Contents/MacOS/Decanter"
 # location Sekiro.app's own hand-tuned launcher uses (Contents/MacOS/gpukeepalive), so
 # Paths.bundledGPUKeepalive's lookup matches regardless of which app it's reading.
 [ -f "$KEEPALIVE_BIN" ] && cp "$KEEPALIVE_BIN" "$APP/Contents/MacOS/gpukeepalive"
+# Release only: drop the debug map, which records the absolute path of every source and object
+# file — the builder's home folder included (`/Users/<name>/…`, or a temp dir named after it).
+# Found in the shared zip 2026-11-05: 190 such paths in Decanter, 6 in gpukeepalive. Function
+# names stay, so a crash report still names the function. The app is re-signed further down.
+if [ "$CONFIG" = "release" ]; then
+  strip -S "$APP/Contents/MacOS/Decanter" 2>/dev/null
+  [ -f "$APP/Contents/MacOS/gpukeepalive" ] && strip -S "$APP/Contents/MacOS/gpukeepalive" 2>/dev/null
+fi
 [ -f "$ROOT/Assets/AppIcon.icns" ] && cp "$ROOT/Assets/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 # Patched DXMT (see Assets/DXMT/VERSION.txt). Ships in the bundle so a fresh install can fix the
 # 26 s geometry-shader stall without the user building anything.
@@ -74,7 +82,11 @@ fi
 SDK="$(xcrun --show-sdk-path)"
 echo "▸ Building window hook + game host"
 mkdir -p "$APP/Contents/Resources/WindowHook"
+# A neutral install name: without one, the dylib's own ID is the absolute path it was built at,
+# which names the builder's home folder. Nothing looks it up by that name — it is injected by
+# file path via DYLD_INSERT_LIBRARIES.
 clang -arch x86_64 -dynamiclib -fblocks -O2 -Wall -isysroot "$SDK" -mmacosx-version-min=14.0 \
+      -install_name @rpath/libwindowhook.dylib \
       -lobjc -o "$APP/Contents/Resources/WindowHook/libwindowhook.dylib" \
       "$ROOT/Helpers/WindowHook/window-hook.m"
 HOST="$APP/Contents/Resources/GameHost/Decanter Game.app"
@@ -97,7 +109,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIconFile</key>        <string>AppIcon</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>1.0</string>
-    <key>CFBundleVersion</key>         <string>33</string>
+    <key>CFBundleVersion</key>         <string>34</string>
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
     <key>LSApplicationCategoryType</key> <string>public.app-category.games</string>
     <key>NSHighResolutionCapable</key> <true/>
