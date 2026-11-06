@@ -84,15 +84,21 @@ Sources/Decanter/
 ## Notes & limitations
 
 - **Graphics DLLs.** D3DMetal ships inside GPTk/CrossOver Wine builds; DXVK needs its DLLs
-  present in the prefix. Decanter sets the correct `WINEDLLOVERRIDES` / env for each backend
-  but doesn't bundle third-party DLLs. WineD3D always works as a fallback.
+  present in the prefix. Decanter sets the correct `WINEDLLOVERRIDES` / env for each backend,
+  and bundles a patched DXMT (see `Assets/DXMT/VERSION.txt`). WineD3D always works as a fallback.
 - **Windows version** is applied via the standard `CurrentVersion` registry keys — good for
   most launchers; a few installers check additional keys.
 - Bottles live in `~/Library/Application Support/Decanter/Bottles/` with an index at
   `bottles.json`.
 - This is a starting point, not a shipping product — no notarization, sandbox, or auto-update.
 
-## Legal
+## License
 
-Wine, DXVK, and Apple's Game Porting Toolkit are separate projects under their own licenses.
-Decanter only manages builds you install yourself. Steam is downloaded from Valve's official CDN.
+Decanter is free and open source under the **GNU General Public License v3.0** — see
+[`LICENSE`](LICENSE). Copyright © 2026 Jack Petersen.
+
+Decanter also installs and runs third-party software under its own licenses: the Wine engine
+its setup downloads (Wine is LGPL 2.1; DXVK, MoltenVK and the rest are listed in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)), and the patched DXMT DLLs bundled in the
+app (MIT — [`Assets/DXMT/LICENSE`](Assets/DXMT/LICENSE)). Steam is downloaded from Valve's
+official CDN and is covered by Valve's own terms.

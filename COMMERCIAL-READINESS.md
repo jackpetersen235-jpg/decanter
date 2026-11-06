@@ -41,6 +41,10 @@ stand up unilaterally in a coding pass.
 
 ## 2. Licensing and attribution — done
 
+> **Superseded 2026-11-05:** Jack open-sourced Decanter — `LICENSE` is now GPL-3.0, and the
+> bundled DXMT DLLs carry their MIT license (`Assets/DXMT/LICENSE`). What follows is the
+> original note.
+
 **Closed.** `LICENSE` (proprietary, all rights reserved — Jack's explicit choice) and
 `THIRD-PARTY-NOTICES.md` (what's installed, each component's real license, and how each
 entry was confirmed — DXMT's MIT license was read directly out of its bundled LICENSE

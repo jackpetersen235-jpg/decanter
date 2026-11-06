@@ -4,14 +4,20 @@ Decanter downloads and runs a Windows compatibility engine on the user's behalf 
 wizard's engine install, see `docs/GAMING-STACK.md`). That engine is a third-party payload —
 **downloaded at first run, not bundled inside the Decanter.app you ship** — but Decanter installs,
 configures, and launches it as part of normal operation, and this file exists to attribute what it
-installs. If you sell Decanter, get real legal advice on this before shipping — this file is
-written from what's verifiably true about the packages involved, not as a legal opinion.
+installs. Anyone selling builds of Decanter should get real legal advice on this first — this
+file is written from what's verifiably true about the packages involved, not as a legal opinion.
 
 Two mitigating facts, already noted in `COMMERCIAL-READINESS.md`: the engine is **downloaded, not
 bundled** in the app itself, and Wine is invoked as a separate executable (`Process`/`Shell.run`)
 rather than linked into Decanter's own binary. Both weigh in Decanter's favor, but neither removes
 the attribution obligation for software actually distributed to the user via the app's own
 first-run flow.
+
+**One thing IS bundled:** the patched DXMT DLLs in `Assets/DXMT/` (see its `VERSION.txt`) ship
+inside Decanter.app at `Contents/Resources/DXMT/`. DXMT's MIT license requires its notice to go
+with every copy, so `Assets/DXMT/LICENSE` (copied from the DXMT source checkout the DLLs were
+built from) ships beside them — `make_app.sh` copies the whole folder. It never reaches a game
+folder: the installer copies only the three DLLs, by name (`Paths.dxmtDLLs`).
 
 ## What's installed
 
@@ -32,8 +38,8 @@ risk that raises (no mirror, until recently no checksum — see the SHA-256 pinn
 
 ## What this file does NOT cover
 
-- **Decanter's own source code's license** — proprietary, all rights reserved. See the top-level
-  `LICENSE` file.
+- **Decanter's own source code's license** — GPL-3.0 since 2026-11-05 (proprietary before
+  that). See the top-level `LICENSE` file.
 - **A full per-dylib audit** of the ~90 unlisted support libraries in the base bundle. The table
   above lists the well-known, major components; a complete pass would need to enumerate every
   `.dylib` under the installed `Wine/Libraries/` tree and identify each one's actual license,
