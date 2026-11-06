@@ -541,6 +541,15 @@ final class AppModel: ObservableObject {
             exit(problems.isEmpty ? 0 : 1)
           }
         }
+        // The link Help ▸ Report a Problem… opens, printed instead of opened — for a helper whose
+        // browser won't open it, and for checking the redacted report without a window.
+        //   Decanter.app/Contents/MacOS/Decanter --problem-report
+        if CommandLine.arguments.contains("--problem-report") {
+          Task {
+            print(await problemReportURL().absoluteString)
+            exit(0)
+          }
+        }
         // Update this copy from the latest GitHub release with no window: the same check and
         // install as Decanter ▸ Check for Updates…, for a helper fixing a friend's Mac (and for
         // testing the swap end to end — `DECANTER_UPDATE_API` can point it at a local release).
@@ -1385,6 +1394,14 @@ final class AppModel: ObservableObject {
         // waits for Steam, honours direct-exe bottles and installs the graphics driver first —
         // everything the generated script was doing.
         return bottle.id
+    }
+
+    /// Help ▸ Report a Problem…: GitHub's bug form, pre-filled with this version, this Mac and the
+    /// `--verify` report — home folder redacted, since GitHub issues are public. See `ProblemReport`.
+    func problemReportURL() async -> URL {
+        let report = await verifyReport().text
+        return ProblemReport.issueURL(version: ProblemReport.appVersion(), mac: ProblemReport.thisMac(),
+                                      report: ProblemReport.redactingHome(report, home: NSHomeDirectory()))
     }
 
     /// Full health check: is the RIGHT engine installed, and is everything loaded? Deeper than

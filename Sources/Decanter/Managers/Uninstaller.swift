@@ -2,7 +2,7 @@ import Foundation
 
 /// A genuine "remove everything" path.
 ///
-/// COMMERCIAL-READINESS.md item 3: dragging the app to Trash leaves behind the engine (~480 MB,
+/// docs/COMMERCIAL-READINESS.md item 3: dragging the app to Trash leaves behind the engine (~480 MB,
 /// up to three profiles — offline/online/legacy), every bottle prefix (25+ GB on the machine this
 /// was built on), shader caches, downloads and logs. A paid Mac app with no clean removal is a
 /// predictable review complaint, and on some distribution channels a rejection.

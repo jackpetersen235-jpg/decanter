@@ -2,7 +2,7 @@ import Foundation
 
 /// Short, stable codes on user-visible failures, so a customer can say "it stopped with
 /// DEC-E04" instead of only "it failed." Part of Phase 4 of the pre-release debug plan —
-/// COMMERCIAL-READINESS.md's point about first-run failures being the ones that generate every
+/// docs/COMMERCIAL-READINESS.md's point about first-run failures being the ones that generate every
 /// support email, because each one produces a customer who paid and got nothing, with no
 /// explanation of which step it was.
 ///

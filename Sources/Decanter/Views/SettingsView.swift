@@ -87,7 +87,7 @@ struct SettingsView: View {
                 }
             }
 
-            // COMMERCIAL-READINESS.md item 3: dragging the app to Trash used to leave every
+            // docs/COMMERCIAL-READINESS.md item 3: dragging the app to Trash used to leave every
             // engine, bottle, shader cache and log behind — no clean removal at all. This is
             // where that goes: itemised in `UninstallView`, sized up fresh each time the sheet
             // opens (not cached — data changes between visits).

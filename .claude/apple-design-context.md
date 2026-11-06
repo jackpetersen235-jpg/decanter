@@ -10,7 +10,7 @@ Read by the `hig-*` skills so they don't re-ask. Decanter only — the other App
 - **Category**: Games utility (`LSApplicationCategoryType` = `public.app-category.games`)
 - **Stage**: Released **free and open source (GPL-3.0)** on a public GitHub repo, 2026-11-05;
   v1.1 is the current release and the goal is wide public use with bug reports coming back.
-  (Until then it was headed for sale — see `COMMERCIAL-READINESS.md`.) Shipped as an
+  (Until then it was headed for sale — see `docs/COMMERCIAL-READINESS.md`.) Shipped as an
   ad-hoc-signed zip (`Scripts/package-for-friend.sh`), not notarized. Judge every HIG question
   as if the user is a stranger on an unfamiliar Mac.
 

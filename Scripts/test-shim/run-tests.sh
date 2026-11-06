@@ -15,10 +15,10 @@ W="${TMPDIR:-/tmp}/decanter-test-shim"; rm -rf "${W:?}"; mkdir -p "$W"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Library/Developer/CommandLineTools}"
 
 SRC=(Models/Bottle Models/BottleSettings Models/BottleList Models/BottleSetupState Models/DockMenuEntries
-     Models/AutoAddGames Models/UpdateCheck Models/PrefixSharing Support/Paths Support/SekiroGraphicsConfig Support/Quarantine
+     Models/AutoAddGames Models/UpdateCheck Models/ProblemReport Models/PrefixSharing Support/Paths Support/SekiroGraphicsConfig Support/Quarantine
      Managers/Steam Managers/LaunchWait Managers/EngineDownloadProgress Managers/SteamBootstrapProgress Managers/GameScanner
      Managers/NativeWindow Managers/Uninstaller)
-DEFAULT_TESTS=(SteamBootstrapProgressTests UpdateCheckTests AutoAddGamesTests DockMenuEntriesTests EngineDownloadProgressTests BottleSetupStateTests
+DEFAULT_TESTS=(ProblemReportTests SteamBootstrapProgressTests UpdateCheckTests AutoAddGamesTests DockMenuEntriesTests EngineDownloadProgressTests BottleSetupStateTests
      BottleListTests GameScannerTests NativeWindowTests SteamLogonTests LaunchWaitTests
      SteamProcessTests UninstallerTests QuarantineTests)
 [ $# -eq 0 ] && set -- "${DEFAULT_TESTS[@]}"

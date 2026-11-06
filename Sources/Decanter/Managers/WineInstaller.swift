@@ -59,7 +59,7 @@ final class WineInstaller: ObservableObject {
     static let msyncEngineURL = URL(string:
         "https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS11Wine10.0_3.tar.xz")!
 
-    /// SHA-256 pins for both payloads above. COMMERCIAL-READINESS.md item 1: these are two
+    /// SHA-256 pins for both payloads above. docs/COMMERCIAL-READINESS.md item 1: these are two
     /// GitHub accounts we don't control, and "GitHub release assets are mutable by the publisher
     /// — the bytes at that URL are not guaranteed to be the bytes you tested." A pin can't stop
     /// an asset being silently replaced, but it turns that from a subtly broken engine nobody

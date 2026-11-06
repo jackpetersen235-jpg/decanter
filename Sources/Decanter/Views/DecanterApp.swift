@@ -81,6 +81,28 @@ struct DecanterApp: App {
                 }
             }
             CommandGroup(after: .help) {
+                // Public bug reports: opens GitHub's bug form in the browser with the version, the
+                // Mac and the --verify report already filled in (home folder redacted — issues are
+                // public). Nothing is sent from here; the person reads the form and presses Create.
+                // Ellipsis: the form still needs them to describe what went wrong.
+                Button("Report a Problem…") {
+                    let console = model.openConsole(title: "Report a Problem")
+                    console.append("Gathering a short report about Decanter and its bottles…")
+                    Task {
+                        let url = await model.problemReportURL()
+                        if NSWorkspace.shared.open(url) {
+                            console.append("Opened the bug report form on GitHub in your browser, with "
+                                + "that report already filled in. Describe what went wrong, read it "
+                                + "over, then press Create. Nothing is sent until you do. GitHub asks "
+                                + "you to sign in first (a free account).")
+                            console.finish(0)
+                        } else {
+                            console.append("Couldn't open your browser. The form is at "
+                                + ProblemReport.newIssuePage.absoluteString)
+                            console.finish(1)
+                        }
+                    }
+                }
                 // Phase 4 of the pre-release debug plan: after release, a bug happens on a
                 // machine nobody here will ever touch, reported by someone who cannot describe
                 // it. This is what makes --diagnose/--verify's questions reachable without a

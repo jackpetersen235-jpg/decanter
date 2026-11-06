@@ -7,7 +7,7 @@ configures, and launches it as part of normal operation, and this file exists to
 installs. Anyone selling builds of Decanter should get real legal advice on this first — this
 file is written from what's verifiably true about the packages involved, not as a legal opinion.
 
-Two mitigating facts, already noted in `COMMERCIAL-READINESS.md`: the engine is **downloaded, not
+Two mitigating facts, already noted in `docs/COMMERCIAL-READINESS.md`: the engine is **downloaded, not
 bundled** in the app itself, and Wine is invoked as a separate executable (`Process`/`Shell.run`)
 rather than linked into Decanter's own binary. Both weigh in Decanter's favor, but neither removes
 the attribution obligation for software actually distributed to the user via the app's own
@@ -33,7 +33,7 @@ folder: the installer copies only the three DLLs, by name (`Paths.dxmtDLLs`).
 | ~90 further support dylibs | Mixed | Bundled inside the base release asset (`frankea/Whisky`'s `Libraries.tar.gz`) — not individually audited here; a full pass should enumerate `Wine/Libraries/**/*.dylib` and match each to its source project before shipping |
 
 The base bundle (`WineInstaller.releaseURL`) and the msync overlay (`WineInstaller.msyncEngineURL`)
-are both third-party GitHub release assets — see `COMMERCIAL-READINESS.md` item 1 for the separate
+are both third-party GitHub release assets — see `docs/COMMERCIAL-READINESS.md` item 1 for the separate
 risk that raises (no mirror, until recently no checksum — see the SHA-256 pinning commit).
 
 ## What this file does NOT cover
@@ -50,7 +50,7 @@ risk that raises (no mirror, until recently no checksum — see the SHA-256 pinn
 
 ## In-app acknowledgements
 
-Not yet built. `COMMERCIAL-READINESS.md` recommends an in-app "Acknowledgements" screen surfacing
+Not yet built. `docs/COMMERCIAL-READINESS.md` recommends an in-app "Acknowledgements" screen surfacing
 this table (or something equivalent) — that's a small SwiftUI view reading this file's content (or
 a structured version of it), not built as part of this pass. Worth doing before a public release;
 low effort relative to the risk it closes.

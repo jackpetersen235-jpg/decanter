@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question, idea, or "this game works!"
+    url: https://github.com/jackpetersen235-jpg/decanter/discussions
+    about: Ask how to do something, suggest a feature, or tell others which games run well.

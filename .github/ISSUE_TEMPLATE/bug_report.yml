@@ -1,0 +1,52 @@
+# Decanter's Help ▸ Report a Problem… opens this form with the `version`, `mac` and `diagnostics`
+# fields already filled in (Sources/Decanter/Models/ProblemReport.swift). Renaming any of those
+# ids breaks that silently — change both together.
+name: Something isn't working
+description: Decanter, Steam or a game doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time — every report like this gets a game working for someone else too.
+
+        **Quickest way:** in Decanter, choose **Help ▸ Report a Problem…**. It opens this form with your version, your Mac and a diagnostic report already filled in.
+
+        Before you start: games with kernel-level anti-cheat (Valorant, most competitive shooters) can't run with any Mac tool, so there's no need to report those.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: I pressed Play on Hollow Knight. A black window opened, then closed after a few seconds.
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: Which game? (if it's about one)
+      placeholder: Hollow Knight
+  - type: input
+    id: version
+    attributes:
+      label: Decanter version
+      description: Decanter ▸ About Decanter shows it.
+      placeholder: 1.1 (35)
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Your Mac and macOS version
+      description: Apple menu ▸ About This Mac shows both.
+      placeholder: MacBook Air M2, macOS 26.1
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic report
+      description: |
+        Help ▸ Report a Problem… fills this in. If you came here another way: open Terminal, paste the line below, press Return, and paste what it prints here.
+        `/Applications/Decanter.app/Contents/MacOS/Decanter --verify`
+      render: text

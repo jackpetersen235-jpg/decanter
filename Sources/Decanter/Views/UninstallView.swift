@@ -3,7 +3,7 @@ import SwiftUI
 /// The confirmation sheet for "Uninstall Decanter…" — itemises everything that will be removed,
 /// with real sizes, before the single destructive action can run.
 ///
-/// COMMERCIAL-READINESS.md's own suggestion: "A 'Remove Decanter and its data' flow that itemises
+/// docs/COMMERCIAL-READINESS.md's own suggestion: "A 'Remove Decanter and its data' flow that itemises
 /// sizes before confirming." One list, real numbers, one destructive-styled button — same risk
 /// posture as the existing bottle-delete confirmation (`ContentView`'s `pendingDeletion` dialog),
 /// just scaled to cover everything at once instead of one bottle.
