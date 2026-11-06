@@ -248,7 +248,9 @@ kernel anti-cheat (VAC-only, or none) are unaffected and work normally.
 
 ## Sharing with someone else
 
-`Scripts/package-for-friend.sh` → `~/Desktop/Decanter-<version>.zip` (~7 MB; engine self-downloads).
+`Scripts/package-for-friend.sh` → `~/coding/Releases/Decanter/Decanter-<version>.zip` (~7 MB; engine
+self-downloads; `DECANTER_RELEASES_DIR` overrides). It refuses to overwrite an existing zip there —
+that folder keeps each published release, so bump the version for a new one.
 It is also the GitHub release asset. Strips this Mac's attributes + AppleDouble clutter, re-signs
 ad-hoc, writes a plain-language READ ME. Version lives in `make_app.sh`'s Info.plist (1.0, build 34).
 ⚠️ `make_app.sh` deletes `build/Decanter.app` first — if Jack has that copy open, build the release

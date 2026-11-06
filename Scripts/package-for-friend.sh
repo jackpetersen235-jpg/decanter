@@ -1,8 +1,9 @@
 #!/bin/bash
-# Build a clean, shareable Decanter.app + plain-language READ ME, zipped to the Desktop.
+# Build a clean, shareable Decanter.app + plain-language READ ME, zipped into ~/coding/Releases.
 # The zip is tiny (~2 MB) because the Wine engine self-downloads on first run (~500 MB in two
 # parts: the base bundle, then the upstream-wine-10-with-msync overlay that avoids frame spikes).
-# This is also the GitHub release asset: written to ~/Desktop/Decanter-<version>.zip.
+# This is also the GitHub release asset: written to ../Releases/Decanter/Decanter-<version>.zip
+# beside this repo (i.e. ~/coding/Releases/Decanter), or $DECANTER_RELEASES_DIR if set.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -313,8 +314,17 @@ Enjoy.
 TXT
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Decanter.app/Contents/Info.plist)"
-OUT="$HOME/Desktop/Decanter-$VERSION.zip"
-rm -f "$OUT"
+# Filed with the other releases, never overwritten: that folder keeps the copy of each PUBLISHED
+# release, and a rebuild under the same version is exactly what the in-app updater can't see.
+RELEASES="${DECANTER_RELEASES_DIR:-$ROOT/../Releases/Decanter}"
+mkdir -p "$RELEASES"
+OUT="$(cd "$RELEASES" && pwd)/Decanter-$VERSION.zip"
+if [ -e "$OUT" ]; then
+  echo "✖ $OUT already exists — it's the copy of a released version, so it isn't overwritten."
+  echo "  Bump CFBundleShortVersionString in Scripts/make_app.sh (the updater needs a new version"
+  echo "  to see a release anyway), or move the old zip aside first."
+  exit 1
+fi
 # ditto with no resource forks / no extended attrs => a clean zip with no "._" clutter.
 ( cd "$(dirname "$STAGE")" && ditto -c -k --sequesterRsrc --keepParent \
     "$(basename "$STAGE")" "$OUT" )
