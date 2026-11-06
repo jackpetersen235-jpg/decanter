@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/decanter-window.png" width="820" alt="Decanter's window: a sidebar listing Steam and six installed games, and Steam's page showing its graphics (DXMT) and sync (MSync) settings">
+  <img src="docs/images/decanter-window.png" width="820" alt="Decanter's window in the Liquid Glass look: a sidebar listing Steam and six installed games, and Steam's page showing its graphics (DXMT) and sync (MSync) settings">
 </p>
 
 Decanter sets everything up itself — Apple's Rosetta, a Windows engine tuned for games, and
@@ -49,6 +49,16 @@ bottom of the sidebar, or choose **Decanter ▸ Check for Updates…**.
 - A Mac with Apple silicon (M1 or later). Intel Macs aren't supported.
 - macOS 14 or later. Tested most on macOS 26 and 27.
 - About 2 GB of free space, plus room for your games.
+
+## Three looks
+
+Decanter opens in **Liquid Glass** (above). In **Decanter ▸ Settings… ▸ Theme** you can switch
+to **Standard**, the plain macOS look (below, in dark mode), or **Frutiger Aero**, with glossy
+2006-era buttons and a painted sky.
+
+<p align="center">
+  <img src="docs/images/decanter-window-standard.png" width="820" alt="Decanter's window in the Standard look, dark mode: the same sidebar of Steam and six games, with Steam selected, and Steam's page with Launch Steam, Quit Steam and the bottle's settings">
+</p>
 
 ## What runs, and what doesn't
 

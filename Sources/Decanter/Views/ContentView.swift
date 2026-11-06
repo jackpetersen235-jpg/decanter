@@ -285,10 +285,9 @@ extension ContentView {
 private struct BottleRow: View {
     let bottle: Bottle
     let setupState: BottleSetupState
-    @Environment(\.appTheme) private var appTheme
 
     var body: some View {
-        // A `Label`, so the Standard sidebar treats the symbol as the row's icon.
+        // A `Label`, so the sidebar treats the symbol as the row's icon.
         Label {
             VStack(alignment: .leading, spacing: 1) {
                 Text(bottle.name).lineLimit(1)
@@ -308,17 +307,13 @@ private struct BottleRow: View {
         .help(bottle.name)
     }
 
-    /// Uncoloured in Standard: the sidebar list tints a Label's icon with the accent colour and
-    /// turns it white on the selected row. Colouring it by hand (accent, as the themed looks do)
-    /// made it vanish into the accent-filled selection. The themed looks use a plain list, which
-    /// tints nothing, so they keep the explicit colour.
-    @ViewBuilder
+    /// Never coloured by hand, in any theme: the sidebar list tints a Label's icon with the accent
+    /// colour and turns it white on the selected row. An icon coloured with the accent by hand
+    /// stays accent on the accent-filled selection and vanishes. The themed looks kept that
+    /// explicit colour because they once used a plain list, which tints nothing; since the
+    /// layout-unification pass every theme uses the same `.sidebar` list, and Liquid Glass's
+    /// selected row showed a blank where the controller should be (Jack, 2026-11-06).
     private var icon: some View {
-        let image = Image(systemName: bottle.isSteamInstalled ? "gamecontroller.fill" : "cube.box")
-        if appTheme == .system {
-            image
-        } else {
-            image.foregroundStyle(bottle.isSteamInstalled ? Color.accentColor : .secondary)
-        }
+        Image(systemName: bottle.isSteamInstalled ? "gamecontroller.fill" : "cube.box")
     }
 }

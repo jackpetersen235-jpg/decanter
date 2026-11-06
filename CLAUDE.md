@@ -839,8 +839,11 @@ setting), against a cloned install (below). What changed, and the trap behind ea
   didn't finish / Steam not installed.
 - **Sidebar rows:** `.listRowSeparator(.hidden)` in every theme; and an icon coloured by hand with
   the accent **vanishes on a `.sidebar` list's accent selection** — `backgroundProminence` did not fix
-  it. The row is a `Label` with an UNcoloured icon in Standard (the sidebar tints it and whitens it
-  when selected); the themed looks' `.plain` list tints nothing, so they keep the explicit colour.
+  it. The row is a `Label` with an UNcoloured icon (the sidebar tints it and whitens it when
+  selected). ⚠️ Since the layout-unification pass EVERY theme uses that `.sidebar` list, so the icon
+  is uncoloured in every theme — the themed looks once kept an explicit accent "because a `.plain`
+  list tints nothing", and that leftover made Liquid Glass's selected row a blank (fixed 2026-11-06;
+  checked in all three themes, window active, Steam row selected).
 - (Superseded within the day by the geometry pass below: a `.sidebar` list inside the hand-built
   HStack, with the + and gear forced into the traffic-light row. It still didn't look like Apple's.)
 - **Overview: one primary button.** Reinstall Steam and Install Graphics Driver moved into a
