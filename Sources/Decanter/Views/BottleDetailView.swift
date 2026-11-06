@@ -168,8 +168,24 @@ struct BottleDetailView: View {
                                 .foregroundStyle(.secondary)
                             Text("The first launch downloads the Steam client (a few hundred MB). "
                                  + "Leave it running until the login window appears — it can take "
-                                 + "several minutes and may look stuck.")
+                                 + "several minutes.")
                                 .font(.caption).foregroundStyle(.secondary)
+                            // Real progress while it downloads, so it never looks frozen. Steam
+                            // shows no window and no percentage of its own; this reads its log and
+                            // package folder every 2 s (SteamBootstrapProgress).
+                            if launching {
+                                TimelineView(.periodic(from: .now, by: 2)) { _ in
+                                    if let p = model.steamBootstrapProgress(for: bottle) {
+                                        ProgressView(value: Double(p.done), total: Double(p.total)) {
+                                            Text("Steam is downloading itself — \(p.done / 1_000_000) of "
+                                                 + "\(p.total / 1_000_000) MB")
+                                                .font(.caption)
+                                        }
+                                    } else {
+                                        Text("Steam is getting ready…").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
                         }
                         HStack {
                             // PLAY COMES FIRST. On a game bottle this is what the user came here
@@ -267,10 +283,11 @@ struct BottleDetailView: View {
                         // own window ran on the slow fallback renderer, which is how "it's slow"
                         // reports start.
                         if model.resolvedGame(for: bottle) == nil, bottle.isSteamBootstrapped {
-                            Text("To play a game you've installed, press + and pick it, then press "
-                                 + "Play. Decanter sets up a game's graphics when it starts Steam, "
-                                 + "so a game started from Steam's own window can run slowly the "
-                                 + "first time.")
+                            Text("Games you install in Steam appear in the sidebar by themselves "
+                                 + "once they finish installing. Click one, then press Play. "
+                                 + "Decanter sets up a game's graphics when it starts Steam, so a "
+                                 + "game started from Steam's own window can run slowly the first "
+                                 + "time.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         if let gfxResult {

@@ -22,6 +22,10 @@ enum GameScanner {
         let appID: String?
         /// The prefix this game lives in, so a new bottle can point at the right one.
         let prefix: URL
+        /// False while Steam is still downloading or updating it (its manifest's StateFlags lack
+        /// the "fully installed" bit). The folder and even the .exe exist mid-download, so the
+        /// scan finds such a game; auto-adding waits for this. Always true for non-Steam games.
+        var isFullyInstalled: Bool = true
 
         var displaySize: String {
             ByteCountFormatter.string(fromByteCount: Int64(sizeBytes), countStyle: .file)
@@ -130,7 +134,8 @@ enum GameScanner {
             results.append(FoundGame(name: match?.value.name ?? installDir,
                                      folder: folder, executable: exe,
                                      sizeBytes: folderSize(folder),
-                                     appID: match?.key, prefix: prefix))
+                                     appID: match?.key, prefix: prefix,
+                                     isFullyInstalled: match?.value.isFullyInstalled ?? true))
         }
 
         // 2. Everything else a Windows installer might have used.
@@ -166,9 +171,12 @@ enum GameScanner {
         return items.filter { (try? $0.resourceValues(forKeys: keys))?.isDirectory == true }
     }
 
-    /// appid -> (installdir, name), read from every `appmanifest_*.acf` in a steamapps folder.
-    private static func manifestIndex(at steamApps: URL) -> [String: (installDir: String, name: String)] {
-        var out: [String: (String, String)] = [:]
+    /// appid -> (installdir, name, fully installed?), read from every `appmanifest_*.acf` in a
+    /// steamapps folder. "Fully installed" is bit 4 of `StateFlags`; a download or update in
+    /// progress clears it (e.g. 1026), and a manifest without the field counts as installed.
+    private static func manifestIndex(at steamApps: URL)
+        -> [String: (installDir: String, name: String, isFullyInstalled: Bool)] {
+        var out: [String: (String, String, Bool)] = [:]
         let names = (try? FileManager.default.contentsOfDirectory(atPath: steamApps.path)) ?? []
         for file in names where file.hasPrefix("appmanifest_") && file.hasSuffix(".acf") {
             let id = file.replacingOccurrences(of: "appmanifest_", with: "")
@@ -177,7 +185,8 @@ enum GameScanner {
                                          encoding: .utf8) else { continue }
             let installDir = value("installdir", in: text) ?? ""
             let name = value("name", in: text) ?? installDir
-            if !installDir.isEmpty { out[id] = (installDir, name) }
+            let installed = value("StateFlags", in: text).flatMap(Int.init).map { $0 & 4 != 0 } ?? true
+            if !installDir.isEmpty { out[id] = (installDir, name, installed) }
         }
         return out
     }

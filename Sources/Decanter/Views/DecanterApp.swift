@@ -48,6 +48,9 @@ struct DecanterApp: App {
             // the console sheet. They used to run and return in silence: ⇧⌘R looked identical
             // whether it found five engines or none, and Import CrossOver on a Mac without
             // CrossOver was a complete no-op with its Int result thrown away.
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { Task { await model.checkForUpdatesInteractively() } }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Bottle…") {
                     NotificationCenter.default.post(name: .newBottleRequested, object: nil)

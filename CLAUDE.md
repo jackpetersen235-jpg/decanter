@@ -31,6 +31,34 @@ open build/Decanter.app
 - `Package.swift` targets macOS 14; toolchain is Swift 6.3.3, `swift-tools-version:5.9`
   (deliberate: keeps Swift 5 language mode and avoids strict-concurrency errors).
 - `@main struct DecanterApp` — do **not** add a `main.swift`, it conflicts.
+- **Since macOS 27.2 / CLT 27.2 (2026-11-05), plain `swift build` FAILS** with "plugin for module
+  'SwiftUIMacros' not found": the 27 SDK makes SwiftUI's `@State` a macro whose plugin ships only
+  with full Xcode. `make_app.sh` now falls back to the 26.5 SDK on its own; for a bare build use
+  `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk swift build`.
+- **Tests without Xcode:** `swift test` can't load XCTest until Xcode's license is accepted. Run
+  `bash Scripts/test-shim/run-tests.sh` instead — a minimal XCTest stand-in that compiles the pure
+  tests with the sources they need (89 tests as of 2026-11-05). Add a source to its `SRC` list when
+  a new test needs one; tests that need `AppModel` or a view still need `swift test`.
+- **Games appear by themselves (2026-11-05):** `AppModel.addNewlyInstalledGames` runs when the
+  window appears and whenever Decanter becomes active, adding a bottle for every fully installed
+  Steam game that has none (`AutoAddGames`, `AutoAddGamesTests`; "fully installed" is StateFlags
+  bit 4, read by `GameScanner`). Deleting a game's bottle records it in the UserDefaults key
+  `dismissedAutoAddedGames` so it stays gone; undo or re-adding via "+" clears that. One entry per
+  Steam app id: a game already played from another prefix isn't added again (Half Sword lives in
+  two prefixes here).
+- **Self-update (2026-11-05):** Decanter ▸ Check for Updates…, a quiet check at launch that shows
+  "Update to Decanter X" in the sidebar, and headless `Decanter --update`. `Updater` downloads the
+  latest GitHub release zip, verifies bundle id + newer version, clears quarantine, re-signs, and a
+  helper script swaps the bundle after the app quits (rollback on failure). Verified end to end:
+  a test copy went 1.0 → 9.9 against a local fake release (`DECANTER_UPDATE_API=file://…`).
+  ⚠️ **RELEASE RULE:** every release must bump `CFBundleShortVersionString` in `make_app.sh` and be
+  tagged `v<version>` with the zip attached — re-uploading a rebuild under the same tag is
+  invisible to friends' apps.
+- **Steam first-launch progress (2026-11-05):** while a non-bootstrapped Steam starts, the bottle
+  shows "Steam is downloading itself — X of Y MB" (`SteamBootstrapProgress`: packages queued in the
+  latest startup of `logs/bootstrap_log.txt`, sized by their `_<bytes>` suffix, counted in
+  `package/`). ⚠️ Steam's log uses `\r\n`, and Swift treats `\r\n` as ONE Character — split with
+  `isNewline`, never `"\n"`. Checked against this Mac's real first session: 18 packages, 327 MB.
 
 ## Layout
 

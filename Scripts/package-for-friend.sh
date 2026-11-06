@@ -158,10 +158,11 @@ appears, so it can look stuck for several minutes. Leave it alone until the
 Steam sign-in window shows up. Sign in and install a game like you would on
 a PC.
 
-To play it: click + at the top of Decanter's sidebar, pick the game from the
-list, then press Play. Decanter sets up a game's graphics fixes each time it
-starts Steam, so start your games from Decanter. A game started from Steam's
-own window right after installing it can run slowly the first time.
+To play it: switch back to Decanter. When Steam finishes installing the
+game, it appears in Decanter's sidebar by itself. Click it, then press Play.
+Decanter sets up a game's graphics fixes each time it starts Steam, so start
+your games from Decanter. A game started from Steam's own window right after
+installing it can run slowly the first time.
 
 That's it. You're done.
 

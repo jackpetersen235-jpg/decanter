@@ -43,6 +43,14 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .setupAssistantRequested)) { _ in
             showingWizard = true
         }
+        // Games installed in Steam appear in the sidebar by themselves: look when the window first
+        // shows and every time Decanter comes back to the front — the moment after someone installs
+        // a game in Steam and switches back.
+        .task { await model.addNewlyInstalledGames() }
+        .task { await model.checkForUpdatesQuietly() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await model.addNewlyInstalledGames() }
+        }
         // Bottle ▸ Delete… — handled here because this view owns the window's undo manager and
         // the with-files confirmation.
         .onReceive(NotificationCenter.default.publisher(for: .deleteBottleRequested)) { note in
@@ -118,6 +126,8 @@ struct ContentView: View {
             bottleList
                 .listStyle(.sidebar)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 320)
+                // A newer release, offered in place above the footer — not an alert at launch.
+                .safeAreaInset(edge: .bottom, spacing: 0) { updateOffer }
                 // Pinned under the list, inside the floating sidebar, the way Mail and Notes pin
                 // their footers. The gear lives here, beside the engine status it manages: the
                 // sidebar's share of the toolbar holds the traffic lights, + and the sidebar toggle,
@@ -252,6 +262,22 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+}
+
+extension ContentView {
+    /// "Update to Decanter 1.1" — one click downloads it and reopens Decanter. Empty (and so
+    /// takes no space) when the quiet launch check found nothing newer.
+    @ViewBuilder var updateOffer: some View {
+        if let update = model.availableUpdate {
+            Button { Task { await model.installUpdate(update) } } label: {
+                Label("Update to Decanter \(update.version)", systemImage: "arrow.down.circle.fill")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderless)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .help("Downloads the new version and reopens Decanter. Your bottles and games stay as they are.")
+        }
     }
 }
 

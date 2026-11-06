@@ -22,6 +22,21 @@ if [ "${NATIVE_ONLY:-0}" = 1 ]; then
   echo "▸ NATIVE_ONLY=1 — building $(uname -m) only (local testing; do not distribute)"
 fi
 
+# macOS 27's SDK makes SwiftUI's `@State` a MACRO whose plugin (SwiftUIMacros) ships only with full
+# Xcode, so with just the Command Line Tools every build fails: "plugin for module 'SwiftUIMacros'
+# not found" (first hit 2026-11-05, after the macOS 27.2 / CLT 27.2 update). The CLT keep the 26.x
+# SDKs beside it, and the app targets macOS 14, so fall back to the newest of those. Skipped when
+# the toolchain has the plugin (full Xcode) or SDKROOT is already set.
+PLUGINS="$(dirname "$(xcrun -f swift)")/../lib/swift/host/plugins"
+SDK_MAJOR="$(xcrun --show-sdk-version | cut -d. -f1)"
+if [ -z "${SDKROOT:-}" ] && [ "$SDK_MAJOR" -ge 27 ] && ! ls "$PLUGINS" 2>/dev/null | grep -qi swiftui; then
+  SDK_DIR="$(dirname "$(xcrun --show-sdk-path)")"
+  for candidate in "$SDK_DIR/MacOSX26.5.sdk" "$SDK_DIR/MacOSX26.sdk"; do
+    if [ -d "$candidate" ]; then export SDKROOT="$candidate"; break; fi
+  done
+  [ -n "${SDKROOT:-}" ] && echo "▸ No SwiftUI macro plugin in these tools — building against $(basename "$SDKROOT")"
+fi
+
 # Record the SDK actually used. macOS picks an app's look from the SDK version stamped into the
 # binary, and Xcode's build system (active once the Xcode license is accepted) stamped `sdk 14.0` —
 # the deployment target — which runs the app in macOS 14 COMPATIBILITY MODE: no floating sidebar,

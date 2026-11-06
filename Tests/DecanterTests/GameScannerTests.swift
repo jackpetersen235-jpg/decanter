@@ -82,5 +82,29 @@ final class GameScannerTests: XCTestCase {
         let re = try XCTUnwrap(found.first { $0.appID == "304240" }, "Resident Evil not listed")
         XCTAssertEqual(re.name, "Resident Evil")
         XCTAssertEqual(re.executable.lastPathComponent, "bhd.exe")
+        XCTAssertTrue(re.isFullyInstalled, "StateFlags 4 is Steam's 'fully installed'")
+    }
+
+    /// Mid-download, a game's folder and .exe already exist, so the scan finds it — but Steam's
+    /// manifest says it isn't finished (StateFlags without the 4 bit, e.g. 1026). Auto-adding
+    /// reads this so a half-downloaded game doesn't get a Play button yet.
+    func testAGameStillDownloadingIsNotFullyInstalled() throws {
+        let prefix = root.appendingPathComponent("Steam-Wine11")
+        let steamApps = prefix.appendingPathComponent("drive_c/Program Files (x86)/Steam/steamapps")
+        _ = try residentEvil(in: steamApps.appendingPathComponent("common"), dataFiles: 3)
+        try """
+            "AppState"
+            {
+            \t"appid"\t\t"304240"
+            \t"name"\t\t"Resident Evil"
+            \t"StateFlags"\t\t"1026"
+            \t"installdir"\t\t"Resident Evil Biohazard HD REMASTER"
+            }
+            """.write(to: steamApps.appendingPathComponent("appmanifest_304240.acf"),
+                      atomically: true, encoding: .utf8)
+
+        let re = try XCTUnwrap(GameScanner.scan(prefix: prefix).first { $0.appID == "304240" })
+
+        XCTAssertFalse(re.isFullyInstalled)
     }
 }

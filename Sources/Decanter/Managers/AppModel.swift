@@ -31,6 +31,107 @@ final class AppModel: ObservableObject {
         .of(isInitialized: bottle.isInitialized, isBooting: bootingBottleIDs.contains(bottle.id))
     }
 
+    // MARK: Games appear by themselves
+
+    /// Games the user deleted from the sidebar, as `AutoAddGames.key`s, so auto-adding never brings
+    /// them back. Kept in UserDefaults, not bottles.json: it's a record of what NOT to show.
+    private static let dismissedGamesKey = "dismissedAutoAddedGames"
+    private var dismissedAutoGames: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: Self.dismissedGamesKey) ?? []) }
+        set { UserDefaults.standard.set(newValue.sorted(), forKey: Self.dismissedGamesKey) }
+    }
+    private var isAutoAdding = false
+
+    private func setDismissed(_ dismissed: Bool, gameOf bottle: Bottle) {
+        guard let appID = resolvedGame(for: bottle)?.appID ?? bottle.settings.steamAppID else { return }
+        let key = AutoAddGames.key(appID: appID, prefix: bottle.url)
+        if dismissed { dismissedAutoGames.insert(key) } else { dismissedAutoGames.remove(key) }
+    }
+
+    /// Give every finished Steam game without a bottle one, so a game installed in Steam shows up
+    /// in the sidebar with a Play button — no "+" step, the way CrossOver lists installed games.
+    /// Called when the window appears and whenever Decanter comes back to the front, which is the
+    /// moment after someone installs a game in Steam and switches back. Never changes the selection
+    /// and never re-adds a game the user deleted (`AutoAddGames`).
+    func addNewlyInstalledGames() async {
+        guard defaultInstallation != nil, !isAutoAdding else { return }
+        isAutoAdding = true
+        defer { isAutoAdding = false }
+        var seen = Set<String>()
+        let prefixes = bottles.filter(\.isInitialized).map(\.url.standardizedFileURL)
+            .filter { seen.insert(PrefixSharing.key(for: $0)).inserted }
+        guard !prefixes.isEmpty else { return }
+        let found = await Task.detached { AppModel.scanForGames(in: prefixes) }.value
+        let played = Set(bottles.compactMap { resolvedGame(for: $0)?.appID ?? $0.settings.steamAppID })
+        let toAdd = AutoAddGames.gamesToAdd(found, alreadyHasBottle: { self.existingBottle(for: $0) != nil },
+                                            appIDsWithBottles: played, dismissed: dismissedAutoGames)
+        for game in toAdd { createBottle(named: game.name, for: game, select: false) }
+    }
+
+    // MARK: Steam's first launch
+
+    /// How far Steam's first-launch self-download has got for this bottle, as (done, total) bytes;
+    /// nil before Steam has queued anything. Read fresh on every call — the bottle view polls it
+    /// while Steam is starting (`SteamBootstrapProgress` explains where the numbers come from).
+    func steamBootstrapProgress(for bottle: Bottle) -> (done: Int64, total: Int64)? {
+        let steam = bottle.driveC.appendingPathComponent("Program Files (x86)/Steam", isDirectory: true)
+        guard let data = try? Data(contentsOf: steam.appendingPathComponent("logs/bootstrap_log.txt"))
+        else { return nil }
+        let packages = SteamBootstrapProgress.pendingPackages(inLog: String(decoding: data, as: UTF8.self))
+        let folder = steam.appendingPathComponent("package", isDirectory: true)
+        let progress = SteamBootstrapProgress.progress(of: packages) { name in
+            let attributes = try? FileManager.default.attributesOfItem(atPath: folder.appendingPathComponent(name).path)
+            return (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+        }
+        return progress.total > 0 ? progress : nil
+    }
+
+    // MARK: Updates
+
+    /// A newer release found by the quiet check at launch. The sidebar shows an "Update to …"
+    /// button while this is set — an offer in place, not an alert when the app starts (HIG).
+    @Published private(set) var availableUpdate: UpdateCheck.Release?
+
+    /// At launch: look once, say nothing unless there's something newer. A failed check (offline,
+    /// GitHub down) stays silent here; Check for Updates… reports it.
+    func checkForUpdatesQuietly() async {
+        availableUpdate = try? await Updater.check()
+    }
+
+    /// Decanter ▸ Check for Updates…: always answers, and asks before installing anything.
+    func checkForUpdatesInteractively() async {
+        let release: UpdateCheck.Release?
+        do { release = try await Updater.check() } catch {
+            let console = openConsole(title: "Check for Updates")
+            console.append("Couldn't check for updates: \(error.localizedDescription)")
+            console.append("Check your internet connection and try again.")
+            console.finish(1)
+            return
+        }
+        availableUpdate = release
+        guard let release else {
+            let console = openConsole(title: "Check for Updates")
+            console.append("Decanter \(Updater.currentVersion) is the newest version.")
+            console.finish(0)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Decanter \(release.version) is available"
+        alert.informativeText = "You have \(Updater.currentVersion). Your bottles, games and saves "
+            + "stay as they are.\n\n" + String(release.notes.prefix(600))
+        alert.addButton(withTitle: "Install and Reopen")
+        alert.addButton(withTitle: "Later")
+        if alert.runModal() == .alertFirstButtonReturn { await installUpdate(release) }
+    }
+
+    func installUpdate(_ release: UpdateCheck.Release) async {
+        let console = openConsole(title: "Updating Decanter")
+        do { try await Updater.install(release, console: console) } catch {
+            console.append("Couldn't update: \(error.localizedDescription)")
+            console.finish(1)
+        }
+    }
+
     /// Bottles whose game launch Decanter is HOLDING until Steam signs in — the request exists
     /// only in this process until then, so quitting Decanter drops it (see `LaunchWait`). Drives
     /// the "keep Decanter open" caption under Play and the quit confirmation.
@@ -438,6 +539,24 @@ final class AppModel: ObservableObject {
             let (out, problems) = await verifyReport()
             FileHandle.standardError.write(out.data(using: .utf8)!)
             exit(problems.isEmpty ? 0 : 1)
+          }
+        }
+        // Update this copy from the latest GitHub release with no window: the same check and
+        // install as Decanter ▸ Check for Updates…, for a helper fixing a friend's Mac (and for
+        // testing the swap end to end — `DECANTER_UPDATE_API` can point it at a local release).
+        //   Decanter.app/Contents/MacOS/Decanter --update
+        if CommandLine.arguments.contains("--update") {
+          Task {
+            func say(_ s: String) { FileHandle.standardError.write((s + "\n").data(using: .utf8)!) }
+            do {
+                guard let release = try await Updater.check() else {
+                    say("Decanter \(Updater.currentVersion) is the newest version."); exit(0)
+                }
+                say("Updating Decanter \(Updater.currentVersion) → \(release.version)…")
+                try await Updater.install(release, console: TaskConsole(title: "update"), quit: { exit(0) })
+            } catch {
+                say("Update failed: \(error.localizedDescription)"); exit(1)
+            }
           }
         }
         // What the New Bottle picker will offer.
@@ -1241,7 +1360,8 @@ final class AppModel: ObservableObject {
     /// reinstalling Steam and re-downloading the game for no benefit — the same reasoning the
     /// hand-written JJBA launcher records for sharing Sekiro's prefix.
     @discardableResult
-    func createBottle(named name: String, for game: GameScanner.FoundGame) -> Bottle.ID? {
+    func createBottle(named name: String, for game: GameScanner.FoundGame,
+                      select: Bool = true) -> Bottle.ID? {
         guard let installation = defaultInstallation else { return nil }
         var bottle = Bottle(name: uniqueBottleName(name.isEmpty ? game.name : name), url: game.prefix)
         bottle.wineBinDirectory = installation.binDirectory
@@ -1255,7 +1375,8 @@ final class AppModel: ObservableObject {
             bottle.settings.directExecutable = game.executable.path
         }
         bottles.append(bottle)
-        selectedBottleID = bottle.id
+        if select { selectedBottleID = bottle.id }      // auto-added games don't steal the selection
+        setDismissed(false, gameOf: bottle)             // re-adding by hand un-hides it for good
         saveBottles()
 
         // No launcher bundle is generated. Decanter used to write a `.app` per game into
@@ -1821,6 +1942,7 @@ final class AppModel: ObservableObject {
     }
 
     func deleteBottle(_ bottle: Bottle, removeFiles: Bool) {
+        setDismissed(true, gameOf: bottle)      // deleted on purpose: auto-adding must not undo it
         bottles.removeAll { $0.id == bottle.id }
         if selectedBottleID == bottle.id { selectedBottleID = bottles.first?.id }
         saveBottles()
@@ -1864,6 +1986,7 @@ final class AppModel: ObservableObject {
     /// The undo of `removeBottleKeepingFiles`. Registers the redo, so ⇧⌘Z deletes it again.
     func restoreBottle(_ bottle: Bottle, at index: Int, undoManager: UndoManager?) {
         bottles = BottleList.restoring(bottle, at: index, in: bottles)
+        setDismissed(false, gameOf: bottle)
         selectedBottleID = bottle.id        // programmatic, so it never warm-starts Steam
         saveBottles()
         undoManager?.registerUndo(withTarget: self) { model in
