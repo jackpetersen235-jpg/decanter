@@ -117,8 +117,9 @@ final class AppModel: ObservableObject {
         }
         let alert = NSAlert()
         alert.messageText = "Decanter \(release.version) is available"
+        let notes = UpdateCheck.summary(ofNotes: release.notes)
         alert.informativeText = "You have \(Updater.currentVersion). Your bottles, games and saves "
-            + "stay as they are.\n\n" + String(release.notes.prefix(600))
+            + "stay as they are." + (notes.isEmpty ? "" : "\n\n" + notes)
         alert.addButton(withTitle: "Install and Reopen")
         alert.addButton(withTitle: "Later")
         if alert.runModal() == .alertFirstButtonReturn { await installUpdate(release) }

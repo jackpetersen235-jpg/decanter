@@ -44,4 +44,47 @@ enum UpdateCheck {
         }
         return false
     }
+
+    /// What the update alert shows from a release's notes: the "What's new" section when there is
+    /// one — the rest of a release page is download-by-hand steps, which the alert's own Install
+    /// button replaces — as plain text, since an alert can't render Markdown. Cut at a whole line.
+    static func summary(ofNotes notes: String, limit: Int = 600) -> String {
+        let lines = notes.components(separatedBy: .newlines)
+        let isHeading: (String) -> Bool = { $0.hasPrefix("#") }
+        let whatsNew = lines.firstIndex {
+            isHeading($0) && $0.lowercased().replacingOccurrences(of: "’", with: "'").contains("what's new")
+        }
+        let section = whatsNew.map { lines[($0 + 1)...].prefix { !isHeading($0) } } ?? lines[...]
+
+        // One blank line at most between paragraphs, none at either end.
+        let tidy = section.map(plainText).reduce(into: [String]()) { kept, line in
+            if !(line.isEmpty && (kept.last?.isEmpty ?? true)) { kept.append(line) }
+        }
+        let kept = tidy.last?.isEmpty == true ? Array(tidy.dropLast()) : tidy
+
+        let text = kept.joined(separator: "\n")
+        guard text.count > limit else { return text }
+        let ellipsis = "\n…"
+        var used = 0
+        let fitting = kept.prefix { line in
+            used += line.count + 1
+            return used - 1 <= limit - ellipsis.count
+        }
+        return fitting.joined(separator: "\n") + ellipsis
+    }
+
+    private static let markdownLink = try? NSRegularExpression(pattern: #"\[([^\]]+)\]\([^)]*\)"#)
+
+    /// One line of Markdown as plain text: links keep their words, bullets become "•", and heading
+    /// marks, bold and code marks go.
+    private static func plainText(_ line: String) -> String {
+        var text = line.trimmingCharacters(in: .whitespaces)
+        if let link = markdownLink {
+            text = link.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text),
+                                                 withTemplate: "$1")
+        }
+        if text.hasPrefix("#") { text = String(text.drop { $0 == "#" }).trimmingCharacters(in: .whitespaces) }
+        if text.hasPrefix("- ") || text.hasPrefix("* ") { text = "• " + text.dropFirst(2) }
+        return ["**", "__", "`"].reduce(text) { $0.replacingOccurrences(of: $1, with: "") }
+    }
 }

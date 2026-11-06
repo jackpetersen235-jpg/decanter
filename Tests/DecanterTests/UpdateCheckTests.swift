@@ -48,4 +48,51 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertFalse(UpdateCheck.isNewer("1.0.0", than: "1.0"))
         XCTAssertFalse(UpdateCheck.isNewer("0.9", than: "1.0"))
     }
+
+    // MARK: What the update alert shows
+
+    /// The 1.1 alert showed the notes' raw Markdown, starting with the by-hand steps for 1.0 users —
+    /// instructions to do the very thing the alert's own button does. Only "What's new" belongs there.
+    func testTheAlertShowsOnlyWhatsNewWithoutMarkdown() {
+        let notes = """
+        Play Windows games from Steam on an Apple silicon Mac.
+
+        ## Already have Decanter 1.0?
+
+        1. Download **Decanter-1.1.zip** below and open it.
+
+        ## What's new in 1.1
+
+        - **Games appear by themselves.** Install a game in Steam and it's in the sidebar.
+        - **Decanter updates itself.** Choose **Decanter → Check for Updates…**.
+
+        ## Requirements
+
+        - A Mac with Apple silicon.
+        """
+
+        let summary = UpdateCheck.summary(ofNotes: notes)
+
+        XCTAssertEqual(summary, """
+        • Games appear by themselves. Install a game in Steam and it's in the sidebar.
+        • Decanter updates itself. Choose Decanter → Check for Updates….
+        """)
+    }
+
+    func testNotesWithoutAWhatsNewSectionAreShownWhole() {
+        let notes = "Fixes a **crash** when [Steam](https://example.com/steam) quits.\n\n\n`--verify` is quieter."
+
+        XCTAssertEqual(UpdateCheck.summary(ofNotes: notes),
+                       "Fixes a crash when Steam quits.\n\n--verify is quieter.")
+    }
+
+    func testLongNotesAreCutAtALineWithAnEllipsis() {
+        let notes = (1...100).map { "- Fix number \($0) of many." }.joined(separator: "\n")
+
+        let summary = UpdateCheck.summary(ofNotes: notes, limit: 200)
+
+        XCTAssertLessThanOrEqual(summary.count, 201)
+        XCTAssertTrue(summary.hasPrefix("• Fix number 1 of many.\n• Fix number 2"))
+        XCTAssertTrue(summary.hasSuffix("of many.\n…"))
+    }
 }

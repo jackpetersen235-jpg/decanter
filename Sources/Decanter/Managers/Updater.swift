@@ -77,6 +77,13 @@ enum Updater {
         try swap.run()
         console.append("Installing — Decanter will reopen in a moment.")
         quit()
+        // Still here: something stopped the quit (QuitGuard's "Keep Waiting", or a window that
+        // refuses). Say so instead of leaving "will reopen in a moment" up forever — that is
+        // exactly what an open console did until ConsoleView stopped blocking termination. The
+        // swap waits for ANY quit, so quitting by hand still finishes the update.
+        try? await Task.sleep(for: .seconds(5))
+        console.append("Decanter hasn't closed by itself. Quit it (Decanter ▸ Quit Decanter) to "
+            + "finish installing — the new version opens by itself.")
     }
 
     private static func findApp(in folder: URL) -> URL? {
@@ -89,12 +96,12 @@ enum Updater {
 
     /// Waits for Decanter to quit, then swaps the new bundle in. Copies first and keeps the old one
     /// until the new one is in place, so a failure anywhere leaves a working Decanter. Gives up and
-    /// changes nothing if Decanter is still running after two minutes (e.g. the user chose Keep
-    /// Waiting in the quit guard).
+    /// changes nothing if Decanter is still running after ten minutes — long enough for someone
+    /// who chose Keep Waiting in the quit guard, or was told to quit by hand, to do it.
     private static let swapScript = #"""
         #!/bin/bash
         pid="$1"; old="$2"; new="$3"; home="$4"
-        for _ in $(seq 1 240); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+        for _ in $(seq 1 1200); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
         kill -0 "$pid" 2>/dev/null && exit 1
         stage="${old%.app}.updating.app"; backup="${old%.app}.previous.app"
         rm -rf "$stage" "$backup"

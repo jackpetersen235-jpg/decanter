@@ -49,5 +49,19 @@ struct ConsoleView: View {
         .frame(width: 640, height: 460)
         // Esc hides, like the button — it never stops the operation.
         .onExitCommand { dismiss() }
+        .allowingAppTermination()
+    }
+}
+
+private extension View {
+    /// A console is only a log; it must never stop Decanter quitting. Since macOS 15.4, SwiftUI
+    /// treats a sheet WITHOUT a lone OK/Cancel toolbar button as blocking termination — and this
+    /// one has no toolbar — so while any console was open, ⌘Q did nothing and `NSApp.terminate`
+    /// was silently ignored. That broke the in-app updater outright: it asks Decanter to quit with
+    /// its own "Updating Decanter" console open, nothing happened, and the swap gave up after its
+    /// wait (Jack's Mac, 2026-11-05, three tries). Quits that ARE risky still get asked about, by
+    /// `QuitGuard`.
+    @ViewBuilder func allowingAppTermination() -> some View {
+        if #available(macOS 15.4, *) { presentationPreventsAppTermination(false) } else { self }
     }
 }
