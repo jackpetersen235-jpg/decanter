@@ -285,6 +285,13 @@ opens by itself (nothing launches it after setup); the helper note says `wine-10
 
 - **`sips` writes JPEG data into `.png` filenames** unless you pass `-s format png`.
   `iconutil` then fails with a useless "Failed to generate ICNS". This silently broke the icon twice.
+- **The app icon must carry its own rounded tile** (fixed 2026-11-06). macOS 26+ puts a
+  mis-shaped icon on a rounded tile of its own, so the old full-bleed wizard-on-white looked right
+  here — and showed as a sharp white square in the Dock on a Sequoia 15.8.2 Mac. Rebuild the icon
+  with `bash Scripts/make-icon.sh` (Apple's 824-in-1024 grid, from `Assets/icon-1024.png`), never by
+  dropping art into the icns. To see how this Mac draws an icon, `NSWorkspace.icon(forFile:)` only
+  works on a bundle in `~/Applications` or `/Applications`: anywhere under `~/coding` or the temp
+  folder it returns the blank-document icon once the app isn't running.
 - **Whisky.app is sandboxed** → its Wine lives under
   `~/Library/Containers/com.isaacmarovitz.Whisky/Data/Library/Application Support/...`.
   The non-sandboxed path is still used by the manually-installed WhiskyWine (see INVENTORY).
