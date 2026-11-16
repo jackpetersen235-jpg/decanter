@@ -336,6 +336,13 @@ opens by itself (nothing launches it after setup); the helper note says `wine-10
   (`afterQuitScript`: `defaults delete`, the removals, `rmdir` of the empty data folder) because
   quitting rewrites some of them. `Paths.userLibrary` follows a scratch DECANTER_HOME so tests can't
   reach the real Library.
+- **Steam's own programs are never a game** (fixed 2026-11-16, a friend's 1.2.2): the "+" picker
+  offered a >64 MB folder whose only program was SteamSetup.exe, because `largestExecutable` fell
+  back to "noise" names when nothing else was there. The friend's "steam" and "SteamSetup" bottles
+  then waited minutes for a Steam sign-in on Play — and on Launch Steam, since `directLaunchTarget`
+  wins there too — and ran the installer. `GameScanner.isSteamItself` now keeps them out of the scan,
+  and `resolvedGame`/`directLaunchTarget` ignore a stored one, so such a bottle is a plain Steam
+  launcher. Repro: a big SteamSetup.exe alone in `drive_c/Program Files/X/`, then `--scan-games`.
 - **Whisky.app is sandboxed** → its Wine lives under
   `~/Library/Containers/com.isaacmarovitz.Whisky/Data/Library/Application Support/...`.
   The non-sandboxed path is still used by the manually-installed WhiskyWine (see INVENTORY).

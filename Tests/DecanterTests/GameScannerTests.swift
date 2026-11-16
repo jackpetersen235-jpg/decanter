@@ -62,6 +62,34 @@ final class GameScannerTests: XCTestCase {
         XCTAssertEqual(GameScanner.largestExecutable(in: game)?.lastPathComponent, "game.exe")
     }
 
+    /// A friend's sidebar (2026-11-16) had "steam" and "SteamSetup" bottles whose Play — and even
+    /// Launch Steam — waited minutes for Steam and then ran Steam's installer. A folder whose only
+    /// program is Steam's own was offered as a game because noise names were the fallback.
+    func testSteamsOwnProgramsAreNeverAGame() throws {
+        // Arrange
+        let installerOnly = root.appendingPathComponent("SteamSetup")
+        try file("SteamSetup.exe", bytes: 90_000_000, in: installerOnly)
+        let mixed = root.appendingPathComponent("Some Game")
+        try file("game.exe", bytes: 1_000, in: mixed)
+        try file("steam.exe", bytes: 50_000, in: mixed)
+
+        // Act
+        let fromInstallerOnly = GameScanner.largestExecutable(in: installerOnly)
+        let fromMixed = GameScanner.largestExecutable(in: mixed)
+
+        // Assert
+        XCTAssertNil(fromInstallerOnly)
+        XCTAssertEqual(fromMixed?.lastPathComponent, "game.exe")
+    }
+
+    func testSteamsOwnProgramsAreRecognisedInWindowsAndMacPaths() {
+        XCTAssertTrue(GameScanner.isSteamItself(#"C:\Program Files (x86)\Steam\SteamSetup.exe"#))
+        XCTAssertTrue(GameScanner.isSteamItself("/Users/x/Bottles/Games/drive_c/Downloads/steamsetup.exe"))
+        XCTAssertTrue(GameScanner.isSteamItself(#"C:\Program Files (x86)\Steam\steam.exe"#))
+        XCTAssertFalse(GameScanner.isSteamItself(#"C:\Games\Steam Punk Adventure\SteamPunk.exe"#))
+        XCTAssertFalse(GameScanner.isSteamItself(""))
+    }
+
     /// The user-facing failure: the whole New Bottle scan, real budget, real manifest.
     func testScanListsTheGameWhoseDataFolderExceedsTheDefaultBudget() throws {
         let prefix = root.appendingPathComponent("Steam-Wine11")

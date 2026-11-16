@@ -1245,6 +1245,10 @@ final class AppModel: ObservableObject {
         let appID = steamAppID(for: bottle)
 
         let direct = (bottle.settings.directExecutable ?? "").trimmingCharacters(in: .whitespaces)
+        // A bottle pointed at Steam's own installer or client (made from the "+" picker before it
+        // filtered those) has no game: it is a Steam launcher, and Play must not run the installer.
+        // Checked before the single-manifest fallback below, which would hand it someone's game.
+        if GameScanner.isSteamItself(direct) { return nil }
         if !direct.isEmpty {
             if let exe = Self.resolveStoredExecutable(direct, driveC: bottle.driveC),
                fm.fileExists(atPath: exe.path) {
@@ -3313,6 +3317,9 @@ final class AppModel: ObservableObject {
     /// Steam still runs alongside — `launchSteam` starts it first — for steam_api64's DRM check.
     private func directLaunchTarget(for bottle: Bottle) -> String {
         let stored = (bottle.settings.directExecutable ?? "").trimmingCharacters(in: .whitespaces)
+        // Steam's own installer or client is not a game to run directly (see resolvedGame): such a
+        // bottle launches Steam the ordinary way.
+        if GameScanner.isSteamItself(stored) { return "" }
         if !stored.isEmpty { return stored }
         guard nativeWindowApplies(to: bottle),
               let exe = resolvedGame(for: bottle)?.executable

@@ -62,6 +62,22 @@ enum GameScanner {
         "reporter", "helper", "handler", "vc_redist", "ueprereqsetup", "easyanticheat",
     ]
 
+    /// Steam's own programs. Never a game, not even as the fallback when a folder holds nothing
+    /// else: a friend's sidebar (2026-11-16) had "steam" and "SteamSetup" bottles pointed at
+    /// SteamSetup.exe, whose Play — and Launch Steam — waited minutes for a Steam sign-in and then
+    /// ran Steam's installer.
+    static let steamOwnExecutables: Set<String> = [
+        "steam.exe", "steamsetup.exe", "steamwebhelper.exe", "steamservice.exe",
+        "steamerrorreporter.exe", "steamerrorreporter64.exe", "steamsysinfo.exe",
+        "gameoverlayui.exe", "gameoverlayui64.exe",
+    ]
+
+    /// True for one of `steamOwnExecutables`, given a Windows (`C:\…`) or macOS path.
+    static func isSteamItself(_ path: String) -> Bool {
+        let name = path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init) ?? ""
+        return steamOwnExecutables.contains(name.lowercased())
+    }
+
     private static func isNoise(_ url: URL) -> Bool {
         let n = url.lastPathComponent.lowercased()
         return noiseExecutables.contains { n.contains($0) }
@@ -101,7 +117,7 @@ enum GameScanner {
                     let values = try? u.resourceValues(forKeys: keys)
                     if values?.isDirectory == true {
                         if values?.isPackage != true { nextLevel.append(u) }
-                    } else if u.pathExtension.lowercased() == "exe" {
+                    } else if u.pathExtension.lowercased() == "exe", !isSteamItself(u.path) {
                         candidates.append(u)
                     }
                 }
