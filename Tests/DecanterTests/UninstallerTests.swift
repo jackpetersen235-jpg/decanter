@@ -25,6 +25,89 @@ final class UninstallerTests: XCTestCase {
         XCTAssertTrue(Uninstaller.plan().isEmpty)
     }
 
+    /// Decanter's own files in ~/Library (settings, caches, the update check's network cache,
+    /// window state) used to survive an uninstall. Created here under the scratch home's Library.
+    private func makeLibraryLeftovers() throws -> [URL] {
+        let lib = Paths.userLibrary, id = Paths.bundleIdentifier
+        let files = [lib.appendingPathComponent("Preferences/\(id).plist"),
+                     lib.appendingPathComponent("Caches/\(id)/Cache.db"),
+                     lib.appendingPathComponent("HTTPStorages/\(id)/httpstorages.sqlite"),
+                     lib.appendingPathComponent("Saved Application State/\(id).savedState/windows.plist")]
+        for file in files {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            try "leftover".write(to: file, atomically: true, encoding: .utf8)
+        }
+        return files
+    }
+
+    func testLibraryLeftoversAreListedAndRemoved() throws {
+        // Arrange
+        let files = try makeLibraryLeftovers()
+
+        // Act
+        let labels = Uninstaller.plan().map(\.label)
+        let failed = Uninstaller.execute()
+
+        // Assert
+        XCTAssertEqual(Set(labels), ["Settings (theme and preferences)", "Caches", "Network cache",
+                                     "Window state"])
+        XCTAssertTrue(failed.isEmpty)
+        for file in files { XCTAssertFalse(FileManager.default.fileExists(atPath: file.path)) }
+    }
+
+    func testTheAfterQuitScriptWaitsThenRemovesEverythingAndTheEmptyDataFolder() throws {
+        // Arrange: leftovers with an apostrophe in the path (quoting), an empty data folder, and a
+        // process that has already exited standing in for Decanter.
+        let library = scratch.appendingPathComponent("Jack's Library", isDirectory: true)
+        let leftovers = [library.appendingPathComponent("Caches/x/Cache.db"),
+                         library.appendingPathComponent("Preferences/x.plist")]
+        for file in leftovers {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            try "leftover".write(to: file, atomically: true, encoding: .utf8)
+        }
+        let dataFolder = scratch.appendingPathComponent("Decanter", isDirectory: true)
+        try FileManager.default.createDirectory(at: dataFolder, withIntermediateDirectories: true)
+        let exited = Process()
+        exited.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+        try exited.run()
+        exited.waitUntilExit()
+
+        // Act
+        let script = Uninstaller.afterQuitScript(
+            waitingFor: exited.processIdentifier, domain: "com.decanter.uninstall-test",
+            paths: [library.appendingPathComponent("Caches/x").path, leftovers[1].path],
+            appSupport: dataFolder.path)
+        let shell = Process()
+        shell.executableURL = URL(fileURLWithPath: "/bin/sh")
+        shell.arguments = ["-c", script]
+        try shell.run()
+        shell.waitUntilExit()
+
+        // Assert
+        XCTAssertEqual(shell.terminationStatus, 0)
+        for file in leftovers { XCTAssertFalse(FileManager.default.fileExists(atPath: file.path)) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dataFolder.path))
+    }
+
+    func testAScratchHomeKeepsEveryPlannedPathInsideIt() throws {
+        // Arrange: the real ~/Library must be out of reach whenever DECANTER_HOME is set, or these
+        // tests would delete the developer's own Decanter settings.
+        _ = try makeLibraryLeftovers()
+        try FileManager.default.createDirectory(at: Paths.bottlesRoot, withIntermediateDirectories: true)
+        try "save data".write(to: Paths.bottlesRoot.appendingPathComponent("save.dat"),
+                              atomically: true, encoding: .utf8)
+
+        // Act
+        let paths = Uninstaller.plan().map { $0.url.standardizedFileURL.path }
+
+        // Assert
+        XCTAssertTrue(Paths.userLibrary.path.hasPrefix(scratch.path))
+        XCTAssertFalse(paths.isEmpty)
+        for path in paths { XCTAssertTrue(path.hasPrefix(scratch.standardizedFileURL.path), path) }
+    }
+
     func testPlanListsOnlyWhatExistsWithARealSize() throws {
         try FileManager.default.createDirectory(at: Paths.bottlesRoot, withIntermediateDirectories: true)
         try "save data".write(to: Paths.bottlesRoot.appendingPathComponent("save.dat"),

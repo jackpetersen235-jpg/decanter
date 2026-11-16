@@ -5,6 +5,9 @@ import SwiftUI
 struct ConfigurationView: View {
     @EnvironmentObject private var model: AppModel
     @Binding var bottle: Bottle
+    /// Why Frame generation can't take effect here (nil: it can). Worked out off the render path:
+    /// it scans the game folder and the launcher scripts in ~/Applications.
+    @State private var frameGenerationBlocker: String?
 
     @State private var switchingEngine = false
     @State private var engineError: String?
@@ -272,6 +275,23 @@ struct ConfigurationView: View {
                          + "occasional multi-second whole-system freezes during play. Only turn it "
                          + "on if you've seen those freezes — it runs a small background GPU load "
                          + "for as long as the game does.")
+                }
+                Toggle(isOn: $bottle.settings.frameGeneration) {
+                    Text("Frame generation")
+                    subtitle(frameGenerationBlocker
+                         ?? ("The game renders every other frame and DXMT draws the one in between, so "
+                             + "motion is smoother for about half the GPU work, with one frame of extra "
+                             + "input delay. Takes effect the next time the game starts."))
+                }
+                .disabled(frameGenerationBlocker != nil)
+                .task(id: "\(bottle.id)|\(bottle.settings.graphics)|\(bottle.settings.steamArguments)") {
+                    frameGenerationBlocker = model.frameGenerationUnavailableReason(for: bottle)
+                }
+                // Swap the DLLs now, not only at the next Play: they are the switch, so a game started
+                // from Steam's own library would otherwise keep the old ones.
+                .onChange(of: bottle.settings.frameGeneration) {
+                    let changed = bottle
+                    Task { await model.installGraphicsDriver(in: changed) }
                 }
             }
 

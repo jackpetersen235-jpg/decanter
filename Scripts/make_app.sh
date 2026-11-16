@@ -84,6 +84,11 @@ if [ -d "$ROOT/Assets/DXMT" ]; then
   mkdir -p "$APP/Contents/Resources/DXMT"
   cp "$ROOT/Assets/DXMT/"* "$APP/Contents/Resources/DXMT/"
 fi
+# The frame-generation build of DXMT (Paths.bundledDXMTInbetween), when present: per-bottle opt-in.
+if [ -d "$ROOT/Assets/DXMT-Inbetween" ]; then
+  mkdir -p "$APP/Contents/Resources/DXMT-Inbetween"
+  cp "$ROOT/Assets/DXMT-Inbetween/"* "$APP/Contents/Resources/DXMT-Inbetween/"
+fi
 
 # "Real game window" (BottleSettings.nativeWindow) — two native pieces, built with plain clang
 # because neither belongs in the Swift package:

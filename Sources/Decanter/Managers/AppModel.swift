@@ -137,6 +137,9 @@ final class AppModel: ObservableObject {
     /// only in this process until then, so quitting Decanter drops it (see `LaunchWait`). Drives
     /// the "keep Decanter open" caption under Play and the quit confirmation.
     @Published private(set) var launchesWaitingForSteam: Set<Bottle.ID> = []
+    /// Shown under Play while a launch runs: why Steam is being restarted for it, or why it wasn't
+    /// (`restartSteamIfItsSettingsDiffer`).
+    @Published private(set) var steamSettingsNotes: [Bottle.ID: String] = [:]
 
     /// True while the first-run setup wizard is actively running its steps. Keeps the wizard
     /// mounted (see ContentView) so creating the first bottle — which makes `bottles` non-empty —
@@ -265,6 +268,27 @@ final class AppModel: ObservableObject {
         }
         // Headless per-game graphics install, so the payload path can be verified without the GUI:
         //   Decanter.app/Contents/MacOS/Decanter --install-gfx
+        // Read-only: for every game Steam starts, which of its settings the Steam now running in its
+        // prefix would override (what Play restarts Steam for). Changes nothing:
+        //   Decanter.app/Contents/MacOS/Decanter --steam-settings-check
+        if CommandLine.arguments.contains("--steam-settings-check") {
+            Task {
+                var out = ""
+                for bottle in bottles where bottle.settings.steamArguments.contains("-applaunch") {
+                    if let env = await runningSteamEnvironment(for: bottle) {
+                        let differing = SteamInheritedSettings.differing(game: bottle.settings,
+                                                                         steamEnvironment: env)
+                        out += "\(bottle.name): " + (differing.isEmpty
+                            ? "matches the running Steam\n"
+                            : "Play would restart Steam (\(differing.joined(separator: ", ")))\n")
+                    } else {
+                        out += "\(bottle.name): no Steam running in its prefix\n"
+                    }
+                }
+                FileHandle.standardError.write(out.data(using: .utf8)!)
+                exit(0)
+            }
+        }
         if CommandLine.arguments.contains("--install-gfx") {
             Task {
                 for bottle in bottles {
@@ -1742,6 +1766,66 @@ final class AppModel: ObservableObject {
         return (folder: redirector.deletingLastPathComponent(), exe: redirector.lastPathComponent)
     }
 
+    /// Hand-made launchers in ~/Applications (Sekiro.app, JJBA All-Star Battle.app) whose script runs
+    /// a game from `folder` — matched on the path below `drive_c/`, since the scripts build the prefix
+    /// part from a variable. A trailing slash keeps "common/Sekiro/" from matching "Sekiro-Inbetween".
+    nonisolated static func externalLaunchers(using folder: URL, applications: URL? = nil) -> [String] {
+        let path = folder.standardizedFileURL.path
+        guard let range = path.range(of: "/drive_c/") else { return [] }
+        let tail = String(path[range.upperBound...]) + "/"
+        let dir = applications ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+        let apps = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        return apps.filter { $0.pathExtension == "app" }.compactMap { app -> String? in
+            let macOS = app.appendingPathComponent("Contents/MacOS")
+            let files = (try? FileManager.default.contentsOfDirectory(at: macOS, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+            let uses = files.contains { file in
+                guard let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 512_000,
+                      let text = try? String(contentsOf: file, encoding: .utf8), text.hasPrefix("#!") else { return false }
+                return text.contains(tail)
+            }
+            return uses ? app.deletingPathExtension().lastPathComponent : nil
+        }
+    }
+
+    /// True when `folder` already holds exactly `source`'s DXMT DLLs. Sizes first (cheap), then
+    /// contents: a rebuilt DLL can keep its exact size — the self-enabling frame-generation
+    /// d3d11.dll is as long as the build it replaced — and a size-only check never installed it.
+    nonisolated static func dxmtDLLsMatch(in folder: URL, source: URL) -> Bool {
+        let fm = FileManager.default
+        return Paths.dxmtDLLs.allSatisfy { dll in
+            let installed = folder.appendingPathComponent(dll), wanted = source.appendingPathComponent(dll)
+            let a = (try? installed.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+            let b = (try? wanted.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -2
+            return a == b && fm.contentsEqual(atPath: installed.path, andPath: wanted.path)
+        }
+    }
+
+    /// The frame-generation DXMT has only ever run on macOS 26 and later. Its shaders come from
+    /// Xcode 26's Metal compiler (AIR v26) and it carries a Metal 4 library, unlike the regular
+    /// DXMT's Xcode 16.1 build, so it is not offered on older systems (Sequoia is untested).
+    nonisolated static var frameGenerationOSSupported: Bool {
+        ProcessInfo.processInfo.isOperatingSystemAtLeast(
+            OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0))
+    }
+
+    /// Why the Frame generation switch can't take effect for `bottle`, or nil when it can. The
+    /// switch is disabled with this as its explanation: before, a game that another launcher runs
+    /// (Sekiro, JoJo) showed a working switch that never did anything.
+    func frameGenerationUnavailableReason(for bottle: Bottle) -> String? {
+        if bottle.settings.graphics != .dxmt { return "Works with DXMT graphics only." }
+        if !Self.frameGenerationOSSupported { return "Needs macOS 26 or later." }
+        if Paths.bundledDXMTInbetween == nil { return "This build of Decanter doesn't include it." }
+        if let game = resolvedGame(for: bottle) {
+            let launchers = Self.externalLaunchers(using: game.folder)
+            if !launchers.isEmpty {
+                return launchers.joined(separator: " and ") + " runs this game from the same folder, "
+                    + "so frame generation stays off here. It needs a launcher of its own, as "
+                    + "Sekiro (Inbetween).app has."
+            }
+        }
+        return nil
+    }
+
     /// Copy the bundled DXMT DLLs into each detected game and register the per-game DLL overrides.
     ///
     /// PER-GAME, NEVER PREFIX-WIDE. A prefix-wide d3d11/dxgi override routes Steam's own CEF UI
@@ -1887,6 +1971,14 @@ final class AppModel: ObservableObject {
             console?.append("This build of Decanter ships no DXMT payload.")
             return 0
         }
+        let frameGenOS = Self.frameGenerationOSSupported
+        let inbetween = bottle.settings.frameGeneration && frameGenOS ? Paths.bundledDXMTInbetween : nil
+        if bottle.settings.frameGeneration && inbetween == nil {
+            console?.append(frameGenOS
+                ? "Frame generation is on, but this build of Decanter ships no frame-generation "
+                    + "DXMT (Assets/DXMT-Inbetween), so the regular DXMT is installed."
+                : "Frame generation needs macOS 26 or later, so the regular DXMT is installed.")
+        }
         let games = scoped
         if games.isEmpty { console?.append("No games found for this bottle yet.") }
 
@@ -1910,13 +2002,21 @@ final class AppModel: ObservableObject {
             //
             // The fix is to make DLL-copying and override-writing two independent steps: skipping
             // one must never skip the other.
-            let already = Paths.dxmtDLLs.allSatisfy { dll in
-                let a = (try? game.folder.appendingPathComponent(dll)
-                    .resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
-                let b = (try? src.appendingPathComponent(dll)
-                    .resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -2
-                return a == b
+            // Frame generation: the Inbetween DLLs, unless another launcher runs this same folder
+            // (Sekiro.app does Sekiro's): it would then get them too, unasked.
+            var source = src
+            if let inbetween {
+                let others = Self.externalLaunchers(using: game.folder)
+                if others.isEmpty {
+                    source = inbetween
+                } else {
+                    console?.append("Frame generation left off for \(game.folder.lastPathComponent): "
+                                    + others.joined(separator: ", ") + " runs this game from the same "
+                                    + "folder and would get the frame-generation DXMT too. Give that game "
+                                    + "a launcher of its own (as Sekiro (Inbetween).app does).")
+                }
             }
+            let already = Self.dxmtDLLsMatch(in: game.folder, source: source)
 
             var copied = true
             if !already {
@@ -1928,7 +2028,7 @@ final class AppModel: ObservableObject {
                         try? fm.copyItem(at: dst, to: backup)
                     }
                     try? fm.removeItem(at: dst)
-                    do { try fm.copyItem(at: src.appendingPathComponent(dll), to: dst) }
+                    do { try fm.copyItem(at: source.appendingPathComponent(dll), to: dst) }
                     catch { console?.append("Could not write \(dll) into \(game.folder.lastPathComponent): \(error.localizedDescription)"); copied = false }
                 }
             }
@@ -2662,7 +2762,14 @@ final class AppModel: ObservableObject {
             // it would wait out the full 150s timeout for an event that already happened, instead
             // of returning immediately. `startedSteamForGame` folds the warm-start flag in for
             // reaping; the wait condition below deliberately does not.
-            let steamWasAlreadyUp = await isSteamRunning()
+            var steamWasAlreadyUp = await isSteamRunning()
+            // The game will get the RUNNING Steam's environment. Started before a setting changed
+            // (the sidebar warm-starts it the moment the game is selected) or by another bottle,
+            // that is not this game's settings — so restart it first (2026-11-16).
+            steamSettingsNotes[bottle.id] = nil
+            if steamWasAlreadyUp, isGameLauncher, await restartSteamIfItsSettingsDiffer(for: bottle) {
+                steamWasAlreadyUp = await isSteamRunning()
+            }
             let weWarmStartedThisPrefix = warmStartedPrefixKeys.remove(prefixKey) != nil
             let startedSteamForGame = !steamWasAlreadyUp || weWarmStartedThisPrefix
             // Quiet: no console sheet pops over Decanter (which made the first click look like a
@@ -2746,6 +2853,47 @@ final class AppModel: ObservableObject {
     /// Launch silently do nothing (GAMING-STACK.md §10). But any argument match still counted a
     /// Wine launch of Steam that hung before it ever became Steam (`…/bin/wine …/Steam/steam.exe`)
     /// — found live 2026-10-21 (GAMING-STACK.md §7e).
+    /// The environment of the Steam client running in `bottle`'s prefix, or nil when none runs there
+    /// or it can't be read. A Steam-started game inherits exactly this (`SteamInheritedSettings`).
+    private func runningSteamEnvironment(for bottle: Bottle) async -> [String: String]? {
+        guard let result = try? await Shell.run(URL(fileURLWithPath: "/bin/ps"),
+                                                 arguments: ["-Ao", "pid=,comm="]) else { return nil }
+        let prefix = bottle.url.standardizedFileURL.path
+        for line in result.stdout.split(separator: "\n") {
+            let fields = line.trimmingCharacters(in: .whitespaces)
+            guard let space = fields.firstIndex(of: " "), let pid = pid_t(fields[..<space]),
+                  Steam.isClient(comm: fields[space...].trimmingCharacters(in: .whitespaces)),
+                  let env = ProcessEnvironment.of(pid: pid), let steamPrefix = env["WINEPREFIX"],
+                  URL(fileURLWithPath: steamPrefix).standardizedFileURL.path == prefix
+            else { continue }
+            return env
+        }
+        return nil
+    }
+
+    /// Shuts Steam down when the one running in this bottle's prefix would hand the game settings
+    /// that differ from its own, so the launch that follows starts a fresh Steam with the right ones.
+    /// Not while any game is open — quitting Steam would close it — and then says why instead.
+    /// Returns true when Steam was shut down.
+    private func restartSteamIfItsSettingsDiffer(for bottle: Bottle) async -> Bool {
+        guard let steamEnv = await runningSteamEnvironment(for: bottle) else { return false }
+        let differing = SteamInheritedSettings.differing(game: bottle.settings, steamEnvironment: steamEnv)
+        guard !differing.isEmpty else { return false }
+        let names = differing.joined(separator: ", ")
+        let note: String
+        let restart = await !isAnyGameRunning()
+        if restart {
+            note = "Restarting Steam so \(bottle.name) gets its own settings (\(names))."
+        } else {
+            note = "Steam is running with other settings (\(names)) and a game is open, so "
+                + "\(bottle.name) starts with Steam's. Quit Steam, then press Play to use its own."
+        }
+        steamSettingsNotes[bottle.id] = note
+        TaskConsole(title: "Steam").append(note)
+        if restart { await shutdownPrefix(for: bottle) }
+        return restart
+    }
+
     private func isSteamRunning() async -> Bool {
         guard let result = try? await Shell.run(URL(fileURLWithPath: "/bin/ps"),
                                                  arguments: ["-Ao", "comm="]) else { return false }

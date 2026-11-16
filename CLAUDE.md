@@ -246,6 +246,32 @@ against JJBA All-Star Battle R: it reaches its online service over HTTPS, never 
 socket, and reports "transmission error" — rejected before a peer session exists. Games without
 kernel anti-cheat (VAC-only, or none) are unaffected and work normally.
 
+## Frame generation switch (2026-11-15, Inbetween)
+
+Configuration ▸ **Frame generation** (`BottleSettings.frameGeneration`, off by default, DXMT only):
+the game renders every other frame and DXMT draws the one in between (measured in Half Sword Demo:
+53.9 → 59.6 distinct frames/s on screen). `installGraphicsDriver` puts the frame-generation DXMT
+(`Assets/DXMT-Inbetween` → `Resources/DXMT-Inbetween`, from ~/coding/dxmt branch
+`inbetween-framegen`; **not committed** — an experimental build in this public repo is Jack's call)
+into that game's folder instead of `Assets/DXMT`, at every Play and the moment the switch changes.
+The engine is untouched: the new DLLs run on its existing winemetal, DXMT 0.80's official one too.
+- ⚠️ **The DLLs are the switch — no environment flag** (fixed 2026-11-16). The first version set
+  `DXMT_FRAMEGEN=1` in the bottle's environment. An `-applaunch` game inherits the RUNNING Steam's
+  environment, and selecting a game in the sidebar warm-starts Steam before anyone flips the switch,
+  so the usual order (select, switch on, Play) got 30 fps on screen, not 60, with no sign why
+  (measured on the test game). `Assets/DXMT-Inbetween` is now built with
+  `dxmt-build.sh framegen-decanter` (meson `framegen_default_on`): on unless `DXMT_FRAMEGEN=0`.
+  The plain `framegen` build keeps "on only with =1" for the Inbetween tools and Sekiro (Inbetween).app.
+- **Compare DLL contents, not sizes** (`AppModel.dxmtDLLsMatch`): the self-enabling d3d11.dll is
+  exactly as long as the build it replaced, and the old size-only check never installed it.
+- **Guard:** `AppModel.externalLaunchers(using:)` refuses a game folder that a hand-made
+  `~/Applications/*.app` script also runs (Sekiro.app runs Sekiro's) — it would get the DLLs too.
+  Sekiro's frame generation lives in `~/Applications/Sekiro (Inbetween).app` instead. The switch is
+  disabled with the reason (`frameGenerationUnavailableReason`) for those bottles, before macOS 26
+  (the build's shaders are AIR v26 + a Metal 4 library; Sequoia untested), and for non-DXMT graphics.
+- Tests: `FrameGenerationSettingsTests` — needs `swift test` (uses `AppModel`), so the XCTest-free
+  `Scripts/test-shim` does not run it.
+
 ## Sharing with someone else
 
 `Scripts/package-for-friend.sh` → `~/coding/Releases/Decanter/Decanter-<version>.zip` (~7 MB; engine
@@ -292,6 +318,24 @@ opens by itself (nothing launches it after setup); the helper note says `wine-10
   dropping art into the icns. To see how this Mac draws an icon, `NSWorkspace.icon(forFile:)` only
   works on a bundle in `~/Applications` or `/Applications`: anywhere under `~/coding` or the temp
   folder it returns the blank-document icon once the app isn't running.
+- **A game Steam starts gets the RUNNING Steam's environment, not its bottle's** (fixed
+  2026-11-16). MetalFX, the HUDs, thread sync, AVX, verbose logging and custom variables all travel
+  that way, and selecting a game warm-starts Steam with whatever was set at that moment (or another
+  bottle started it). Play now reads the running Steam's environment (`ProcessEnvironment`, i.e.
+  `KERN_PROCARGS2`; macOS hides it only for its own system binaries) and restarts Steam when
+  `SteamInheritedSettings.differing` is non-empty — unless a game is open, then it says so under
+  Play. Read-only check: `Decanter --steam-settings-check`. Found live: a Steam warm-started by
+  Peggle would have run Sekiro, JoJo and Resident Evil without their MetalFX. Anything a game must
+  get regardless of who started Steam goes in its FOLDER instead (frame generation's DLLs do).
+- **macOS 15 is the real minimum for DirectX 10/11** (2026-11-16): the shipped DXMT's
+  `winemetal.so` is built for 15.0, so Sonoma opens Decanter but can't load DXMT. README says 15;
+  the setup wizard warns on 14 (`SystemChecks.supportsDXMT`) and points at DXVK. LSMinimumSystemVersion
+  stays 14 on purpose: raising it would let the updater install a version a Sonoma Mac can't open.
+- **The uninstaller clears ~/Library too** (2026-11-16): settings, caches, HTTPStorages and saved
+  window state (`Uninstaller.libraryLeftovers`), then again after the app quits
+  (`afterQuitScript`: `defaults delete`, the removals, `rmdir` of the empty data folder) because
+  quitting rewrites some of them. `Paths.userLibrary` follows a scratch DECANTER_HOME so tests can't
+  reach the real Library.
 - **Whisky.app is sandboxed** → its Wine lives under
   `~/Library/Containers/com.isaacmarovitz.Whisky/Data/Library/Application Support/...`.
   The non-sandboxed path is still used by the manually-installed WhiskyWine (see INVENTORY).

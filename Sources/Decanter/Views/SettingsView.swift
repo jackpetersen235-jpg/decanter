@@ -98,7 +98,7 @@ struct SettingsView: View {
                 }
                 .foregroundStyle(.red)
                 Text("Removes the Wine engine, every bottle (installed games and saves), shader "
-                    + "caches, downloads and logs. Decanter itself is not deleted.")
+                    + "caches, downloads, logs and Decanter's settings. Decanter itself is not deleted.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

@@ -24,6 +24,17 @@ enum SystemChecks {
         + "This Mac has an Intel processor, which Decanter's Windows engine and graphics layer "
         + "don't support."
 
+    /// DirectX 10/11 games run through DXMT, and the macOS side of the DXMT that engines ship
+    /// (`winemetal.so`) is built for macOS 15 and later, so Sonoma can't load it. Decanter still
+    /// opens there, and DXVK (MoltenVK, built for macOS 11) is the way left to run those games.
+    static var supportsDXMT: Bool {
+        ProcessInfo.processInfo.isOperatingSystemAtLeast(
+            OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0))
+    }
+
+    static let olderMacOSMessage = "DirectX 10 and 11 games need macOS 15 (Sequoia) or later. "
+        + "On this Mac, try switching a game's Graphics to DXVK in its Configuration."
+
     /// The command a user can run to install Rosetta. It prompts for admin rights,
     /// so we surface it rather than silently attempting it.
     static let rosettaInstallCommand = "softwareupdate --install-rosetta --agree-to-license"

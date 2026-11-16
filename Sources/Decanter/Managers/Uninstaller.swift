@@ -37,7 +37,7 @@ enum Uninstaller {
             ("Window helper", Paths.installedWindowHook.deletingLastPathComponent()),
             ("Backups", Paths.appSupport.appendingPathComponent("Backups", isDirectory: true)),
             ("Bottle index (bottles.json)", Paths.bottlesIndex),
-        ]
+        ] + libraryLeftovers
         return candidates.compactMap { label, url in
             guard fm.fileExists(atPath: url.path) else { return nil }
             let bytes = size(of: url, fm: fm)
@@ -49,6 +49,19 @@ enum Uninstaller {
             guard bytes > 0 || url == Paths.bottlesIndex else { return nil }
             return Item(label: label, url: url, bytes: bytes)
         }
+    }
+
+    /// What macOS keeps for Decanter in ~/Library: settings (the theme), caches, the update check's
+    /// network cache and window state. These used to survive an uninstall.
+    static var libraryLeftovers: [(String, URL)] {
+        let lib = Paths.userLibrary, id = Paths.bundleIdentifier
+        return [
+            ("Settings (theme and preferences)", lib.appendingPathComponent("Preferences/\(id).plist")),
+            ("Caches", lib.appendingPathComponent("Caches/\(id)", isDirectory: true)),
+            ("Network cache", lib.appendingPathComponent("HTTPStorages/\(id)", isDirectory: true)),
+            ("Window state", lib.appendingPathComponent("Saved Application State/\(id).savedState",
+                                                        isDirectory: true)),
+        ]
     }
 
     /// Total bytes across every item in `plan()` — what the confirmation dialog headlines.
@@ -72,7 +85,38 @@ enum Uninstaller {
                 failed.append("\(item.label): \(error.localizedDescription)")
             }
         }
+        if ProcessInfo.processInfo.environment["DECANTER_HOME"]?.isEmpty ?? true {
+            removeLibraryLeftoversAfterQuit()
+        }
         return failed
+    }
+
+    /// macOS writes some of the ~/Library files again while Decanter quits (window state, the
+    /// settings it still holds in memory) and keeps settings cached in cfprefsd, so they go once more
+    /// after the app has gone: a separate shell waits for this process to exit, then runs
+    /// `defaults delete` and removes them, plus Decanter's Application Support folder if it is now
+    /// empty (`rmdir` refuses otherwise). Same detached-process approach as the updater's swap.
+    /// Never run with a scratch DECANTER_HOME: that is a test, and the real settings must stay.
+    private static func removeLibraryLeftoversAfterQuit() {
+        let cleanup = Process()
+        cleanup.executableURL = URL(fileURLWithPath: "/bin/sh")
+        cleanup.arguments = ["-c", afterQuitScript(waitingFor: ProcessInfo.processInfo.processIdentifier,
+                                                   domain: Paths.bundleIdentifier,
+                                                   paths: libraryLeftovers.map { $0.1.path },
+                                                   appSupport: Paths.appSupport.path)]
+        try? cleanup.run()
+    }
+
+    /// The shell script `removeLibraryLeftoversAfterQuit` runs; separate so a test can run it on
+    /// scratch paths and a throwaway settings domain.
+    static func afterQuitScript(waitingFor pid: Int32, domain: String, paths: [String],
+                                appSupport: String) -> String {
+        func quoted(_ path: String) -> String { "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+        return (["while /bin/kill -0 \(pid) 2>/dev/null; do /bin/sleep 0.5; done",
+                 "/usr/bin/defaults delete \(quoted(domain)) 2>/dev/null"]
+                + paths.map { "/bin/rm -rf " + quoted($0) }
+                + ["/bin/rmdir " + quoted(appSupport) + " 2>/dev/null", "true"])
+            .joined(separator: "; ")
     }
 
     private static func size(of url: URL, fm: FileManager) -> Int {

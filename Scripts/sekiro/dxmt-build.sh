@@ -48,13 +48,18 @@ if [ -z "$XC161" ] && [ -d /Applications/Xcode.app ]; then
 fi
 BRANCH="${1:?usage: dxmt-build.sh stock|capped}"
 
+EXTRA_MESON=""   # a plain string, split on purpose below: bash 3.2 + set -u calls an empty array unbound
 case "$BRANCH" in
   stock)  REF=build-fixes   ;;
   capped) REF=batch-cap     ;;
   fix)    REF=gs-marshal-fix ;;   # index++ AND the overflow guards
   ovf)    REF=overflow-only   ;;   # overflow guards only - no index++
   final)  REF=final-fix       ;;   # index++ + overflow guards + divisor checks  <-- SHIPPING
-  *) echo "arg must be stock|capped|fix|ovf|final" >&2; exit 2 ;;
+  framegen) REF=inbetween-framegen ;;  # final + Inbetween frame generation (DXMT_FRAMEGEN=1)
+  # The same, on unless DXMT_FRAMEGEN=0: what Decanter ships in Assets/DXMT-Inbetween. A game Steam
+  # starts inherits the running Steam's environment, so there the DLLs themselves must be the switch.
+  framegen-decanter) REF=inbetween-framegen; EXTRA_MESON="-Dframegen_default_on=true" ;;
+  *) echo "arg must be stock|capped|fix|ovf|final|framegen|framegen-decanter" >&2; exit 2 ;;
 esac
 
 # ---- prerequisites, checked loudly rather than silently substituted ------------------
@@ -113,7 +118,7 @@ rm -rf "build-$BRANCH" "$OUT"
 # build loads `d3d11.dll builtin`. That one word is the entire difference, and it cost a play
 # session on 2026-07-27 before anyone thought to look.
 meson setup --cross-file build-win64.txt -Denable_nvapi=true -Denable_nvngx=true \
-  -Dwine_builtin_dll=false \
+  -Dwine_builtin_dll=false $EXTRA_MESON \
   -Dnative_llvm_path=toolchains/llvm-darwin -Dwine_install_path=toolchains/wine \
   "build-$BRANCH" --buildtype release --prefix "$OUT" --strip || exit 1
 meson compile -C "build-$BRANCH" || exit 1

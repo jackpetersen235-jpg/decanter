@@ -178,6 +178,9 @@ struct SetupWizard: View {
                 // Said before the button is pressed, not after a Rosetta step that can't succeed.
                 if !SystemChecks.isAppleSilicon {
                     StatusNote.failure(FailureCode.unsupportedMac.tag(SystemChecks.unsupportedMacMessage))
+                } else if !SystemChecks.supportsDXMT {
+                    // A warning, not a block: setup and DXVK still work on Sonoma.
+                    StatusNote(SystemChecks.olderMacOSMessage)
                 }
 
                 // The two engine parts measure 332 MB + 166 MB; this used to say 317, the first

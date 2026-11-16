@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/jackpetersen235-jpg/decanter/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/jackpetersen235-jpg/decanter"></a>
-  <img alt="macOS 14 or later, Apple silicon" src="https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20silicon-blue">
+  <img alt="macOS 15 or later, Apple silicon" src="https://img.shields.io/badge/macOS-15%2B%20%C2%B7%20Apple%20silicon-blue">
   <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/github/license/jackpetersen235-jpg/decanter"></a>
 </p>
 
@@ -47,7 +47,8 @@ bottom of the sidebar, or choose **Decanter ▸ Check for Updates…**.
 ## What you need
 
 - A Mac with Apple silicon (M1 or later). Intel Macs aren't supported.
-- macOS 14 or later. Tested most on macOS 26 and 27.
+- macOS 15 (Sequoia) or later. Tested most on macOS 26 and 27. Decanter opens on macOS 14, but
+  DirectX 10 and 11 games don't start there: the graphics layer they need requires macOS 15.
 - About 2 GB of free space, plus room for your games.
 
 ## Three looks

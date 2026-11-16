@@ -33,6 +33,18 @@ enum Paths {
         return base.appendingPathComponent(appName, isDirectory: true)
     }
 
+    /// The user's Library folder, where macOS keeps Decanter's settings and caches. Inside a scratch
+    /// `DECANTER_HOME` when one is set, like everything else here: the uninstaller removes Decanter's
+    /// files from it, and tests must never reach the real one.
+    static var userLibrary: URL {
+        if let override = ProcessInfo.processInfo.environment["DECANTER_HOME"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+                .appendingPathComponent("Library", isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library", isDirectory: true)
+    }
+
     /// Parent folder that holds every bottle's WINEPREFIX.
     static var bottlesRoot: URL { appSupport.appendingPathComponent("Bottles", isDirectory: true) }
 
@@ -97,6 +109,17 @@ enum Paths {
     /// completely stock engine - so nothing in the Wine tree is touched.
     static var bundledDXMT: URL? {
         guard let dir = Bundle.main.resourceURL?.appendingPathComponent("DXMT", isDirectory: true),
+              FileManager.default.fileExists(atPath: dir.appendingPathComponent("d3d11.dll").path)
+        else { return nil }
+        return dir
+    }
+
+    /// The frame-generation build of DXMT (Inbetween, ~/coding/dxmt branch inbetween-framegen):
+    /// the same three DLLs plus `DXMT_FRAMEGEN` support, used for a bottle with
+    /// `BottleSettings.frameGeneration` on. Measured to run on the engine's existing winemetal, so
+    /// only the game folder changes. Nil when the bundle has none (Assets/DXMT-Inbetween absent).
+    static var bundledDXMTInbetween: URL? {
+        guard let dir = Bundle.main.resourceURL?.appendingPathComponent("DXMT-Inbetween", isDirectory: true),
               FileManager.default.fileExists(atPath: dir.appendingPathComponent("d3d11.dll").path)
         else { return nil }
         return dir

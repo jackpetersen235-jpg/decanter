@@ -308,6 +308,10 @@ struct BottleDetailView: View {
                             Text("Play starts \(game.executable.lastPathComponent)")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
+                        if launching, let note = model.steamSettingsNotes[bottle.id] {
+                            Label(note, systemImage: "arrow.clockwise")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         if model.launchesWaitingForSteam.contains(bottle.id) {
                             Label(LaunchWait.caption(gameName: bottle.name), systemImage: "hourglass")
                                 .font(.caption).foregroundStyle(.secondary)

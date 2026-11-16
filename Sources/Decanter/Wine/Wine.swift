@@ -80,7 +80,7 @@ enum Wine {
     static func environment(for bottle: Bottle, using installation: WineInstallation) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
 
-        env["WINEDEBUG"] = bottle.settings.verboseLogging ? "warn+all,fixme-all" : "-all"
+        env["WINEDEBUG"] = bottle.settings.wineDebug
 
         if installation.isCrossOver {
             // CrossOver's wine locates bottles by *name* under its own Bottles dir via

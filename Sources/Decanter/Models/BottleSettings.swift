@@ -203,6 +203,13 @@ struct BottleSettings: Codable, Equatable {
     /// continuous background submission, so it's opt-in per bottle rather than assumed universal.
     var gpuKeepAlive: Bool = false
 
+    /// Frame generation (Inbetween): the game renders every other frame and DXMT draws the one in
+    /// between from the two it has, so the screen gets twice the frames for about half the GPU work,
+    /// at the cost of one frame of extra input delay. DXMT only; needs the frame-generation DXMT
+    /// (`Paths.bundledDXMTInbetween`), which `installGraphicsDriver` then puts in the game's folder.
+    /// Those DLLs are the switch: they need no environment flag (see `derivedEnvironment`).
+    var frameGeneration: Bool = false
+
     /// "Real game window": the game runs in an ordinary macOS window — move it, minimize it, and
     /// use the green button for native fullscreen — and macOS Game Mode can engage. The opposite
     /// trade from `borderlessFullscreen` (a Wine virtual desktop that fakes fullscreen with a
@@ -302,6 +309,7 @@ struct BottleSettings: Codable, Equatable {
         software2D      = v(.software2D, false)
         borderlessFullscreen = v(.borderlessFullscreen, false)
         gpuKeepAlive    = v(.gpuKeepAlive, false)
+        frameGeneration = v(.frameGeneration, false)
         nativeWindow    = v(.nativeWindow, false)
         retinaMode      = v(.retinaMode, false)
         dpi             = v(.dpi, 96)
@@ -362,6 +370,11 @@ struct BottleSettings: Codable, Equatable {
                 cfg.append("d3d11.metalSpatialUpscaleFactor=\(String(format: "%.1f", metalFXFactor))")
             }
             env["DXMT_CONFIG"] = cfg.joined(separator: ";")
+            // No DXMT_FRAMEGEN for `frameGeneration`: a game launched by `steam.exe -applaunch`
+            // inherits the RUNNING Steam's environment (see the config note above), and selecting a
+            // game in the sidebar has usually started Steam before the switch is flipped, so a flag
+            // set here never reached the game (measured 2026-11-16). The frame-generation DLLs turn
+            // it on by themselves; see Assets/DXMT-Inbetween/VERSION.txt.
 
         case .dxvk:
             // NOTE: no prefix-wide WINEDLLOVERRIDES here. A global override also routes the Steam
@@ -397,5 +410,11 @@ struct BottleSettings: Codable, Equatable {
         // User overrides win.
         for (key, value) in environment { env[key] = value }
         return env
+    }
+
+    /// WINEDEBUG for this bottle (`Wine.environment` sets it). Here so the check of what a running
+    /// Steam would hand a game (`SteamInheritedSettings`) uses the same value.
+    var wineDebug: String {
+        verboseLogging ? "warn+all,fixme-all" : "-all"
     }
 }
