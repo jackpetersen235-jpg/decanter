@@ -276,6 +276,9 @@ struct ConfigurationView: View {
                          + "on if you've seen those freezes — it runs a small background GPU load "
                          + "for as long as the game does.")
                 }
+                // Only in builds that bundle the frame-generation DXMT (Assets/DXMT-Inbetween is not in
+                // the public repo): a switch that could only ever say "not included" is noise there.
+                if Paths.bundledDXMTInbetween != nil {
                 Toggle(isOn: $bottle.settings.frameGeneration) {
                     Text("Frame generation")
                     subtitle(frameGenerationBlocker
@@ -292,6 +295,7 @@ struct ConfigurationView: View {
                 .onChange(of: bottle.settings.frameGeneration) {
                     let changed = bottle
                     Task { await model.installGraphicsDriver(in: changed) }
+                }
                 }
             }
 

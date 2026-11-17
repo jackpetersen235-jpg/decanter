@@ -128,8 +128,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleExecutable</key>      <string>Decanter</string>
     <key>CFBundleIconFile</key>        <string>AppIcon</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
-    <key>CFBundleShortVersionString</key> <string>1.2.2</string>
-    <key>CFBundleVersion</key>         <string>38</string>
+    <key>CFBundleShortVersionString</key> <string>1.2.3</string>
+    <key>CFBundleVersion</key>         <string>39</string>
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
     <key>LSApplicationCategoryType</key> <string>public.app-category.games</string>
     <key>NSHighResolutionCapable</key> <true/>
